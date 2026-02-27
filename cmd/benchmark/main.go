@@ -237,7 +237,7 @@ func phase1Ingest() (int, time.Duration, error) {
 		}
 
 		var resp createMemoryResp
-		json.Unmarshal(body, &resp)
+		_ = json.Unmarshal(body, &resp)
 		fmt.Printf("  [%2d] %s  (%.0fms)\n", i+1, resp.ID[:8], float64(elapsed.Milliseconds()))
 		ingested++
 	}
@@ -266,7 +266,7 @@ func phase2WaitEncoding(expected int) (time.Duration, int, error) {
 				continue
 			}
 			var stats statsResp
-			json.Unmarshal(body, &stats)
+			_ = json.Unmarshal(body, &stats)
 			count := stats.Store.TotalMemories
 			if count != lastCount {
 				fmt.Printf("  Encoded: %d / %d\n", count, expected)
@@ -321,7 +321,7 @@ func phase3Retrieval() ([]queryResult, error) {
 		}
 
 		var resp queryResp
-		json.Unmarshal(body, &resp)
+		_ = json.Unmarshal(body, &resp)
 		results[i].resp = resp
 
 		// Score precision: how many expected keywords appear in returned memories

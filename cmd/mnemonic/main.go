@@ -1228,7 +1228,7 @@ func serveCommand(configPath string) {
 			defer func() {
 				shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer shutdownCancel()
-				apiServer.Stop(shutdownCtx)
+				_ = apiServer.Stop(shutdownCtx)
 			}()
 		}
 	}
@@ -1268,28 +1268,28 @@ func serveCommand(configPath string) {
 	time.Sleep(500 * time.Millisecond)
 
 	if orch != nil {
-		orch.Stop()
+		_ = orch.Stop()
 	}
 	if abstractionAgent != nil {
-		abstractionAgent.Stop()
+		_ = abstractionAgent.Stop()
 	}
 	if dreamer != nil {
-		dreamer.Stop()
+		_ = dreamer.Stop()
 	}
 	if metaAgent != nil {
-		metaAgent.Stop()
+		_ = metaAgent.Stop()
 	}
 	if consolidator != nil {
-		consolidator.Stop()
+		_ = consolidator.Stop()
 	}
 	if encoder != nil {
-		encoder.Stop()
+		_ = encoder.Stop()
 	}
 	if episodingAgent != nil {
-		episodingAgent.Stop()
+		_ = episodingAgent.Stop()
 	}
 	if percAgent != nil {
-		percAgent.Stop()
+		_ = percAgent.Stop()
 	}
 
 	if err := bus.Close(); err != nil {
@@ -1323,7 +1323,7 @@ func initRuntime(configPath string) (*config.Config, *sqlite.SQLiteStore, *llm.L
 
 	homeDir, _ := os.UserHomeDir()
 	dataPath := filepath.Join(homeDir, ".mnemonic")
-	os.MkdirAll(dataPath, 0755)
+	_ = os.MkdirAll(dataPath, 0755)
 
 	db, err := sqlite.NewSQLiteStore(cfg.Store.DBPath)
 	if err != nil {
@@ -1404,7 +1404,7 @@ func rememberCommand(configPath, text string) {
 	}
 
 	// Publish event to trigger encoding
-	bus.Publish(encodeCtx, events.RawMemoryCreated{
+	_ = bus.Publish(encodeCtx, events.RawMemoryCreated{
 		ID:       raw.ID,
 		Source:   raw.Source,
 		Salience: raw.InitialSalience,
@@ -1430,7 +1430,7 @@ func rememberCommand(configPath, text string) {
 		}
 	}
 
-	encoder.Stop()
+	_ = encoder.Stop()
 	fmt.Printf("Remembered: %s\n", text)
 }
 
@@ -1510,7 +1510,7 @@ func consolidateCommand(configPath string) {
 	}
 
 	// Publish events for dashboard
-	bus.Publish(ctx, events.ConsolidationCompleted{
+	_ = bus.Publish(ctx, events.ConsolidationCompleted{
 		DurationMs:         report.Duration.Milliseconds(),
 		MemoriesProcessed:  report.MemoriesProcessed,
 		MemoriesDecayed:    report.MemoriesDecayed,
@@ -1683,7 +1683,7 @@ func purgeCommand(configPath string) {
 	fmt.Printf("\nType 'yes' to confirm: ")
 
 	var confirmation string
-	fmt.Scanln(&confirmation)
+	_, _ = fmt.Scanln(&confirmation)
 	if confirmation != "yes" {
 		fmt.Println("Aborted.")
 		return
@@ -1923,7 +1923,7 @@ func mcpCommand(configPath string) {
 	if err := encoder.Start(ctx, bus); err != nil {
 		log.Error("failed to start encoding agent for MCP", "error", err)
 	}
-	defer encoder.Stop()
+	defer func() { _ = encoder.Stop() }()
 
 	// Create retrieval agent for recall
 	retriever := retrieval.NewRetrievalAgent(db, llmProvider, retrieval.RetrievalConfig{
