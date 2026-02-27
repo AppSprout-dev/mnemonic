@@ -1,0 +1,40 @@
+name: Feature Request
+description: Suggest a new feature or enhancement
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What do you want to add or change?
+    validations:
+      required: true
+
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+      description: Why is this needed? What problem does it solve?
+
+  - type: textarea
+    id: proposed
+    attributes:
+      label: Proposed Solution
+      description: How would you implement this?
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Graph visualization
+        - Dashboard / Web UI
+        - Daemon / service management
+        - MCP server
+        - REST API
+        - CLI
+        - Python SDK
+        - Cognitive agents
+        - Store / SQLite
+        - Platform support
+        - Other

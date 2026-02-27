@@ -1,0 +1,66 @@
+name: Bug Report
+description: Report a bug in Mnemonic
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: How can we reproduce the issue?
+      placeholder: |
+        1. Run `mnemonic start`
+        2. Open dashboard at localhost:9999
+        3. Click on Graph tab
+        4. See error...
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What should have happened?
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS ARM (M-series)
+        - macOS x86
+        - Linux x86_64
+        - Windows
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Graph visualization
+        - Dashboard / Web UI
+        - Daemon / service management
+        - MCP server
+        - REST API
+        - CLI
+        - Python SDK
+        - Agent (specify which)
+        - Store / SQLite
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Mnemonic Version
+      description: Output of `mnemonic version`
+      placeholder: "0.6.0"
