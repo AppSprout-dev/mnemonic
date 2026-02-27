@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/appsprout/mnemonic/internal/llm"
 	"github.com/appsprout/mnemonic/internal/store"
+	"github.com/google/uuid"
 )
 
 // RetrievalConfig holds configurable parameters for the retrieval agent.
@@ -22,8 +22,8 @@ type RetrievalConfig struct {
 	ActivationThreshold float32
 	DecayFactor         float32
 	MaxResults          int
-	MaxToolCalls        int // max tool invocations per synthesis
-	SynthesisMaxTokens  int // max tokens per synthesis LLM call
+	MaxToolCalls        int     // max tool invocations per synthesis
+	SynthesisMaxTokens  int     // max tokens per synthesis LLM call
 	MergeAlpha          float32 // weight of embedding vs FTS in score merge (0-1)
 	DualHitBonus        float32 // bonus for memories found by both FTS and embedding
 }
@@ -78,11 +78,11 @@ type RetrievalAgent struct {
 
 // retrievalStats tracks retrieval performance metrics.
 type retrievalStats struct {
-	TotalQueries      int64
-	TotalMemoriesHit  int64
-	AvgActivationMs   int64
-	AvgSynthesisMs    int64
-	LastQueryTime     time.Time
+	TotalQueries     int64
+	TotalMemoriesHit int64
+	AvgActivationMs  int64
+	AvgSynthesisMs   int64
+	LastQueryTime    time.Time
 }
 
 // NewRetrievalAgent creates a new retrieval agent with the given dependencies.
@@ -214,20 +214,11 @@ func (ra *RetrievalAgent) Query(ctx context.Context, req QueryRequest) (QueryRes
 		}
 
 		if req.IncludeAbstractions {
-			// Search level 2 (principles) and level 3 (axioms)
-			for _, level := range []int{2, 3} {
-				abs, err := ra.store.ListAbstractions(ctx, level, 10)
-				if err != nil {
-					continue
-				}
-				for _, a := range abs {
-					if a.State == "active" && len(a.Embedding) > 0 {
-						sim := cosineSimilarity(embedding, a.Embedding)
-						if sim >= 0.6 {
-							matchedAbstractions = append(matchedAbstractions, a)
-						}
-					}
-				}
+			abs, err := ra.store.SearchAbstractionsByEmbedding(ctx, embedding, 5)
+			if err != nil {
+				ra.log.Warn("abstraction search failed", "query_id", queryID, "error", err)
+			} else {
+				matchedAbstractions = abs
 			}
 		}
 	}
@@ -427,7 +418,6 @@ func (ra *RetrievalAgent) rankResults(activated map[string]activationState, incl
 		id            string
 		activation    float32
 		finalScore    float32
-		hopsReached   int
 		recencyBonus  float32
 		activityBonus float32
 	}
@@ -870,11 +860,11 @@ func (ra *RetrievalAgent) GetStats() map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"total_queries":              ra.stats.TotalQueries,
-		"total_memories_retrieved":   ra.stats.TotalMemoriesHit,
-		"avg_memories_per_query":     avgMemoriesPerQuery,
-		"avg_synthesis_ms":           ra.stats.AvgSynthesisMs,
-		"last_query_time":            ra.stats.LastQueryTime,
+		"total_queries":            ra.stats.TotalQueries,
+		"total_memories_retrieved": ra.stats.TotalMemoriesHit,
+		"avg_memories_per_query":   avgMemoriesPerQuery,
+		"avg_synthesis_ms":         ra.stats.AvgSynthesisMs,
+		"last_query_time":          ra.stats.LastQueryTime,
 	}
 }
 

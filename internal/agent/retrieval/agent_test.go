@@ -88,7 +88,7 @@ type mockStore struct {
 	incrementAccessCalls []string
 }
 
-func (m *mockStore) WriteRaw(ctx context.Context, raw store.RawMemory) error   { return nil }
+func (m *mockStore) WriteRaw(ctx context.Context, raw store.RawMemory) error { return nil }
 func (m *mockStore) GetRaw(ctx context.Context, id string) (store.RawMemory, error) {
 	return store.RawMemory{}, nil
 }
@@ -274,6 +274,9 @@ func (m *mockStore) GetAbstraction(ctx context.Context, id string) (store.Abstra
 }
 func (m *mockStore) UpdateAbstraction(ctx context.Context, a store.Abstraction) error { return nil }
 func (m *mockStore) ListAbstractions(ctx context.Context, level int, limit int) ([]store.Abstraction, error) {
+	return nil, nil
+}
+func (m *mockStore) SearchAbstractionsByEmbedding(ctx context.Context, embedding []float32, limit int) ([]store.Abstraction, error) {
 	return nil, nil
 }
 

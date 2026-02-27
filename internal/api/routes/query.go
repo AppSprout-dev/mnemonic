@@ -57,10 +57,12 @@ func HandleQuery(retriever *retrieval.RetrievalAgent, bus events.Bus, s store.St
 
 		// Create retrieval request
 		queryReq := retrieval.QueryRequest{
-			Query:            reqBody.Query,
-			MaxResults:       reqBody.Limit,
-			Synthesize:       reqBody.Synthesize,
-			IncludeReasoning: reqBody.IncludeReasoning,
+			Query:               reqBody.Query,
+			MaxResults:          reqBody.Limit,
+			Synthesize:          reqBody.Synthesize,
+			IncludeReasoning:    reqBody.IncludeReasoning,
+			IncludePatterns:     true,
+			IncludeAbstractions: true,
 		}
 
 		// Execute query with timeout — must be >= LLM timeout (120s) to allow multi-turn tool-use synthesis

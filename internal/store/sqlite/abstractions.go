@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 	"time"
 
 	store "github.com/appsprout/mnemonic/internal/store"
@@ -113,6 +114,58 @@ func (s *SQLiteStore) ListAbstractions(ctx context.Context, level int, limit int
 		return nil, fmt.Errorf("failed to list abstractions: %w", err)
 	}
 	return scanAbstractionRows(rows)
+}
+
+// SearchAbstractionsByEmbedding finds active abstractions most similar to the given embedding.
+func (s *SQLiteStore) SearchAbstractionsByEmbedding(ctx context.Context, embedding []float32, limit int) ([]store.Abstraction, error) {
+	if len(embedding) == 0 {
+		return nil, fmt.Errorf("empty embedding")
+	}
+
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, embedding FROM abstractions WHERE state = 'active' AND embedding IS NOT NULL AND length(embedding) > 0`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query abstraction embeddings: %w", err)
+	}
+	defer rows.Close()
+
+	type candidate struct {
+		id    string
+		score float32
+	}
+	var candidates []candidate
+
+	for rows.Next() {
+		var id string
+		var blob []byte
+		if err := rows.Scan(&id, &blob); err != nil {
+			continue
+		}
+		emb := decodeEmbedding(blob)
+		if len(emb) == 0 {
+			continue
+		}
+		score := cosineSimilarity(embedding, emb)
+		candidates = append(candidates, candidate{id: id, score: score})
+	}
+
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].score > candidates[j].score
+	})
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+
+	var abstractions []store.Abstraction
+	for _, c := range candidates {
+		a, err := s.GetAbstraction(ctx, c.id)
+		if err != nil {
+			continue
+		}
+		abstractions = append(abstractions, a)
+	}
+
+	return abstractions, nil
 }
 
 // scanAbstraction scans a single abstraction row.

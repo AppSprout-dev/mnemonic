@@ -9,8 +9,8 @@ import (
 type RawMemory struct {
 	ID              string                 `json:"id"`
 	Timestamp       time.Time              `json:"timestamp"`
-	Source          string                 `json:"source"`    // "terminal", "filesystem", "clipboard", "user", "mcp"
-	Type            string                 `json:"type"`      // "file_created", "command_executed", etc.
+	Source          string                 `json:"source"` // "terminal", "filesystem", "clipboard", "user", "mcp"
+	Type            string                 `json:"type"`   // "file_created", "command_executed", etc.
 	Content         string                 `json:"content"`
 	Metadata        map[string]interface{} `json:"metadata,omitempty"`
 	HeuristicScore  float32                `json:"heuristic_score"`
@@ -26,15 +26,15 @@ type Memory struct {
 	ID           string    `json:"id"`
 	RawID        string    `json:"raw_id"`
 	Timestamp    time.Time `json:"timestamp"`
-	Content      string    `json:"content"`      // compressed/encoded form
-	Summary      string    `json:"summary"`      // one-liner
-	Concepts     []string  `json:"concepts"`     // extracted concepts
+	Content      string    `json:"content"`  // compressed/encoded form
+	Summary      string    `json:"summary"`  // one-liner
+	Concepts     []string  `json:"concepts"` // extracted concepts
 	Embedding    []float32 `json:"embedding,omitempty"`
 	Salience     float32   `json:"salience"`
 	AccessCount  int       `json:"access_count"`
 	LastAccessed time.Time `json:"last_accessed"`
-	State        string    `json:"state"`       // "active", "fading", "archived", "merged"
-	GistOf       []string  `json:"gist_of,omitempty"` // if merged: source memory IDs
+	State        string    `json:"state"`                // "active", "fading", "archived", "merged"
+	GistOf       []string  `json:"gist_of,omitempty"`    // if merged: source memory IDs
 	EpisodeID    string    `json:"episode_id,omitempty"` // link to parent episode
 	Project      string    `json:"project,omitempty"`
 	SessionID    string    `json:"session_id,omitempty"`
@@ -46,7 +46,7 @@ type Memory struct {
 type Association struct {
 	SourceID        string    `json:"source_id"`
 	TargetID        string    `json:"target_id"`
-	Strength        float32   `json:"strength"`       // 0.0 to 1.0
+	Strength        float32   `json:"strength"`      // 0.0 to 1.0
 	RelationType    string    `json:"relation_type"` // "similar", "caused_by", "part_of", "contradicts", "temporal", "reinforces"
 	CreatedAt       time.Time `json:"created_at"`
 	LastActivated   time.Time `json:"last_activated"`
@@ -70,13 +70,13 @@ type ActivationConfig struct {
 
 // StoreStatistics aggregates memory health metrics.
 type StoreStatistics struct {
-	TotalMemories        int       `json:"total_memories"`
-	ActiveMemories       int       `json:"active_memories"`
-	FadingMemories       int       `json:"fading_memories"`
-	ArchivedMemories     int       `json:"archived_memories"`
-	MergedMemories       int       `json:"merged_memories"`
-	TotalAssociations    int       `json:"total_associations"`
-	AvgAssociationsPerMem float32  `json:"avg_associations_per_memory"`
+	TotalMemories         int       `json:"total_memories"`
+	ActiveMemories        int       `json:"active_memories"`
+	FadingMemories        int       `json:"fading_memories"`
+	ArchivedMemories      int       `json:"archived_memories"`
+	MergedMemories        int       `json:"merged_memories"`
+	TotalAssociations     int       `json:"total_associations"`
+	AvgAssociationsPerMem float32   `json:"avg_associations_per_memory"`
 	StorageSizeBytes      int64     `json:"storage_size_bytes"`
 	LastConsolidation     time.Time `json:"last_consolidation"`
 }
@@ -160,14 +160,14 @@ type Entity struct {
 
 // Action captures what was done.
 type Action struct {
-	Verb    string `json:"verb"`    // created, modified, debugged, merged, refactored
-	Object  string `json:"object"`  // function, file, dependency
+	Verb    string `json:"verb"`   // created, modified, debugged, merged, refactored
+	Object  string `json:"object"` // function, file, dependency
 	Details string `json:"details"`
 }
 
 // CausalLink captures causal relationships.
 type CausalLink struct {
-	Relation    string `json:"relation"`    // led_to, caused_by, blocked_by, enabled
+	Relation    string `json:"relation"` // led_to, caused_by, blocked_by, enabled
 	Description string `json:"description"`
 }
 
@@ -194,20 +194,20 @@ type MemoryAttributes struct {
 
 // Pattern is a recurring pattern discovered through consolidation.
 type Pattern struct {
-	ID          string    `json:"id"`
-	PatternType string    `json:"pattern_type"` // "recurring_error", "code_practice", "decision_pattern", "workflow"
-	Title       string    `json:"title"`
-	Description string    `json:"description"`
-	EvidenceIDs []string  `json:"evidence_ids"` // memory IDs that support this pattern
-	Strength    float32   `json:"strength"`     // how well-established (0.0-1.0)
-	Project     string    `json:"project,omitempty"`
-	Concepts    []string  `json:"concepts"`
-	Embedding   []float32 `json:"embedding,omitempty"`
-	AccessCount int       `json:"access_count"`
+	ID           string    `json:"id"`
+	PatternType  string    `json:"pattern_type"` // "recurring_error", "code_practice", "decision_pattern", "workflow"
+	Title        string    `json:"title"`
+	Description  string    `json:"description"`
+	EvidenceIDs  []string  `json:"evidence_ids"` // memory IDs that support this pattern
+	Strength     float32   `json:"strength"`     // how well-established (0.0-1.0)
+	Project      string    `json:"project,omitempty"`
+	Concepts     []string  `json:"concepts"`
+	Embedding    []float32 `json:"embedding,omitempty"`
+	AccessCount  int       `json:"access_count"`
 	LastAccessed time.Time `json:"last_accessed"`
-	State       string    `json:"state"` // "active", "fading", "archived"
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	State        string    `json:"state"` // "active", "fading", "archived"
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 // Abstraction is a higher-order knowledge unit derived from patterns.
@@ -334,6 +334,7 @@ type Store interface {
 	GetAbstraction(ctx context.Context, id string) (Abstraction, error)
 	UpdateAbstraction(ctx context.Context, a Abstraction) error
 	ListAbstractions(ctx context.Context, level int, limit int) ([]Abstraction, error)
+	SearchAbstractionsByEmbedding(ctx context.Context, embedding []float32, limit int) ([]Abstraction, error)
 
 	// --- Scoped queries ---
 	SearchByProject(ctx context.Context, project string, query string, limit int) ([]Memory, error)

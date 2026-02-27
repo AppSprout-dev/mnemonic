@@ -34,11 +34,11 @@ type AbstractionAgent struct {
 }
 
 type CycleReport struct {
-	Duration             time.Duration
-	PatternsEvaluated    int
-	PrinciplesCreated    int
-	AxiomsCreated        int
-	AbstractionsDemoted  int
+	Duration            time.Duration
+	PatternsEvaluated   int
+	PrinciplesCreated   int
+	AxiomsCreated       int
+	AbstractionsDemoted int
 }
 
 func NewAbstractionAgent(s store.Store, llmProv llm.Provider, cfg AbstractionConfig, log *slog.Logger) *AbstractionAgent {
@@ -226,6 +226,16 @@ func (aa *AbstractionAgent) synthesizePrinciples(ctx context.Context, report *Cy
 
 		report.PrinciplesCreated++
 		llmBudget--
+
+		if aa.bus != nil {
+			aa.bus.Publish(ctx, events.AbstractionCreated{
+				AbstractionID: principle.ID,
+				Level:         2,
+				Title:         principle.Title,
+				SourceCount:   len(cluster),
+				Ts:            time.Now(),
+			})
+		}
 		aa.log.Info("principle synthesized", "title", principle.Title, "source_patterns", len(cluster))
 	}
 
@@ -293,6 +303,16 @@ func (aa *AbstractionAgent) synthesizeAxioms(ctx context.Context, report *CycleR
 
 		report.AxiomsCreated++
 		llmBudget--
+
+		if aa.bus != nil {
+			aa.bus.Publish(ctx, events.AbstractionCreated{
+				AbstractionID: axiom.ID,
+				Level:         3,
+				Title:         axiom.Title,
+				SourceCount:   len(cluster),
+				Ts:            time.Now(),
+			})
+		}
 		aa.log.Info("axiom synthesized", "title", axiom.Title, "source_principles", len(cluster))
 	}
 
@@ -334,22 +354,40 @@ func (aa *AbstractionAgent) verifyGrounding(ctx context.Context, report *CycleRe
 			}
 
 			groundingRatio := float32(activeEvidence) / float32(totalEvidence)
-			if groundingRatio < 0.3 {
-				// Demote: reduce confidence significantly
-				abs.Confidence *= 0.5
+
+			// Access-count protection: frequently-retrieved abstractions resist decay
+			if abs.AccessCount > 5 && groundingRatio >= 0.1 {
+				continue
+			}
+
+			// Graduated grounding response
+			switch {
+			case groundingRatio >= 0.5:
+				// Healthy grounding, no action needed
+				continue
+			case groundingRatio >= 0.3:
+				// Moderate decay: reduce confidence slightly
+				abs.Confidence *= 0.9
+			case groundingRatio >= 0.1:
+				// Significant decay: reduce confidence more
+				abs.Confidence *= 0.7
+				report.AbstractionsDemoted++
+			default:
+				// Nearly all evidence gone: aggressive demotion
+				abs.Confidence *= 0.3
 				if abs.Confidence < 0.1 {
 					abs.State = "fading"
 				}
-				abs.UpdatedAt = time.Now()
-
-				if err := aa.store.UpdateAbstraction(ctx, abs); err != nil {
-					aa.log.Warn("failed to demote abstraction", "id", abs.ID, "error", err)
-					continue
-				}
 				report.AbstractionsDemoted++
-				aa.log.Info("abstraction demoted due to weak grounding",
-					"id", abs.ID, "title", abs.Title, "grounding_ratio", groundingRatio)
 			}
+
+			abs.UpdatedAt = time.Now()
+			if err := aa.store.UpdateAbstraction(ctx, abs); err != nil {
+				aa.log.Warn("failed to update abstraction grounding", "id", abs.ID, "error", err)
+				continue
+			}
+			aa.log.Info("abstraction grounding adjusted",
+				"id", abs.ID, "title", abs.Title, "grounding_ratio", groundingRatio, "new_confidence", abs.Confidence, "state", abs.State)
 		}
 	}
 
@@ -427,7 +465,13 @@ Only share a principle if it genuinely unifies these patterns in an insightful w
 		return nil, nil
 	}
 
-	embedding := averagePatternEmbedding(patterns)
+	// Generate embedding from the principle's own text (more precise than averaged pattern embeddings)
+	principleText := result.Title + ": " + result.Principle
+	embedding, embErr := aa.llmProvider.Embed(ctx, principleText)
+	if embErr != nil {
+		aa.log.Warn("failed to embed principle text, falling back to pattern average", "error", embErr)
+		embedding = averagePatternEmbedding(patterns)
+	}
 
 	concepts := result.Concepts
 	if len(concepts) == 0 {
@@ -525,7 +569,13 @@ This is the highest level of abstraction — only share an axiom if it's genuine
 		return nil, nil
 	}
 
-	embedding := averageAbstractionEmbedding(principles)
+	// Generate embedding from the axiom's own text (more precise than averaged principle embeddings)
+	axiomText := result.Title + ": " + result.Axiom
+	embedding, embErr := aa.llmProvider.Embed(ctx, axiomText)
+	if embErr != nil {
+		aa.log.Warn("failed to embed axiom text, falling back to principle average", "error", embErr)
+		embedding = averageAbstractionEmbedding(principles)
+	}
 
 	concepts := result.Concepts
 	if len(concepts) == 0 {

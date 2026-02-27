@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/appsprout/mnemonic/internal/agent/retrieval"
 	"github.com/appsprout/mnemonic/internal/events"
 	"github.com/appsprout/mnemonic/internal/store"
+	"github.com/google/uuid"
 )
 
 // JSON-RPC 2.0 types
@@ -577,10 +577,12 @@ func (srv *MCPServer) handleRecall(ctx context.Context, args map[string]interfac
 
 	// Default: full semantic search with spread activation
 	queryReq := retrieval.QueryRequest{
-		Query:            query,
-		MaxResults:       limit,
-		IncludeReasoning: true,
-		Synthesize:       true,
+		Query:               query,
+		MaxResults:          limit,
+		IncludeReasoning:    true,
+		Synthesize:          true,
+		IncludePatterns:     true,
+		IncludeAbstractions: true,
 	}
 
 	result, err := srv.retriever.Query(ctx, queryReq)
@@ -624,7 +626,25 @@ func (srv *MCPServer) handleRecall(ctx context.Context, args map[string]interfac
 		text += fmt.Sprintf("Synthesis:\n%s\n", result.Synthesis)
 	}
 
-	srv.log.Info("recall completed", "query", query, "query_id", result.QueryID, "results", len(result.Memories), "took_ms", result.TookMs)
+	if len(result.Patterns) > 0 {
+		text += fmt.Sprintf("\nRelevant Patterns (%d):\n", len(result.Patterns))
+		for _, p := range result.Patterns {
+			text += fmt.Sprintf("  - [strength:%.2f] %s (%s): %s\n", p.Strength, p.Title, p.PatternType, p.Description)
+		}
+	}
+
+	if len(result.Abstractions) > 0 {
+		text += "\nApplicable Principles:\n"
+		for _, a := range result.Abstractions {
+			levelLabel := "principle"
+			if a.Level == 3 {
+				levelLabel = "axiom"
+			}
+			text += fmt.Sprintf("  - [%s, confidence:%.2f] %s: %s\n", levelLabel, a.Confidence, a.Title, a.Description)
+		}
+	}
+
+	srv.log.Info("recall completed", "query", query, "query_id", result.QueryID, "results", len(result.Memories), "patterns", len(result.Patterns), "abstractions", len(result.Abstractions), "took_ms", result.TookMs)
 
 	return toolResult(text), nil
 }
@@ -1063,7 +1083,9 @@ func (srv *MCPServer) handleFeedback(ctx context.Context, args map[string]interf
 					if newSalience > 1.0 {
 						newSalience = 1.0
 					}
-					srv.store.UpdateSalience(ctx, memID, newSalience)
+					if err := srv.store.UpdateSalience(ctx, memID, newSalience); err != nil {
+						srv.log.Warn("failed to update salience", "memory_id", memID, "error", err)
+					}
 				}
 
 			case "irrelevant":

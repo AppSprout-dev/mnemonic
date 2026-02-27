@@ -47,22 +47,28 @@ func (m *mockStore) GetStatistics(_ context.Context) (store.StoreStatistics, err
 
 // --- All other store.Store methods (stubs) ---
 
-func (m *mockStore) WriteRaw(context.Context, store.RawMemory) error              { return nil }
-func (m *mockStore) GetRaw(context.Context, string) (store.RawMemory, error)      { return store.RawMemory{}, nil }
+func (m *mockStore) WriteRaw(context.Context, store.RawMemory) error { return nil }
+func (m *mockStore) GetRaw(context.Context, string) (store.RawMemory, error) {
+	return store.RawMemory{}, nil
+}
 func (m *mockStore) ListRawUnprocessed(context.Context, int) ([]store.RawMemory, error) {
 	return nil, nil
 }
 func (m *mockStore) ListRawMemoriesAfter(context.Context, time.Time, int) ([]store.RawMemory, error) {
 	return nil, nil
 }
-func (m *mockStore) MarkRawProcessed(context.Context, string) error                    { return nil }
-func (m *mockStore) WriteMemory(context.Context, store.Memory) error                   { return nil }
-func (m *mockStore) GetMemory(context.Context, string) (store.Memory, error)           { return store.Memory{}, nil }
-func (m *mockStore) GetMemoryByRawID(context.Context, string) (store.Memory, error) { return store.Memory{}, nil }
-func (m *mockStore) UpdateMemory(context.Context, store.Memory) error                  { return nil }
-func (m *mockStore) UpdateSalience(context.Context, string, float32) error             { return nil }
-func (m *mockStore) UpdateState(context.Context, string, string) error                 { return nil }
-func (m *mockStore) IncrementAccess(context.Context, string) error                     { return nil }
+func (m *mockStore) MarkRawProcessed(context.Context, string) error  { return nil }
+func (m *mockStore) WriteMemory(context.Context, store.Memory) error { return nil }
+func (m *mockStore) GetMemory(context.Context, string) (store.Memory, error) {
+	return store.Memory{}, nil
+}
+func (m *mockStore) GetMemoryByRawID(context.Context, string) (store.Memory, error) {
+	return store.Memory{}, nil
+}
+func (m *mockStore) UpdateMemory(context.Context, store.Memory) error      { return nil }
+func (m *mockStore) UpdateSalience(context.Context, string, float32) error { return nil }
+func (m *mockStore) UpdateState(context.Context, string, string) error     { return nil }
+func (m *mockStore) IncrementAccess(context.Context, string) error         { return nil }
 func (m *mockStore) ListMemories(context.Context, string, int, int) ([]store.Memory, error) {
 	return nil, nil
 }
@@ -167,6 +173,9 @@ func (m *mockStore) GetAbstraction(context.Context, string) (store.Abstraction, 
 }
 func (m *mockStore) UpdateAbstraction(context.Context, store.Abstraction) error { return nil }
 func (m *mockStore) ListAbstractions(context.Context, int, int) ([]store.Abstraction, error) {
+	return nil, nil
+}
+func (m *mockStore) SearchAbstractionsByEmbedding(context.Context, []float32, int) ([]store.Abstraction, error) {
 	return nil, nil
 }
 func (m *mockStore) SearchByProject(context.Context, string, string, int) ([]store.Memory, error) {

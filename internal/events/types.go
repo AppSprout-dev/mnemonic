@@ -27,7 +27,7 @@ type RawMemoryCreated struct {
 	Ts             time.Time `json:"timestamp"`
 }
 
-func (e RawMemoryCreated) EventType() string        { return TypeRawMemoryCreated }
+func (e RawMemoryCreated) EventType() string         { return TypeRawMemoryCreated }
 func (e RawMemoryCreated) EventTimestamp() time.Time { return e.Ts }
 
 // MemoryEncoded is emitted when a raw memory has been encoded and stored.
@@ -39,7 +39,7 @@ type MemoryEncoded struct {
 	Ts                  time.Time `json:"timestamp"`
 }
 
-func (e MemoryEncoded) EventType() string        { return TypeMemoryEncoded }
+func (e MemoryEncoded) EventType() string         { return TypeMemoryEncoded }
 func (e MemoryEncoded) EventTimestamp() time.Time { return e.Ts }
 
 // MemoryAccessed is emitted when memories are retrieved.
@@ -49,7 +49,7 @@ type MemoryAccessed struct {
 	Ts        time.Time `json:"timestamp"`
 }
 
-func (e MemoryAccessed) EventType() string        { return TypeMemoryAccessed }
+func (e MemoryAccessed) EventType() string         { return TypeMemoryAccessed }
 func (e MemoryAccessed) EventTimestamp() time.Time { return e.Ts }
 
 // ConsolidationStarted is emitted when a consolidation cycle begins.
@@ -57,7 +57,7 @@ type ConsolidationStarted struct {
 	Ts time.Time `json:"timestamp"`
 }
 
-func (e ConsolidationStarted) EventType() string        { return TypeConsolidationStarted }
+func (e ConsolidationStarted) EventType() string         { return TypeConsolidationStarted }
 func (e ConsolidationStarted) EventTimestamp() time.Time { return e.Ts }
 
 // ConsolidationCompleted is emitted when a consolidation cycle finishes.
@@ -70,19 +70,19 @@ type ConsolidationCompleted struct {
 	Ts                 time.Time `json:"timestamp"`
 }
 
-func (e ConsolidationCompleted) EventType() string        { return TypeConsolidationCompleted }
+func (e ConsolidationCompleted) EventType() string         { return TypeConsolidationCompleted }
 func (e ConsolidationCompleted) EventTimestamp() time.Time { return e.Ts }
 
 // QueryExecuted is emitted when a query is processed.
 type QueryExecuted struct {
-	QueryID        string    `json:"query_id"`
-	QueryText      string    `json:"query_text"`
+	QueryID         string    `json:"query_id"`
+	QueryText       string    `json:"query_text"`
 	ResultsReturned int       `json:"results_returned"`
-	TookMs         int64     `json:"took_ms"`
-	Ts             time.Time `json:"timestamp"`
+	TookMs          int64     `json:"took_ms"`
+	Ts              time.Time `json:"timestamp"`
 }
 
-func (e QueryExecuted) EventType() string        { return TypeQueryExecuted }
+func (e QueryExecuted) EventType() string         { return TypeQueryExecuted }
 func (e QueryExecuted) EventTimestamp() time.Time { return e.Ts }
 
 // MetaCycleCompleted is emitted when meta-cognition completes a monitoring cycle.
@@ -91,7 +91,7 @@ type MetaCycleCompleted struct {
 	Ts                 time.Time `json:"timestamp"`
 }
 
-func (e MetaCycleCompleted) EventType() string        { return TypeMetaCycleCompleted }
+func (e MetaCycleCompleted) EventType() string         { return TypeMetaCycleCompleted }
 func (e MetaCycleCompleted) EventTimestamp() time.Time { return e.Ts }
 
 // SystemHealth is emitted periodically with system status.
@@ -103,7 +103,7 @@ type SystemHealth struct {
 	Ts             time.Time `json:"timestamp"`
 }
 
-func (e SystemHealth) EventType() string        { return TypeSystemHealth }
+func (e SystemHealth) EventType() string         { return TypeSystemHealth }
 func (e SystemHealth) EventTimestamp() time.Time { return e.Ts }
 
 // WatcherEvent is emitted when a watcher observes something.
@@ -115,13 +115,13 @@ type WatcherEvent struct {
 	Ts      time.Time `json:"timestamp"`
 }
 
-func (e WatcherEvent) EventType() string        { return TypeWatcherEvent }
+func (e WatcherEvent) EventType() string         { return TypeWatcherEvent }
 func (e WatcherEvent) EventTimestamp() time.Time { return e.Ts }
 
 // DreamCycleCompleted is emitted when the dreaming agent completes a replay cycle.
 type DreamCycleCompleted struct {
 	MemoriesReplayed         int       `json:"memories_replayed"`
-	AssociationsStrengthened  int       `json:"associations_strengthened"`
+	AssociationsStrengthened int       `json:"associations_strengthened"`
 	NewAssociationsCreated   int       `json:"new_associations_created"`
 	CrossProjectLinks        int       `json:"cross_project_links"`
 	PatternLinks             int       `json:"pattern_links"`
@@ -131,7 +131,7 @@ type DreamCycleCompleted struct {
 	Ts                       time.Time `json:"timestamp"`
 }
 
-func (e DreamCycleCompleted) EventType() string        { return TypeDreamCycleCompleted }
+func (e DreamCycleCompleted) EventType() string         { return TypeDreamCycleCompleted }
 func (e DreamCycleCompleted) EventTimestamp() time.Time { return e.Ts }
 
 // EpisodeClosed is emitted when an episode is synthesized and closed.
@@ -143,21 +143,35 @@ type EpisodeClosed struct {
 	Ts          time.Time `json:"timestamp"`
 }
 
-func (e EpisodeClosed) EventType() string        { return TypeEpisodeClosed }
+func (e EpisodeClosed) EventType() string         { return TypeEpisodeClosed }
 func (e EpisodeClosed) EventTimestamp() time.Time { return e.Ts }
 
 // PatternDiscovered is emitted when a new pattern is extracted from memory clusters.
 type PatternDiscovered struct {
-	PatternID   string    `json:"pattern_id"`
-	Title       string    `json:"title"`
-	PatternType string    `json:"pattern_type"`
-	Project     string    `json:"project,omitempty"`
-	EvidenceCount int     `json:"evidence_count"`
-	Ts          time.Time `json:"timestamp"`
+	PatternID     string    `json:"pattern_id"`
+	Title         string    `json:"title"`
+	PatternType   string    `json:"pattern_type"`
+	Project       string    `json:"project,omitempty"`
+	EvidenceCount int       `json:"evidence_count"`
+	Ts            time.Time `json:"timestamp"`
 }
 
-func (e PatternDiscovered) EventType() string        { return TypePatternDiscovered }
+func (e PatternDiscovered) EventType() string         { return TypePatternDiscovered }
 func (e PatternDiscovered) EventTimestamp() time.Time { return e.Ts }
+
+// AbstractionCreated is emitted when a new principle or axiom is synthesized.
+const TypeAbstractionCreated = "abstraction_created"
+
+type AbstractionCreated struct {
+	AbstractionID string    `json:"abstraction_id"`
+	Level         int       `json:"level"` // 2=principle, 3=axiom
+	Title         string    `json:"title"`
+	SourceCount   int       `json:"source_count"`
+	Ts            time.Time `json:"timestamp"`
+}
+
+func (e AbstractionCreated) EventType() string         { return TypeAbstractionCreated }
+func (e AbstractionCreated) EventTimestamp() time.Time { return e.Ts }
 
 // AssocCandidate is a pending association for LLM reclassification.
 type AssocCandidate struct {
@@ -176,5 +190,7 @@ type AssociationsPendingClassification struct {
 
 const TypeAssociationsPendingClassification = "associations_pending_classification"
 
-func (e AssociationsPendingClassification) EventType() string        { return TypeAssociationsPendingClassification }
+func (e AssociationsPendingClassification) EventType() string {
+	return TypeAssociationsPendingClassification
+}
 func (e AssociationsPendingClassification) EventTimestamp() time.Time { return e.Ts }

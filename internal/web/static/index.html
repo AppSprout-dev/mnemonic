@@ -1383,12 +1383,18 @@
         section.innerHTML = patterns.map(function(p) {
             var strengthPct = Math.round((p.strength || 0) * 100);
             var concepts = (p.concepts || []).slice(0, 5);
+            var evidenceCount = (p.evidence_ids || []).length;
+            var age = p.created_at ? timeAgo(p.created_at) : '';
             var html = '<div class="pattern-card"><div class="pattern-title">' + escapeHtml(p.title || 'Untitled');
             if (p.project) html += ' <span style="color:var(--accent-blue);font-size:0.8rem">[' + escapeHtml(p.project) + ']</span>';
             html += '</div><span class="badge badge-type">' + (p.pattern_type || 'pattern') + '</span>';
+            if (p.state && p.state !== 'active') html += ' <span class="badge" style="background:var(--warning-bg);color:var(--warning-text)">' + p.state + '</span>';
             html += '<div class="pattern-desc">' + escapeHtml(p.description || '') + '</div>';
             html += '<div class="memory-meta-row"><div class="strength-bar"><div class="strength-fill" style="width:' + strengthPct + '%"></div></div>';
             html += '<span style="font-size:0.75rem;color:var(--text-dim)">Strength ' + strengthPct + '%</span>';
+            if (evidenceCount > 0) html += '<span style="font-size:0.7rem;color:var(--text-muted)">' + evidenceCount + ' evidence</span>';
+            if (p.access_count > 0) html += '<span style="font-size:0.7rem;color:var(--text-muted)">' + p.access_count + ' accesses</span>';
+            if (age) html += '<span style="font-size:0.7rem;color:var(--text-muted)">' + age + '</span>';
             concepts.forEach(function(c) { html += '<span class="concept-tag">' + escapeHtml(c) + '</span>'; });
             html += '</div></div>';
             return html;
@@ -1404,11 +1410,18 @@
             var levelLabel = a.level === 3 ? 'Axiom' : a.level === 2 ? 'Principle' : 'L' + a.level;
             var confPct = Math.round((a.confidence || 0) * 100);
             var concepts = (a.concepts || []).slice(0, 5);
+            var sourceCount = (a.source_pattern_ids || []).length;
+            var age = a.created_at ? timeAgo(a.created_at) : '';
             var html = '<div class="abstraction-card"><div class="abstraction-title">' + escapeHtml(a.title || 'Untitled');
-            html += ' <span class="badge badge-level">' + levelLabel + '</span></div>';
+            html += ' <span class="badge badge-level">' + levelLabel + '</span>';
+            if (a.state && a.state !== 'active') html += ' <span class="badge" style="background:var(--warning-bg);color:var(--warning-text)">' + a.state + '</span>';
+            html += '</div>';
             html += '<div class="abstraction-desc">' + escapeHtml(a.description || '') + '</div>';
             html += '<div class="memory-meta-row"><div class="strength-bar"><div class="strength-fill" style="width:' + confPct + '%;background:linear-gradient(90deg,var(--accent-violet),var(--accent-pink))"></div></div>';
             html += '<span style="font-size:0.75rem;color:var(--text-dim)">Confidence ' + confPct + '%</span>';
+            if (sourceCount > 0) html += '<span style="font-size:0.7rem;color:var(--text-muted)">' + sourceCount + ' sources</span>';
+            if (a.access_count > 0) html += '<span style="font-size:0.7rem;color:var(--text-muted)">' + a.access_count + ' accesses</span>';
+            if (age) html += '<span style="font-size:0.7rem;color:var(--text-muted)">' + age + '</span>';
             concepts.forEach(function(c) { html += '<span class="concept-tag">' + escapeHtml(c) + '</span>'; });
             html += '</div></div>';
             return html;
@@ -1673,6 +1686,8 @@
                     case 'consolidation_started': desc = 'Consolidation cycle started'; break;
                     case 'consolidation_completed': desc = 'Consolidated: ' + (payload.memories_processed || 0) + ' processed'; state.exploreLoaded.episodes = false; state.exploreLoaded.patterns = false; state.exploreLoaded.abstractions = false; break;
                     case 'dream_cycle_completed': desc = 'Dream cycle completed'; state.exploreLoaded.abstractions = false; break;
+                    case 'pattern_discovered': desc = 'Pattern: ' + (payload.title || '').slice(0, 40); state.exploreLoaded.patterns = false; break;
+                    case 'abstraction_created': desc = (payload.level === 3 ? 'Axiom' : 'Principle') + ': ' + (payload.title || '').slice(0, 40); state.exploreLoaded.abstractions = false; break;
                     case 'episode_closed': desc = 'Episode closed: ' + (payload.title || '').slice(0, 40); state.exploreLoaded.episodes = false; break;
                     default: desc = type.replace(/_/g, ' ');
                 }
@@ -1714,6 +1729,20 @@
 
     // ── Utilities ──
     function escapeHtml(str) { if (!str) return ''; var div = document.createElement('div'); div.textContent = str; return div.innerHTML; }
+    function timeAgo(dateStr) {
+        if (!dateStr) return '';
+        var d = new Date(dateStr);
+        var now = new Date();
+        var sec = Math.floor((now - d) / 1000);
+        if (sec < 60) return 'just now';
+        var min = Math.floor(sec / 60);
+        if (min < 60) return min + 'm ago';
+        var hr = Math.floor(min / 60);
+        if (hr < 24) return hr + 'h ago';
+        var days = Math.floor(hr / 24);
+        if (days < 30) return days + 'd ago';
+        return Math.floor(days / 30) + 'mo ago';
+    }
 
     function relativeTime(date) {
         var diff = Date.now() - date.getTime();
@@ -1915,14 +1944,23 @@
         var container = document.getElementById('agentPatches');
         var el = document.getElementById('agentPatchesContent');
         var countEl = document.getElementById('agentPatchesCount');
-        var valid = (patches || []).filter(function(p) { return p.content && p.content.trim(); });
+        var valid = (patches || []).filter(function(p) {
+            var text = p.content || p.instruction || '';
+            return text.trim();
+        });
         if (countEl) countEl.textContent = valid.length;
         if (valid.length === 0) { container.style.display = 'none'; return; }
         container.style.display = 'block';
         el.innerHTML = valid.map(function(p) {
+            var label = p.action || p.id;
+            var body = p.content || p.instruction || '';
+            var meta = '';
+            if (p.created) meta = '<div style="font-size:0.7rem;color:var(--text-muted);margin-top:2px">' + escapeHtml(p.created) + '</div>';
+            if (p.reason) meta += '<div style="font-size:0.75rem;color:var(--text-secondary);margin-top:2px;font-style:italic">' + escapeHtml(p.reason) + '</div>';
             return '<div style="padding:8px 0;border-bottom:1px solid var(--border-subtle)">' +
-                '<div style="font-size:0.75rem;color:var(--accent-cyan);font-weight:600">' + escapeHtml(p.action || p.id) + '</div>' +
-                '<div style="font-size:0.85rem;color:var(--text-primary);margin-top:2px">' + escapeHtml(p.content) + '</div></div>';
+                '<div style="font-size:0.75rem;color:var(--accent-cyan);font-weight:600">' + escapeHtml(label) + '</div>' +
+                '<div style="font-size:0.85rem;color:var(--text-primary);margin-top:2px">' + escapeHtml(body) + '</div>' +
+                meta + '</div>';
         }).join('');
     }
 

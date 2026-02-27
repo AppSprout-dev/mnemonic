@@ -32,12 +32,12 @@ type mockStore struct {
 	getMemoryAttributesFn   func(ctx context.Context, memoryID string) (store.MemoryAttributes, error)
 
 	// Call tracking
-	updateStateCalls          []updateStateCall
-	batchUpdateSalienceCalls  []map[string]float32
-	pruneWeakAssocCalls       []float32
-	deleteOldArchivedCalls    []time.Time
-	batchMergeMemoriesCalls   []batchMergeCall
-	writeConsolidationCalls   []store.ConsolidationRecord
+	updateStateCalls         []updateStateCall
+	batchUpdateSalienceCalls []map[string]float32
+	pruneWeakAssocCalls      []float32
+	deleteOldArchivedCalls   []time.Time
+	batchMergeMemoriesCalls  []batchMergeCall
+	writeConsolidationCalls  []store.ConsolidationRecord
 }
 
 type updateStateCall struct {
@@ -274,6 +274,9 @@ func (m *mockStore) UpdateAbstraction(ctx context.Context, a store.Abstraction) 
 func (m *mockStore) ListAbstractions(ctx context.Context, level int, limit int) ([]store.Abstraction, error) {
 	return nil, nil
 }
+func (m *mockStore) SearchAbstractionsByEmbedding(ctx context.Context, embedding []float32, limit int) ([]store.Abstraction, error) {
+	return nil, nil
+}
 
 // --- Scoped queries ---
 func (m *mockStore) SearchByProject(ctx context.Context, project string, query string, limit int) ([]store.Memory, error) {
@@ -348,8 +351,8 @@ func (m *mockBus) Publish(ctx context.Context, event events.Event) error {
 	return nil
 }
 func (m *mockBus) Subscribe(eventType string, handler events.Handler) string { return "sub-1" }
-func (m *mockBus) Unsubscribe(subscriptionID string)                        {}
-func (m *mockBus) Close() error                                             { return nil }
+func (m *mockBus) Unsubscribe(subscriptionID string)                         {}
+func (m *mockBus) Close() error                                              { return nil }
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -530,8 +533,8 @@ func TestFindClusters(t *testing.T) {
 		{ID: "m1", Embedding: []float32{1.0, 0.0, 0.0}, Summary: "mem1"},
 		{ID: "m2", Embedding: []float32{0.99, 0.05, 0.0}, Summary: "mem2"},
 		{ID: "m3", Embedding: []float32{0.98, 0.1, 0.0}, Summary: "mem3"},
-		{ID: "m4", Embedding: []float32{0.0, 1.0, 0.0}, Summary: "mem4"},     // orthogonal
-		{ID: "m5", Embedding: nil, Summary: "no embedding"},                    // no embedding
+		{ID: "m4", Embedding: []float32{0.0, 1.0, 0.0}, Summary: "mem4"},      // orthogonal
+		{ID: "m5", Embedding: nil, Summary: "no embedding"},                   // no embedding
 		{ID: "m6", Embedding: []float32{0.0, 0.0, 1.0}, Summary: "different"}, // different direction
 	}
 

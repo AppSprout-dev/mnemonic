@@ -21,18 +21,18 @@ import (
 // ---------------------------------------------------------------------------
 
 type mockStore struct {
-	getRawFn              func(ctx context.Context, id string) (store.RawMemory, error)
-	listRawUnprocessedFn  func(ctx context.Context, limit int) ([]store.RawMemory, error)
-	markRawProcessedFn    func(ctx context.Context, id string) error
-	writeMemoryFn         func(ctx context.Context, mem store.Memory) error
-	searchByEmbeddingFn   func(ctx context.Context, embedding []float32, limit int) ([]store.RetrievalResult, error)
-	createAssociationFn   func(ctx context.Context, assoc store.Association) error
-	countMemoriesFn       func(ctx context.Context) (int, error)
-	getOpenEpisodeFn      func(ctx context.Context) (store.Episode, error)
-	searchByConceptsFn    func(ctx context.Context, concepts []string, limit int) ([]store.Memory, error)
-	writeMemoryResFn      func(ctx context.Context, res store.MemoryResolution) error
-	writeConceptSetFn     func(ctx context.Context, cs store.ConceptSet) error
-	writeMemoryAttrsFn    func(ctx context.Context, attrs store.MemoryAttributes) error
+	getRawFn             func(ctx context.Context, id string) (store.RawMemory, error)
+	listRawUnprocessedFn func(ctx context.Context, limit int) ([]store.RawMemory, error)
+	markRawProcessedFn   func(ctx context.Context, id string) error
+	writeMemoryFn        func(ctx context.Context, mem store.Memory) error
+	searchByEmbeddingFn  func(ctx context.Context, embedding []float32, limit int) ([]store.RetrievalResult, error)
+	createAssociationFn  func(ctx context.Context, assoc store.Association) error
+	countMemoriesFn      func(ctx context.Context) (int, error)
+	getOpenEpisodeFn     func(ctx context.Context) (store.Episode, error)
+	searchByConceptsFn   func(ctx context.Context, concepts []string, limit int) ([]store.Memory, error)
+	writeMemoryResFn     func(ctx context.Context, res store.MemoryResolution) error
+	writeConceptSetFn    func(ctx context.Context, cs store.ConceptSet) error
+	writeMemoryAttrsFn   func(ctx context.Context, attrs store.MemoryAttributes) error
 }
 
 func (m *mockStore) WriteRaw(ctx context.Context, raw store.RawMemory) error { return nil }
@@ -74,7 +74,7 @@ func (m *mockStore) UpdateSalience(ctx context.Context, id string, salience floa
 	return nil
 }
 func (m *mockStore) UpdateState(ctx context.Context, id string, state string) error { return nil }
-func (m *mockStore) IncrementAccess(ctx context.Context, id string) error            { return nil }
+func (m *mockStore) IncrementAccess(ctx context.Context, id string) error           { return nil }
 func (m *mockStore) ListMemories(ctx context.Context, state string, limit, offset int) ([]store.Memory, error) {
 	return nil, nil
 }
@@ -207,6 +207,7 @@ func (m *mockStore) WriteMemoryAttributes(ctx context.Context, attrs store.Memor
 func (m *mockStore) GetMemoryAttributes(ctx context.Context, memoryID string) (store.MemoryAttributes, error) {
 	return store.MemoryAttributes{}, nil
 }
+
 // --- Pattern operations ---
 func (m *mockStore) WritePattern(ctx context.Context, p store.Pattern) error { return nil }
 func (m *mockStore) GetPattern(ctx context.Context, id string) (store.Pattern, error) {
@@ -227,6 +228,9 @@ func (m *mockStore) GetAbstraction(ctx context.Context, id string) (store.Abstra
 }
 func (m *mockStore) UpdateAbstraction(ctx context.Context, a store.Abstraction) error { return nil }
 func (m *mockStore) ListAbstractions(ctx context.Context, level int, limit int) ([]store.Abstraction, error) {
+	return nil, nil
+}
+func (m *mockStore) SearchAbstractionsByEmbedding(ctx context.Context, embedding []float32, limit int) ([]store.Abstraction, error) {
 	return nil, nil
 }
 

@@ -24,11 +24,11 @@ import (
 
 // mockStore implements store.Store with configurable behavior per-test.
 type mockStore struct {
-	writeRawFn       func(ctx context.Context, raw store.RawMemory) error
-	getMemoryFn      func(ctx context.Context, id string) (store.Memory, error)
-	listMemoriesFn   func(ctx context.Context, state string, limit, offset int) ([]store.Memory, error)
-	countMemoriesFn  func(ctx context.Context) (int, error)
-	getStatisticsFn  func(ctx context.Context) (store.StoreStatistics, error)
+	writeRawFn      func(ctx context.Context, raw store.RawMemory) error
+	getMemoryFn     func(ctx context.Context, id string) (store.Memory, error)
+	listMemoriesFn  func(ctx context.Context, state string, limit, offset int) ([]store.Memory, error)
+	countMemoriesFn func(ctx context.Context) (int, error)
+	getStatisticsFn func(ctx context.Context) (store.StoreStatistics, error)
 }
 
 func (m *mockStore) WriteRaw(ctx context.Context, raw store.RawMemory) error {
@@ -64,7 +64,7 @@ func (m *mockStore) UpdateSalience(ctx context.Context, id string, salience floa
 	return nil
 }
 func (m *mockStore) UpdateState(ctx context.Context, id string, state string) error { return nil }
-func (m *mockStore) IncrementAccess(ctx context.Context, id string) error             { return nil }
+func (m *mockStore) IncrementAccess(ctx context.Context, id string) error           { return nil }
 func (m *mockStore) ListMemories(ctx context.Context, state string, limit, offset int) ([]store.Memory, error) {
 	if m.listMemoriesFn != nil {
 		return m.listMemoriesFn(ctx, state, limit, offset)
@@ -178,6 +178,7 @@ func (m *mockStore) WriteMemoryAttributes(ctx context.Context, attrs store.Memor
 func (m *mockStore) GetMemoryAttributes(ctx context.Context, memoryID string) (store.MemoryAttributes, error) {
 	return store.MemoryAttributes{}, nil
 }
+
 // --- Pattern operations ---
 func (m *mockStore) WritePattern(ctx context.Context, p store.Pattern) error { return nil }
 func (m *mockStore) GetPattern(ctx context.Context, id string) (store.Pattern, error) {
@@ -198,6 +199,9 @@ func (m *mockStore) GetAbstraction(ctx context.Context, id string) (store.Abstra
 }
 func (m *mockStore) UpdateAbstraction(ctx context.Context, a store.Abstraction) error { return nil }
 func (m *mockStore) ListAbstractions(ctx context.Context, level int, limit int) ([]store.Abstraction, error) {
+	return nil, nil
+}
+func (m *mockStore) SearchAbstractionsByEmbedding(ctx context.Context, embedding []float32, limit int) ([]store.Abstraction, error) {
 	return nil, nil
 }
 
@@ -228,8 +232,8 @@ func (b *mockBus) Publish(_ context.Context, event events.Event) error {
 	return nil
 }
 func (b *mockBus) Subscribe(eventType string, handler events.Handler) string { return "sub-1" }
-func (b *mockBus) Unsubscribe(subscriptionID string)                        {}
-func (b *mockBus) Close() error                                             { return nil }
+func (b *mockBus) Unsubscribe(subscriptionID string)                         {}
+func (b *mockBus) Close() error                                              { return nil }
 
 // ---------------------------------------------------------------------------
 // Mock LLM provider

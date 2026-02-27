@@ -15,10 +15,10 @@ import (
 // --- Evolution endpoint ---
 
 type evolutionResponse struct {
-	Principles []principle        `json:"principles"`
+	Principles []principle         `json:"principles"`
 	Strategies map[string]strategy `json:"strategies"`
-	Patches    []patch            `json:"patches"`
-	Timestamp  string             `json:"timestamp"`
+	Patches    []patch             `json:"patches"`
+	Timestamp  string              `json:"timestamp"`
 }
 
 type principle struct {
@@ -35,9 +35,12 @@ type strategy struct {
 }
 
 type patch struct {
-	ID      string `json:"id" yaml:"id"`
-	Action  string `json:"action" yaml:"action"`
-	Content string `json:"content" yaml:"content"`
+	ID          string `json:"id" yaml:"id"`
+	Action      string `json:"action,omitempty" yaml:"action"`
+	Content     string `json:"content,omitempty" yaml:"content"`
+	Instruction string `json:"instruction,omitempty" yaml:"instruction"`
+	Reason      string `json:"reason,omitempty" yaml:"reason"`
+	Created     string `json:"created,omitempty" yaml:"created"`
 }
 
 // HandleAgentEvolution returns a handler that reads evolution YAML files.
@@ -162,9 +165,9 @@ func HandleAgentChangelog(evolutionDir string, log *slog.Logger) http.HandlerFun
 // --- Sessions endpoint ---
 
 type sessionsResponse struct {
-	Sessions []sessionRecord `json:"sessions"`
-	Stats    sessionStats    `json:"stats"`
-	Timestamp string         `json:"timestamp"`
+	Sessions  []sessionRecord `json:"sessions"`
+	Stats     sessionStats    `json:"stats"`
+	Timestamp string          `json:"timestamp"`
 }
 
 type sessionRecord struct {

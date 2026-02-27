@@ -26,7 +26,7 @@ func (m *mockStore) ListRawUnprocessed(ctx context.Context, limit int) ([]store.
 func (m *mockStore) ListRawMemoriesAfter(ctx context.Context, after time.Time, limit int) ([]store.RawMemory, error) {
 	return nil, nil
 }
-func (m *mockStore) MarkRawProcessed(ctx context.Context, id string) error { return nil }
+func (m *mockStore) MarkRawProcessed(ctx context.Context, id string) error   { return nil }
 func (m *mockStore) WriteMemory(ctx context.Context, mem store.Memory) error { return nil }
 func (m *mockStore) GetMemory(ctx context.Context, id string) (store.Memory, error) {
 	return store.Memory{}, nil
@@ -86,7 +86,9 @@ func (m *mockStore) BatchMergeMemories(ctx context.Context, sourceIDs []string, 
 func (m *mockStore) DeleteOldArchived(ctx context.Context, olderThan time.Time) (int, error) {
 	return 0, nil
 }
-func (m *mockStore) WriteConsolidation(ctx context.Context, record store.ConsolidationRecord) error { return nil }
+func (m *mockStore) WriteConsolidation(ctx context.Context, record store.ConsolidationRecord) error {
+	return nil
+}
 func (m *mockStore) GetLastConsolidation(ctx context.Context) (store.ConsolidationRecord, error) {
 	return store.ConsolidationRecord{}, nil
 }
@@ -173,6 +175,9 @@ func (m *mockStore) UpdateAbstraction(ctx context.Context, a store.Abstraction) 
 func (m *mockStore) ListAbstractions(ctx context.Context, level int, limit int) ([]store.Abstraction, error) {
 	return nil, nil
 }
+func (m *mockStore) SearchAbstractionsByEmbedding(ctx context.Context, embedding []float32, limit int) ([]store.Abstraction, error) {
+	return nil, nil
+}
 
 // --- Scoped queries ---
 func (m *mockStore) SearchByProject(ctx context.Context, project string, query string, limit int) ([]store.Memory, error) {
@@ -195,8 +200,8 @@ func (m *mockBus) Publish(ctx context.Context, event events.Event) error { retur
 func (m *mockBus) Subscribe(eventType string, handler events.Handler) string {
 	return "test-sub-id"
 }
-func (m *mockBus) Unsubscribe(subscriptionID string)                    {}
-func (m *mockBus) Close() error                                         { return nil }
+func (m *mockBus) Unsubscribe(subscriptionID string) {}
+func (m *mockBus) Close() error                      { return nil }
 
 // TestHandleInitialize tests handleInitialize returns correct protocol version and server info.
 func TestHandleInitialize(t *testing.T) {
@@ -304,18 +309,18 @@ func TestHandleToolsList(t *testing.T) {
 
 	// Verify tool names
 	expectedTools := map[string]bool{
-		"remember":         false,
-		"recall":           false,
-		"forget":           false,
-		"status":           false,
-		"recall_project":   false,
-		"recall_timeline":  false,
-		"session_summary":  false,
-		"get_patterns":     false,
-		"get_insights":     false,
-		"feedback":         false,
-		"audit_encodings":  false,
-		"coach_local_llm":  false,
+		"remember":        false,
+		"recall":          false,
+		"forget":          false,
+		"status":          false,
+		"recall_project":  false,
+		"recall_timeline": false,
+		"session_summary": false,
+		"get_patterns":    false,
+		"get_insights":    false,
+		"feedback":        false,
+		"audit_encodings": false,
+		"coach_local_llm": false,
 	}
 
 	for _, toolInterface := range toolsArray {
@@ -462,7 +467,7 @@ func TestHandleRequestDispatch(t *testing.T) {
 	srv := NewMCPServer(&mockStore{}, nil, &mockBus{}, logger, "")
 
 	tests := []struct {
-		method string
+		method  string
 		wantErr bool
 	}{
 		{"initialize", false},

@@ -6,14 +6,15 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/appsprout/mnemonic/internal/events"
 	"github.com/appsprout/mnemonic/internal/llm"
 	"github.com/appsprout/mnemonic/internal/store"
+	"github.com/google/uuid"
 )
 
 // ConsolidationConfig holds configurable parameters for the consolidation agent.
@@ -56,7 +57,7 @@ type ConsolidationAgent struct {
 	cancel      context.CancelFunc
 	wg          sync.WaitGroup
 	stopOnce    sync.Once
-	triggerCh chan struct{} // allows on-demand consolidation via event bus or reactor
+	triggerCh   chan struct{} // allows on-demand consolidation via event bus or reactor
 }
 
 // NewConsolidationAgent creates a new consolidation agent.
@@ -169,16 +170,16 @@ func (ca *ConsolidationAgent) consolidationLoop() {
 
 // CycleReport summarizes what happened during a consolidation cycle.
 type CycleReport struct {
-	StartTime          time.Time
-	Duration           time.Duration
-	MemoriesProcessed  int
-	MemoriesDecayed    int
-	TransitionedFading int
+	StartTime            time.Time
+	Duration             time.Duration
+	MemoriesProcessed    int
+	MemoriesDecayed      int
+	TransitionedFading   int
 	TransitionedArchived int
-	AssociationsPruned int
-	MergesPerformed    int
-	PatternsExtracted  int
-	ExpiredDeleted     int
+	AssociationsPruned   int
+	MergesPerformed      int
+	PatternsExtracted    int
+	ExpiredDeleted       int
 }
 
 // runCycle executes the full consolidation pipeline.
@@ -644,85 +645,140 @@ func (ca *ConsolidationAgent) extractPatterns(ctx context.Context) (int, error) 
 			continue
 		}
 
-		// Find concept-overlap clusters (lower threshold than merge)
-		clusters := ca.findConceptClusters(group)
+		// Find concept-overlap clusters (hybrid: concept + embedding)
+		conceptClusters := ca.findConceptClusters(group)
 		ca.log.Info("pattern extraction: found concept clusters",
 			"project", project,
 			"memories_in_project", len(group),
-			"clusters_found", len(clusters))
+			"clusters_found", len(conceptClusters))
 
-		for _, cluster := range clusters {
-			if extracted >= maxPatternExtractionsPerCycle {
-				break
-			}
-			if len(cluster) < 3 {
-				continue
-			}
+		extracted += ca.processPatternClusters(ctx, conceptClusters, project, maxPatternExtractionsPerCycle-extracted)
 
-			// Check if this cluster matches an existing pattern (by embedding similarity)
-			existing, err := ca.findMatchingPattern(ctx, cluster)
-			if err == nil && existing != nil {
-				// Strengthen existing pattern
-				existing.Strength = min32(existing.Strength+0.05, 1.0)
-				existing.AccessCount++
-				existing.LastAccessed = time.Now()
-				// Add new evidence
-				for _, mem := range cluster {
-					if !containsString(existing.EvidenceIDs, mem.ID) {
-						existing.EvidenceIDs = append(existing.EvidenceIDs, mem.ID)
-					}
+		// Also check temporal clusters (different signal source)
+		if extracted < maxPatternExtractionsPerCycle {
+			temporalClusters := ca.findTemporalClusters(group)
+			ca.log.Info("pattern extraction: found temporal clusters",
+				"project", project,
+				"temporal_clusters", len(temporalClusters))
+
+			extracted += ca.processPatternClusters(ctx, temporalClusters, project, maxPatternExtractionsPerCycle-extracted)
+		}
+	}
+
+	// Cross-project pattern detection
+	if extracted < maxPatternExtractionsPerCycle && len(memories) >= 3 {
+		crossClusters := ca.findConceptClusters(memories)
+		// Only keep clusters that span multiple projects
+		var multiProjectClusters [][]store.Memory
+		for _, cluster := range crossClusters {
+			projects := make(map[string]bool)
+			for _, mem := range cluster {
+				p := mem.Project
+				if p == "" {
+					p = "_default"
 				}
-				if err := ca.store.UpdatePattern(ctx, *existing); err != nil {
-					ca.log.Warn("failed to update existing pattern", "pattern_id", existing.ID, "error", err)
-				} else {
-					ca.log.Debug("strengthened existing pattern", "pattern_id", existing.ID, "strength", existing.Strength)
-				}
-				continue
+				projects[p] = true
 			}
-
-			// Ask LLM if there's a recurring pattern
-			pattern, err := ca.identifyPattern(ctx, cluster, project)
-			if err != nil {
-				ca.log.Warn("pattern identification failed", "project", project, "cluster_size", len(cluster), "error", err)
-				continue
+			if len(projects) >= 2 {
+				multiProjectClusters = append(multiProjectClusters, cluster)
 			}
-			if pattern == nil {
-				ca.log.Info("pattern extraction: LLM rejected cluster (not a pattern)", "project", project, "cluster_size", len(cluster))
-				continue
-			}
-
-			if err := ca.store.WritePattern(ctx, *pattern); err != nil {
-				ca.log.Warn("failed to write pattern", "error", err)
-				continue
-			}
-
-			// Publish pattern discovered event
-			if ca.bus != nil {
-				ca.bus.Publish(ctx, events.PatternDiscovered{
-					PatternID:     pattern.ID,
-					Title:         pattern.Title,
-					PatternType:   pattern.PatternType,
-					Project:       pattern.Project,
-					EvidenceCount: len(pattern.EvidenceIDs),
-					Ts:            time.Now(),
-				})
-			}
-
-			extracted++
-			ca.log.Info("pattern discovered",
-				"pattern_id", pattern.ID,
-				"title", pattern.Title,
-				"type", pattern.PatternType,
-				"project", pattern.Project,
-				"evidence_count", len(pattern.EvidenceIDs))
+		}
+		if len(multiProjectClusters) > 0 {
+			ca.log.Info("pattern extraction: found cross-project clusters",
+				"clusters", len(multiProjectClusters))
+			extracted += ca.processPatternClusters(ctx, multiProjectClusters, "", maxPatternExtractionsPerCycle-extracted)
 		}
 	}
 
 	return extracted, nil
 }
 
-// findConceptClusters groups memories by concept overlap using a greedy approach.
-// Uses a lower similarity threshold than merge clustering (concept overlap >= 2).
+// processPatternClusters handles the common logic for evaluating a set of memory clusters
+// as potential patterns: strengthening existing matches or identifying new ones via LLM.
+func (ca *ConsolidationAgent) processPatternClusters(ctx context.Context, clusters [][]store.Memory, project string, budget int) int {
+	extracted := 0
+	for _, cluster := range clusters {
+		if extracted >= budget {
+			break
+		}
+		if len(cluster) < 3 {
+			continue
+		}
+
+		// Check if this cluster matches an existing pattern (by embedding similarity)
+		existing, err := ca.findMatchingPattern(ctx, cluster)
+		if err == nil && existing != nil {
+			// Count genuinely new evidence
+			newEvidence := 0
+			for _, mem := range cluster {
+				if !containsString(existing.EvidenceIDs, mem.ID) {
+					existing.EvidenceIDs = append(existing.EvidenceIDs, mem.ID)
+					newEvidence++
+				}
+			}
+			if newEvidence > 0 {
+				// Scale strength increment by amount of new evidence
+				increment := float32(0.03) * float32(newEvidence)
+				if len(cluster) >= 5 {
+					increment *= 1.3 // bonus for large clusters
+				}
+				if increment > 0.15 {
+					increment = 0.15 // cap single-cycle increment
+				}
+				existing.Strength = min32(existing.Strength+increment, 1.0)
+			}
+			existing.AccessCount++
+			existing.LastAccessed = time.Now()
+			if err := ca.store.UpdatePattern(ctx, *existing); err != nil {
+				ca.log.Warn("failed to update existing pattern", "pattern_id", existing.ID, "error", err)
+			} else {
+				ca.log.Debug("strengthened existing pattern", "pattern_id", existing.ID, "strength", existing.Strength, "new_evidence", newEvidence)
+			}
+			continue
+		}
+
+		// Ask LLM if there's a recurring pattern
+		pattern, err := ca.identifyPattern(ctx, cluster, project)
+		if err != nil {
+			ca.log.Warn("pattern identification failed", "project", project, "cluster_size", len(cluster), "error", err)
+			continue
+		}
+		if pattern == nil {
+			ca.log.Info("pattern extraction: LLM rejected cluster (not a pattern)", "project", project, "cluster_size", len(cluster))
+			continue
+		}
+
+		if err := ca.store.WritePattern(ctx, *pattern); err != nil {
+			ca.log.Warn("failed to write pattern", "error", err)
+			continue
+		}
+
+		// Publish pattern discovered event
+		if ca.bus != nil {
+			ca.bus.Publish(ctx, events.PatternDiscovered{
+				PatternID:     pattern.ID,
+				Title:         pattern.Title,
+				PatternType:   pattern.PatternType,
+				Project:       pattern.Project,
+				EvidenceCount: len(pattern.EvidenceIDs),
+				Ts:            time.Now(),
+			})
+		}
+
+		extracted++
+		ca.log.Info("pattern discovered",
+			"pattern_id", pattern.ID,
+			"title", pattern.Title,
+			"type", pattern.PatternType,
+			"project", pattern.Project,
+			"evidence_count", len(pattern.EvidenceIDs))
+	}
+	return extracted
+}
+
+// findConceptClusters groups memories by concept overlap and embedding similarity using a hybrid approach.
+// Requires EITHER 2+ concept overlap, OR 1 concept overlap with embedding similarity >= 0.6.
+// This reduces false-positive clusters from single loose concept matches.
 func (ca *ConsolidationAgent) findConceptClusters(memories []store.Memory) [][]store.Memory {
 	used := make(map[string]bool)
 	var clusters [][]store.Memory
@@ -742,9 +798,72 @@ func (ca *ConsolidationAgent) findConceptClusters(memories []store.Memory) [][]s
 			}
 
 			overlap := countConceptOverlap(seed.Concepts, candidate.Concepts)
-			if overlap >= 1 {
+			if overlap >= 2 {
+				// Strong concept signal — accept directly
 				cluster = append(cluster, candidate)
 				used[candidate.ID] = true
+			} else if overlap >= 1 && len(seed.Embedding) > 0 && len(candidate.Embedding) > 0 {
+				// Weak concept signal — require embedding confirmation
+				sim := cosineSimilarity(seed.Embedding, candidate.Embedding)
+				if sim >= 0.6 {
+					cluster = append(cluster, candidate)
+					used[candidate.ID] = true
+				}
+			}
+		}
+
+		if len(cluster) >= 3 {
+			clusters = append(clusters, cluster)
+		}
+	}
+
+	return clusters
+}
+
+// findTemporalClusters groups memories that occur in close temporal proximity and share concepts.
+// This detects patterns that emerge from sequences of related activity (e.g., recurring workflows).
+func (ca *ConsolidationAgent) findTemporalClusters(memories []store.Memory) [][]store.Memory {
+	if len(memories) < 3 {
+		return nil
+	}
+
+	// Sort by timestamp
+	sorted := make([]store.Memory, len(memories))
+	copy(sorted, memories)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].CreatedAt.Before(sorted[j].CreatedAt)
+	})
+
+	used := make(map[string]bool)
+	var clusters [][]store.Memory
+	temporalWindow := 2 * time.Hour
+
+	for i, seed := range sorted {
+		if used[seed.ID] || len(seed.Concepts) == 0 {
+			continue
+		}
+
+		cluster := []store.Memory{seed}
+		used[seed.ID] = true
+
+		for j := i + 1; j < len(sorted); j++ {
+			candidate := sorted[j]
+			if used[candidate.ID] || len(candidate.Concepts) == 0 {
+				continue
+			}
+
+			// Stop if too far from seed (3x window to allow gaps)
+			if candidate.CreatedAt.Sub(seed.CreatedAt) > temporalWindow*3 {
+				break
+			}
+
+			// Within temporal window of last cluster member
+			lastInCluster := cluster[len(cluster)-1]
+			if candidate.CreatedAt.Sub(lastInCluster.CreatedAt) <= temporalWindow {
+				if countConceptOverlap(seed.Concepts, candidate.Concepts) >= 1 {
+					cluster = append(cluster, candidate)
+					used[candidate.ID] = true
+				}
 			}
 		}
 
@@ -838,11 +957,12 @@ type patternResponse struct {
 
 // identifyPattern asks the LLM whether a cluster of memories represents a recurring pattern.
 func (ca *ConsolidationAgent) identifyPattern(ctx context.Context, cluster []store.Memory, project string) (*store.Pattern, error) {
-	// Build prompt
+	// Build prompt with quality signals
 	var summaries strings.Builder
 	allConcepts := make(map[string]bool)
 	for i, mem := range cluster {
-		summaries.WriteString(fmt.Sprintf("%d. %s (concepts: %s)\n", i+1, mem.Summary, strings.Join(mem.Concepts, ", ")))
+		qualityInfo := fmt.Sprintf("salience:%.2f, accessed:%d", mem.Salience, mem.AccessCount)
+		summaries.WriteString(fmt.Sprintf("%d. [%s] %s (concepts: %s)\n", i+1, qualityInfo, mem.Summary, strings.Join(mem.Concepts, ", ")))
 		for _, c := range mem.Concepts {
 			allConcepts[c] = true
 		}
@@ -856,7 +976,7 @@ Memories:
 %s
 
 Respond with ONLY a JSON object:
-{"is_pattern": true/false, "title": "a descriptive name for the pattern", "description": "what the pattern is and why it matters", "pattern_type": "recurring_error|code_practice|decision_pattern|workflow", "concepts": ["key", "concepts"]}
+{"is_pattern": true/false, "title": "a descriptive name for the pattern", "description": "what the pattern is and why it matters", "pattern_type": "recurring_error|code_practice|decision_pattern|workflow|temporal_sequence", "concepts": ["key", "concepts"]}
 
 If these memories are just coincidentally similar but don't reveal a real pattern, set is_pattern to false. Only call it a pattern if it genuinely recurs.`, len(cluster), summaries.String())
 
@@ -899,8 +1019,13 @@ If these memories are just coincidentally similar but don't reveal a real patter
 		evidenceIDs[i] = mem.ID
 	}
 
-	// Compute average embedding for the pattern
-	embedding := averageEmbedding(cluster)
+	// Generate embedding from the pattern's own description (more precise than averaged cluster embeddings)
+	patternText := result.Title + ": " + result.Description
+	embedding, embErr := ca.llmProvider.Embed(ctx, patternText)
+	if embErr != nil {
+		ca.log.Warn("failed to embed pattern text, falling back to cluster average", "error", embErr)
+		embedding = averageEmbedding(cluster)
+	}
 
 	// Determine project
 	proj := project
@@ -927,10 +1052,11 @@ If these memories are just coincidentally similar but don't reveal a real patter
 
 	// Validate pattern type
 	validTypes := map[string]bool{
-		"recurring_error":  true,
-		"code_practice":    true,
-		"decision_pattern": true,
-		"workflow":         true,
+		"recurring_error":   true,
+		"code_practice":     true,
+		"decision_pattern":  true,
+		"workflow":          true,
+		"temporal_sequence": true,
 	}
 	if !validTypes[pattern.PatternType] {
 		pattern.PatternType = "workflow"

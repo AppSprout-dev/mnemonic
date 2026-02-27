@@ -422,6 +422,9 @@ func (m *mockStore) UpdateAbstraction(ctx context.Context, a store.Abstraction) 
 func (m *mockStore) ListAbstractions(ctx context.Context, level int, limit int) ([]store.Abstraction, error) {
 	return nil, nil
 }
+func (m *mockStore) SearchAbstractionsByEmbedding(ctx context.Context, embedding []float32, limit int) ([]store.Abstraction, error) {
+	return nil, nil
+}
 
 // --- Scoped queries ---
 func (m *mockStore) SearchByProject(ctx context.Context, project string, query string, limit int) ([]store.Memory, error) {
