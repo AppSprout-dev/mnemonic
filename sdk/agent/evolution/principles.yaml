@@ -1,0 +1,69 @@
+# Behavioral principles — the agent modifies this file as it learns.
+# Each principle captures a rule the agent has discovered through experience.
+#
+# Schema:
+#   - id: unique identifier (p1, p2, ...)
+#     text: the principle in imperative form
+#     source: how/when this was learned
+#     confidence: 0.0-1.0 (higher = more validated)
+#     created: YYYY-MM-DD
+principles:
+  - id: p1
+    text: "When debugging build or compilation issues, check the Makefile first - it's the authoritative source for build flags, tags, and dependencies"
+    source: "Debugged FTS5 SQLite error by finding `-tags sqlite_fts5` in Makefile"
+    confidence: 0.7
+    created: "2026-02-24"
+
+  - id: p2
+    text: "When analyzing memory systems, check both project-scoped recalls and system-wide status to understand full context - project recalls may show 0 while system has hundreds"
+    source: "Reviewed mnemonic system: recall_project showed 0, status showed 385 total"
+    confidence: 0.6
+    created: "2026-02-24"
+
+  - id: p3
+    text: "Read evolution files (principles, strategies) before starting any analysis or audit task — avoids rediscovering known patterns and builds on prior learning instead of repeating it"
+    source: "Codebase audit task: read evolution files after analysis and missed chance to skip already-known territory"
+    confidence: 0.6
+    created: "2026-02-24"
+
+  - id: p4
+    text: "When multiple tool calls are independent of each other, always batch them in a single response — never call them sequentially if no dependency exists. This cuts latency and turn count."
+    source: "System instructions + observed that parallel recall/patterns/status calls consistently cut pre-task overhead in half"
+    confidence: 0.8
+    created: "2026-02-25"
+
+  - id: p5
+    text: "When the same approach fails twice, stop and change strategy — don't retry the identical action a third time. Either find an alternative or ask the user. Brute force on a blocked path wastes turns and can't succeed."
+    source: "System instructions explicitly warn against this; confirmed through sessions where early pivots resolved issues faster than persistence"
+    confidence: 0.7
+    created: "2026-02-25"
+
+  - id: p6
+    text: "Before writing a new file, verify no existing file serves the same purpose using Glob or Grep. Creating unnecessary files leads to bloat and fragmentation."
+    source: "System instructions; also, early sessions occasionally created redundant files that duplicated existing functionality"
+    confidence: 0.8
+    created: "2026-02-25"
+
+  - id: p7
+    text: "For diagnostic/status questions ('can you see X?', 'is Y running?'), use diagnostic tools directly (status, ps, logs) — not semantic recall. Recall is for knowledge retrieval, not state inspection."
+    source: "User asked 'can you see all the memories now?' — recall returned irrelevant memory-architecture docs; status gave the precise answer in one call"
+    confidence: 0.6
+    created: "2026-02-25"
+
+  - id: p8
+    text: "When a code fix is correct but has no observable effect, the first hypothesis is a stale binary — identify ALL processes using the binary and confirm which are running the new version. Multi-mode binaries (e.g., daemon vs mcp subcommand) each need their own restart."
+    source: "Fixed encoding agent bug (project field not copied) but encoded memories still had empty project — traced to MCP server process using old binary. Daemon was restarted but MCP server wasn't."
+    confidence: 0.8
+    created: "2026-02-25"
+
+  - id: p9
+    text: "In a multi-process pipeline, trace the actual data flow path BEFORE inspecting code — verify which process handles each stage. A fix in process A does nothing if process B handles that stage."
+    source: "Spent many turns verifying correct code (GetRaw, WriteMemory SQL) before discovering the MCP server runs its own encoder — the daemon's fix was irrelevant to MCP-stored memories."
+    confidence: 0.7
+    created: "2026-02-25"
+
+  - id: p10
+    text: "When the user's question is temporal or reflective ('what did we work on', 'what have you learned', 'what happened this morning'), use recall_timeline as the primary tool — not semantic recall with the user's question as the query. Semantic recall is for knowledge retrieval; recall_timeline is for temporal reconstruction."
+    source: "Pre-task recall used user's verbatim question 'we've done a lot of work this morning. what have you learned?' as a semantic query — returned generic/partial results. recall_timeline gave the accurate chronological picture in one call."
+    confidence: 0.8
+    created: "2026-02-26"

@@ -1,0 +1,160 @@
+package sqlite
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	store "github.com/appsprout/mnemonic/internal/store"
+)
+
+// SearchByProject searches memories within a specific project using FTS.
+func (s *SQLiteStore) SearchByProject(ctx context.Context, project string, query string, limit int) ([]store.Memory, error) {
+	if query == "" {
+		// No query — return recent memories for this project
+		sqlQuery := `SELECT ` + memoryColumns + ` FROM memories WHERE project = ? AND state IN ('active', 'fading') ORDER BY timestamp DESC LIMIT ?`
+		rows, err := s.db.QueryContext(ctx, sqlQuery, project, limit)
+		if err != nil {
+			return nil, fmt.Errorf("failed to search by project: %w", err)
+		}
+		return scanMemoryRows(rows)
+	}
+
+	// FTS search scoped to project
+	safeQuery := sanitizeFTSQuery(query)
+	if safeQuery == "" {
+		return nil, nil
+	}
+
+	ftsQuery := `
+	SELECT m.id, m.raw_id, m.timestamp, m.content, m.summary, m.concepts, m.embedding,
+	       m.salience, m.access_count, m.last_accessed, m.state, m.gist_of, m.episode_id,
+	       m.project, m.session_id, m.created_at, m.updated_at
+	FROM memories m
+	WHERE m.project = ?
+	AND m.rowid IN (SELECT rowid FROM memories_fts WHERE memories_fts MATCH ?)
+	LIMIT ?
+	`
+
+	rows, err := s.db.QueryContext(ctx, ftsQuery, project, safeQuery, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search by project with FTS: %w", err)
+	}
+	return scanMemoryRows(rows)
+}
+
+// ListMemoriesByTimeRange lists memories within a time range.
+func (s *SQLiteStore) ListMemoriesByTimeRange(ctx context.Context, from, to time.Time, limit int) ([]store.Memory, error) {
+	query := `SELECT ` + memoryColumns + ` FROM memories WHERE timestamp BETWEEN ? AND ? AND state IN ('active', 'fading') ORDER BY timestamp DESC LIMIT ?`
+
+	rows, err := s.db.QueryContext(ctx, query,
+		from.Format(time.RFC3339),
+		to.Format(time.RFC3339),
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list memories by time range: %w", err)
+	}
+	return scanMemoryRows(rows)
+}
+
+// GetProjectSummary returns aggregate stats for a specific project.
+func (s *SQLiteStore) GetProjectSummary(ctx context.Context, project string) (map[string]interface{}, error) {
+	summary := make(map[string]interface{})
+
+	// Count memories by state
+	var active, fading, archived, total int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT
+			COALESCE(SUM(CASE WHEN state = 'active' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN state = 'fading' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN state = 'archived' THEN 1 ELSE 0 END), 0),
+			COUNT(*)
+		FROM memories WHERE project = ?`, project,
+	).Scan(&active, &fading, &archived, &total)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get project memory counts: %w", err)
+	}
+
+	summary["project"] = project
+	summary["total_memories"] = total
+	summary["active_memories"] = active
+	summary["fading_memories"] = fading
+	summary["archived_memories"] = archived
+
+	// Get most recent activity
+	var lastActivity string
+	err = s.db.QueryRowContext(ctx,
+		`SELECT MAX(timestamp) FROM memories WHERE project = ?`, project,
+	).Scan(&lastActivity)
+	if err == nil && lastActivity != "" {
+		summary["last_activity"] = lastActivity
+	}
+
+	// Count patterns for this project
+	var patternCount int
+	err = s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM patterns WHERE project = ? AND state = 'active'`, project,
+	).Scan(&patternCount)
+	if err == nil {
+		summary["active_patterns"] = patternCount
+	}
+
+	// Get top concepts
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT concepts FROM memories WHERE project = ? AND state = 'active' ORDER BY salience DESC LIMIT 20`, project)
+	if err == nil {
+		defer rows.Close()
+		conceptCounts := make(map[string]int)
+		for rows.Next() {
+			var conceptsStr string
+			if err := rows.Scan(&conceptsStr); err != nil {
+				continue
+			}
+			concepts, _ := decodeStringSlice(conceptsStr)
+			for _, c := range concepts {
+				conceptCounts[c]++
+			}
+		}
+		// Get top 10 concepts
+		type conceptCount struct {
+			concept string
+			count   int
+		}
+		var topConcepts []string
+		for concept := range conceptCounts {
+			topConcepts = append(topConcepts, concept)
+		}
+		if len(topConcepts) > 10 {
+			topConcepts = topConcepts[:10]
+		}
+		summary["top_concepts"] = topConcepts
+	}
+
+	return summary, nil
+}
+
+// ListProjects returns all distinct project names.
+func (s *SQLiteStore) ListProjects(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT DISTINCT project FROM memories WHERE project IS NOT NULL AND project != '' ORDER BY project`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list projects: %w", err)
+	}
+	defer rows.Close()
+
+	var projects []string
+	for rows.Next() {
+		var project string
+		if err := rows.Scan(&project); err != nil {
+			continue
+		}
+		projects = append(projects, project)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error reading project rows: %w", err)
+	}
+
+	return projects, nil
+}

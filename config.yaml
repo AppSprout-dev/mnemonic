@@ -1,0 +1,327 @@
+# Mnemonic Configuration File
+# All paths support ~ expansion for home directory
+
+# LLM Provider Configuration
+llm:
+  # Endpoint URL for the LLM API (e.g., Ollama local endpoint)
+  endpoint: "http://localhost:1234/v1"
+
+  # Model name for chat/conversation (must match what's loaded in LM Studio)
+  chat_model: "qwen/qwen3-8b"
+
+  # Model name for embeddings
+  embedding_model: "text-embedding-embeddinggemma-300m-qat"
+
+  # Maximum tokens in model responses
+  max_tokens: 4096
+
+  # Temperature for sampling (0.0 = deterministic, 2.0 = more random)
+  temperature: 0.3
+
+  # Request timeout in seconds (needs headroom for tool-use synthesis)
+  timeout_sec: 120
+
+  # Maximum simultaneous LLM requests (prevents overwhelming local models)
+  max_concurrent: 2
+
+# Storage Configuration
+store:
+  # Path to SQLite database file
+  db_path: "~/.mnemonic/memory.db"
+
+  # Journal mode: "delete" (default), "wal" (write-ahead logging, recommended)
+  journal_mode: "wal"
+
+# Memory Configuration
+memory:
+  # Maximum number of memories in working memory
+  max_working_memory: 7
+
+# Perception Configuration
+perception:
+  # Enable all perception modules
+  enabled: true
+
+  # LLM gating: send each event to the LLM for a "worth remembering?" decision.
+  # When false (recommended), only the fast heuristic filter is used.
+  llm_gating_enabled: false
+
+  # Filesystem perception (watches for file changes)
+  filesystem:
+    enabled: true
+
+    # Directories to watch for changes
+    # Watch the full home directory for comprehensive awareness
+    watch_dirs:
+      - "~"
+
+    # Glob patterns to exclude from perception
+    # These use substring matching — any path containing the pattern is excluded.
+    exclude_patterns:
+      # --- Version control & package managers ---
+      - ".git/"
+      - "node_modules/"
+      - ".npm/"
+      - ".cache/"
+      - "__pycache__/"
+      - ".DS_Store"
+
+      # --- macOS Library (all app/system internal state) ---
+      - "/Library/"
+
+      # --- macOS app bundles (binary data, not useful as memories) ---
+      - ".photoslibrary/"
+      - ".app/"
+      - ".appex/"
+      - ".musiclibrary/"
+      - ".fcpbundle/"
+      - ".maildownload/"
+      - ".imapmessages/"
+
+      # --- Trash & system ---
+      - ".Trash/"
+      - "/.Spotlight-"
+      - ".localized"
+      - ".CFUserTextEncoding"
+
+      # --- App internal state ---
+      - ".lmstudio/"
+      - ".vscode/"
+      - ".idea/"
+      - ".mnemonic/"
+      - ".claude/"
+      - ".claude.json"
+      - "evolution/conversations/"
+      - "evolution/sessions.json"
+
+    # Maximum file content size to process (in bytes)
+    max_content_bytes: 102400
+
+  # Terminal perception (captures shell commands and output)
+  terminal:
+    enabled: true
+
+    # Shell to monitor: "auto" (detect from env), "bash", "zsh", etc.
+    shell: "auto"
+
+    # Poll interval in seconds
+    poll_interval_sec: 10
+
+    # Patterns to exclude from perception
+    exclude_patterns:
+      - "^cd "
+      - "^ls "
+      - "^pwd$"
+
+  # Clipboard perception (monitors clipboard changes)
+  clipboard:
+    enabled: false
+
+    # Poll interval in seconds
+    poll_interval_sec: 5
+
+    # Maximum clipboard content size (in bytes)
+    max_content_bytes: 102400
+
+  # Heuristics for filtering perceived content
+  heuristics:
+    # Minimum content length to consider (characters)
+    min_content_length: 10
+
+    # Maximum content length to consider (characters)
+    max_content_length: 100000
+
+    # Frequency threshold (how many times to see content before encoding)
+    frequency_threshold: 5
+
+    # Frequency window in minutes
+    frequency_window_min: 10
+
+# Encoding Configuration
+encoding:
+  # Enable semantic encoding of memories
+  enabled: true
+
+  # Maximum number of concepts to extract per memory
+  max_concepts: 5
+
+  # Limit for similarity search results
+  find_similar_limit: 5
+
+  # Enable contextual encoding using surrounding memories
+  enable_contextual_encoding: true
+
+  # Number of preceding memories to use for context
+  context_lookback_count: 5
+
+  # Number of semantically similar memories to include as context
+  context_semantic_count: 3
+
+  # Maximum concurrent encoding goroutines (serializes local LLM calls)
+  max_concurrent_encodings: 1
+
+  # Enable LLM-based association type classification (similar → caused_by, part_of, etc.)
+  enable_llm_classification: false
+
+  # Maximum tokens for encoding LLM completions (higher = more room for structured JSON output)
+  completion_max_tokens: 1024
+
+# Consolidation Configuration
+consolidation:
+  # Enable memory consolidation
+  enabled: true
+
+  # Consolidation interval (e.g., "1h", "6h", "24h")
+  interval: "1h"
+
+  # Decay rate for memory strength (0.0-1.0)
+  decay_rate: 0.95
+
+  # Threshold below which memories fade away (0.0-1.0)
+  fade_threshold: 0.3
+
+  # Threshold below which memories are archived (0.0-1.0)
+  archive_threshold: 0.1
+
+  # Retention window before permanent deletion (e.g., "90d", "6w")
+  retention_window: "90d"
+
+  # Maximum memories to process per consolidation cycle
+  max_memories_per_cycle: 100
+
+  # Maximum merge operations per consolidation cycle
+  max_merges_per_cycle: 5
+
+  # Minimum cluster size for merging memories
+  min_cluster_size: 3
+
+# Retrieval Configuration
+retrieval:
+  # Maximum hops in associative retrieval graph
+  max_hops: 3
+
+  # Activation threshold for memory retrieval (0.0-1.0)
+  activation_threshold: 0.1
+
+  # Decay factor for activation spreading (0.0-1.0)
+  decay_factor: 0.7
+
+  # Maximum results to return from retrieval
+  max_results: 7
+
+  # Maximum tool invocations per synthesis
+  max_tool_calls: 5
+
+  # Maximum tokens per synthesis LLM call
+  synthesis_max_tokens: 500
+
+  # Weight of embedding vs FTS in score merge (0.0-1.0; higher = more embedding weight)
+  merge_alpha: 0.6
+
+  # Bonus for memories found by both FTS and embedding search
+  dual_hit_bonus: 0.15
+
+# Metacognition Configuration
+metacognition:
+  # Enable metacognitive reflection
+  enabled: true
+
+  # Reflection interval (e.g., "4h", "24h")
+  interval: "4h"
+
+# Dreaming Configuration (memory replay / REM-like consolidation)
+dreaming:
+  # Enable dreaming agent
+  enabled: true
+
+  # Interval between dream cycles (e.g., "1h", "3h")
+  interval: "1h"
+
+  # Number of memories to replay per cycle
+  batch_size: 20
+
+  # Minimum salience threshold for replay (0.0-1.0)
+  salience_threshold: 0.3
+
+  # Multiplier for association strength during replay (>1.0 = strengthen)
+  association_boost_factor: 1.15
+
+  # Salience threshold below which dead memories get demoted (0.0-1.0)
+  noise_prune_threshold: 0.15
+
+# Episoding Configuration (groups raw events into fixed time-window episodes)
+episoding:
+  # Enable episoding agent
+  enabled: true
+
+  # Fixed episode window size in minutes — events are batched into this window
+  # then synthesized by the LLM when the window closes
+  episode_window_size_min: 10
+
+  # Minimum number of events to synthesize an episode (below this, episode is
+  # closed without LLM synthesis to save resources)
+  min_events_per_episode: 2
+
+# Abstraction Configuration (synthesizes principles and axioms from patterns)
+abstraction:
+  # Enable abstraction agent
+  enabled: true
+
+  # Interval between abstraction cycles (e.g., "2h", "6h")
+  interval: "2h"
+
+  # Minimum pattern strength to consider for principle synthesis (0.0-1.0)
+  # Patterns start at 0.5 — set below that to let fresh patterns qualify
+  min_strength: 0.4
+
+  # Maximum LLM calls per abstraction cycle
+  max_llm_calls: 5
+
+# MCP Server Configuration (Model Context Protocol for AI agents)
+mcp:
+  # Enable MCP server (run with: mnemonic mcp)
+  enabled: true
+
+# Agent SDK Configuration (self-evolving coding assistant)
+agent_sdk:
+  # Enable Agent SDK dashboard integration
+  enabled: true
+
+  # Path to the agent's evolution directory (principles, strategies, changelog)
+  evolution_dir: "/Users/appsprout/Projects/mem/sdk/agent/evolution"
+
+  # Port for the Python WebSocket chat server (default: 9998)
+  web_port: 9998
+
+# Coaching Configuration (Claude teaches the local LLM)
+coaching:
+  # Path to the YAML file Claude writes to improve local LLM prompts.
+  # Both the daemon and MCP server read this file on startup.
+  coaching_file: "~/.mnemonic/coaching.yaml"
+
+# API Server Configuration
+api:
+  # Bind address
+  host: "127.0.0.1"
+
+  # Port number
+  port: 9999
+
+  # Request timeout in seconds
+  request_timeout_sec: 180
+
+# Web UI Configuration
+web:
+  # Enable web UI
+  enabled: true
+
+# Logging Configuration
+logging:
+  # Log level: "debug", "info", "warn", "error"
+  level: "info"
+
+  # Output format: "json" or "text"
+  format: "json"
+
+  # Log file path (leave empty for stdout only)
+  file: "~/.mnemonic/mnemonic.log"

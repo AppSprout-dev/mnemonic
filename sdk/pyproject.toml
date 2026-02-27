@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mnemonic-agent"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "claude-agent-sdk>=0.1.42",
+    "pyyaml>=6.0",
+    "starlette>=0.52.0",
+    "uvicorn>=0.41.0",
+    "websockets>=15.0",
+]
+
+[project.scripts]
+mnemonic-agent = "agent.main:cli"
+mnemonic-agent-web = "agent.web:main"
+
+[tool.setuptools.packages.find]
+where = ["."]

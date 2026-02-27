@@ -1,0 +1,26 @@
+# Compiled binaries
+mnemonic
+bin/
+benchmark
+
+# Databases
+*.db
+
+# macOS
+.DS_Store
+
+# Python
+sdk/.venv/
+sdk/mnemonic_agent.egg-info/
+__pycache__/
+*.pyc
+
+# Presentation
+Mnemonic_Pitch.pptx
+
+# SDK local data
+sdk/agent/evolution/conversations/
+sdk/agent/evolution/sessions.json
+
+# IDE / local config
+.claude/

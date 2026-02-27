@@ -1,0 +1,165 @@
+# Task strategies — the agent modifies this file based on experience.
+# Each strategy describes how to approach a type of task effectively.
+#
+# Schema:
+#   task_type:
+#     steps: [ordered list of approach steps]
+#     tips: [optional tips learned from experience]
+#     learned_from: description of how this was refined
+strategies:
+  daemon_startup:
+    steps:
+      - "Check if daemon is already running (ps, pidfile)"
+      - "Examine config files for correct paths and settings"
+      - "Check Makefile for build requirements and flags"
+      - "Rebuild if binary is missing build tags or outdated"
+      - "Start daemon using proper command (check Makefile targets)"
+      - "Verify health via logs, API endpoint, or status command"
+    tips:
+      - "Database errors may indicate binary missing compile-time features (e.g., FTS5 needs build tags)"
+      - "Makefiles often have 'start', 'stop', 'status' targets - use them instead of manual commands"
+    learned_from: "Started mnemonic daemon after discovering FTS5 required sqlite_fts5 build tag"
+
+  memory_analysis:
+    steps:
+      - "Call recall_project, recall, and get_patterns in parallel for comprehensive view"
+      - "Call get_insights and status for complete picture"
+      - "Compare project-scoped vs system-wide counts to understand context"
+      - "Identify repeated abstractions (same text, same confidence) as priority patterns"
+      - "Review system warnings for actionable issues"
+      - "Synthesize into categories: architecture, principles, health, actionable insights"
+    tips:
+      - "Multiple identical abstractions indicate strongly reinforced patterns - prioritize these"
+      - "Project recalls may show 0 while system has hundreds - check both scopes"
+      - "System warnings (source_balance, quality_audit) indicate specific issues to address"
+      - "For 'what changed recently / since last chat' questions, use recall_timeline (chronological, hours_back param) — NOT semantic recall. Semantic recall is for knowledge retrieval, not temporal change-detection."
+      - "Audit abstractions separately: healthy = ~8-10 active L2, 2-3 active L3. More = dedup bug firing. Check with: SELECT COUNT(*), state FROM abstractions GROUP BY state, level"
+    learned_from: "Analyzed mnemonic memories/patterns and discovered scope distinction between project and system-wide contexts. Abstraction audit found 27 active L2s (should be ~8-10) due to ListAbstractions limit=20 bug"
+
+  system_verification:
+    steps:
+      - "Check process status (is daemon/service running?)"
+      - "Query database state (check PRAGMA table_info first for schema, then count records)"
+      - "Review recent logs for active operations (look for timestamps, new IDs)"
+      - "Verify configuration (which components are enabled?)"
+      - "Check processing queues (unprocessed counts show active work)"
+      - "Measure growth over time (compare before/after counts to prove activity)"
+    tips:
+      - "Process running ≠ working - check data flow, logs, and queue processing"
+      - "Always verify database schema with PRAGMA table_info before assuming column names"
+      - "Growth metrics prove autonomy: X→Y memories in N minutes shows active ingestion"
+      - "Multi-source evidence prevents false confidence from single indicators"
+    learned_from: "Verified mnemonic system: found 311 unprocessed queue, 10 new memories in 10 min, real-time log activity - multiple layers proved full autonomy"
+
+  codebase_audit:
+    steps:
+      - "Read evolution files first (principles, strategies) to avoid re-discovering known patterns"
+      - "Call mcp__mnemonic__status and get_insights to surface active health warnings"
+      - "Delegate deep exploration to the Explore subagent — returns structured analysis without bloating context"
+      - "Cross-reference system health warnings with code-level findings for a complete picture"
+      - "Organize output by: architecture strengths, test gaps, error handling, code quality, quick wins vs. deeper work"
+      - "End with a priority table (severity × effort) to make findings actionable"
+    tips:
+      - "System health warnings (source_balance, quality_audit, recall_effectiveness) are often the highest-signal findings"
+      - "Combine internal health (mnemonic tools) with external code analysis (Explore subagent) — neither alone is complete"
+      - "get_insights duplicate abstractions = consolidation/deduplication bug in the daemon, not a reflection of genuine variety"
+    learned_from: "Analyzed mnemonic SDK for improvements; Explore subagent returned comprehensive structured audit; health warnings from get_insights revealed daemon-level bugs"
+
+  code_improvement:
+    steps:
+      - "Read ALL files to be modified before touching any of them — full context upfront"
+      - "Use TodoWrite to list each change as a discrete task"
+      - "Implement smallest/safest changes first (imports, constants, error handling)"
+      - "Implement larger changes next (new logic, tests)"
+      - "Run tests once at the end to validate all changes together"
+    tips:
+      - "Reading all files first eliminates backtracking — changes are consistent on the first pass"
+      - "Write test helper functions at module level (not inside test methods) to reduce boilerplate"
+      - "Keep user-facing print() calls as-is; only convert diagnostic/internal prints to logging"
+      - "Mark todos complete immediately after each file edit, not in batches"
+    learned_from: "Implemented logging, session rotation, and 12 new tests across 4 files — all 22 tests passed first run with no debugging"
+
+  debugging:
+    steps:
+      - "Read the full error message carefully — identify the exact failing component and error type"
+      - "Check the Makefile first for build flags and requirements (see principle p1)"
+      - "Check logs if available (daemon logs, test output, stack traces) — look for the root cause, not just the symptom"
+      - "Form a specific hypothesis about root cause before investigating further"
+      - "Verify hypothesis with minimal investigation — don't over-explore before testing your theory"
+      - "Fix the root cause, not the symptom — avoid adding try/catch for errors that shouldn't happen"
+      - "Run tests or reproduce the original error to confirm the fix worked"
+    tips:
+      - "Single-symptom diagnosis often misses cascading causes — look for related errors nearby"
+      - "If the error is a compilation/build issue, check Makefile build tags before editing code"
+      - "Database schema errors often mean a mismatch — use PRAGMA table_info to verify actual columns"
+      - "If the same fix fails twice, you have the wrong hypothesis — re-read the error from scratch"
+      - "When a fix is correct but has no effect, check if ALL processes using the binary were restarted — multi-mode binaries (daemon vs mcp subcommand) are independent processes"
+      - "To test async pipeline fixes without waiting for a queue: insert test data directly into the DB, bypassing the event path, so only the specific process you want handles it"
+      - "For multi-process pipelines: map the actual data flow path EARLY (which process handles which stage?) before reading any code — saves turns wasted verifying correct code in the wrong process"
+    learned_from: "FTS5 SQLite error resolved by checking Makefile. Project scope fix: spent many turns verifying correct code before discovering MCP server has its own encoder — daemon fix was irrelevant to MCP memories"
+
+  new_feature:
+    steps:
+      - "Read ALL files that will be touched before modifying any — understand the full context first"
+      - "Check existing patterns: how does similar functionality already work in this codebase?"
+      - "Verify no existing file/function already does this before creating anything new (see principle p6)"
+      - "Use TodoWrite to list each discrete change across files"
+      - "Implement in layers: types/interfaces/signatures first, logic second, tests third"
+      - "Run existing tests before and after changes — confirm baseline passes, then confirm new tests pass"
+    tips:
+      - "New code should look like it belongs — match existing style, naming, error handling patterns"
+      - "Prefer editing existing files over creating new ones — avoid unnecessary file proliferation"
+      - "Tests should be added alongside the feature, not as an afterthought"
+      - "If the feature touches infrastructure files (main.py, session.py, etc.), confirm with user first"
+    learned_from: "Multiple feature implementations — pattern consistently shows upfront reading eliminates backtracking and first-pass changes are coherent when full context is known"
+
+  system_review:
+    steps:
+      - "Call mcp__mnemonic__status — read health observations (critical/warning entries are the highest signal)"
+      - "Call mcp__mnemonic__get_insights — check abstraction count/quality and any flagged observations"
+      - "Call mcp__mnemonic__recall_project — surface known issues and recent project-scoped insights"
+      - "Read evolution files (principles, strategies, changelog) — identify gaps vs. current state"
+      - "Synthesize into three buckets: infrastructure bugs, agent behavior gaps, what's working well"
+      - "Prioritize by: severity × how long it's been unfixed × effort to fix"
+    tips:
+      - "Do NOT use semantic recall for this — 'areas for improvement' retrieves filesystem noise, not useful signals"
+      - "Health observation recurrence = unresolved systemic issue (e.g., quality_audit critical for 3 sessions = still broken)"
+      - "Evolution files show what gaps were KNOWN but not yet fixed — these are the highest-value targets"
+      - "Duplicate abstractions in get_insights = dedup bug, not genuine variety — don't treat them as separate insights"
+    learned_from: "Answered 'do you see any areas for improvement?' — semantic recall returned file-modification memories; real answer came from status+get_insights+evolution files. Codified the pattern."
+
+  encoding_audit:
+    steps:
+      - "Call mcp__mnemonic__audit_encodings with limit=5 (not 20 — 20 hits token cap) to review recent raw→encoded pairs"
+      - "Query DB directly for systematic failures: SELECT COUNT(*) FROM memories WHERE concepts LIKE '%concept1%'"
+      - "Also check for template echo: SELECT summary FROM memories WHERE summary LIKE '%compressed version%' OR summary LIKE '%1-2 sentences%'"
+      - "Quantify both failure modes (placeholder concepts, template leakage) with hard counts"
+      - "Check if coaching.yaml already exists (cat ~/.mnemonic/coaching.yaml) before writing — instructions must be cumulative"
+      - "Write coaching YAML via mcp__mnemonic__coach_local_llm with 5 specific RULES + bad/good examples for each failure mode"
+      - "Rebuild and restart daemon (make restart in mem project) to apply coaching"
+      - "Log in changelog.md with audit findings and specific counts"
+    tips:
+      - "audit_encodings shows only RECENT pairs — if failures are older, they won't appear. DB queries are the reliable way to find systematic failures."
+      - "limit=5 is the safe ceiling for audit_encodings — limit=20 exceeded 99k token cap and failed"
+      - "Coaching instructions are CUMULATIVE — always read existing coaching.yaml before writing, then keep all prior rules plus new ones"
+      - "MCP server has its own encoding agent — coaching takes effect for daemon immediately but MCP server needs a session restart to pick up new binary"
+      - "The three most common Qwen3-8B failure modes: (1) concept1/concept2 placeholders, (2) template echo in summary, (3) meta-commentary about the encoding task"
+      - "Post-coaching verification: use timestamps, not raw counts. Always filter by state='active' AND check that failing memories predate coaching application. A count increase (e.g. 9→15) may just be archived memories — the timestamp check is definitive."
+    learned_from: "Audited 41+ placeholder-concept memories and 9+ template-echo active memories. Direct DB queries found what audit_encodings missed (recent pairs were fine). Wrote first coaching.yaml with 5 rules and concrete examples."
+
+  self_improvement:
+    steps:
+      - "Read evolution files first (principles, strategies, prompt_patches, changelog) — understand current state before identifying gaps"
+      - "Call recall_project, recall, and get_patterns in parallel for additional context"
+      - "Survey project structure if MEMORY.md is absent or stale (read key files to refresh context)"
+      - "Identify gaps systematically: missing MEMORY.md, missing strategies for common task types, thin principles, behavioral patterns not yet codified"
+      - "Prioritize by leverage: MEMORY.md > principles/strategies that cover frequent tasks > niche improvements"
+      - "Execute changes in order: MEMORY.md first, then principles, then strategies, then prompt_patches"
+      - "Update changelog last, after all other changes are complete"
+      - "Store 1-2 key learnings in mcp__mnemonic__remember with project scope"
+    tips:
+      - "Only add principles with real evidence — speculation at 0.5 confidence or below is not worth the noise"
+      - "MEMORY.md should stay under 150 lines — it gets truncated at 200; compact, factual, and structured beats verbose"
+      - "A missing MEMORY.md is always the highest-leverage fix — it affects every future session"
+      - "After making changes, verify MEMORY.md reflects the updated state (stale counts/lists cause confusion)"
+    learned_from: "Free-form self-improvement session — surveyed all evolution files, identified MEMORY.md as critical missing piece, added 3 principles, 2 strategies, and 1 prompt patch in systematic order"
