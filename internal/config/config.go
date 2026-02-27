@@ -231,7 +231,14 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("expanding config path: %w", err)
 	}
 
-	data, err := os.ReadFile(expanded)
+	// Resolve to absolute so relative paths in config resolve against config dir
+	absPath, err := filepath.Abs(expanded)
+	if err != nil {
+		return nil, fmt.Errorf("resolving config path: %w", err)
+	}
+	configDir := filepath.Dir(absPath)
+
+	data, err := os.ReadFile(absPath)
 	if err != nil {
 		return nil, fmt.Errorf("reading config file: %w", err)
 	}
@@ -241,8 +248,8 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("parsing config YAML: %w", err)
 	}
 
-	// Expand paths and parse durations
-	if err := cfg.process(); err != nil {
+	// Expand paths and parse durations; configDir used to resolve relative paths
+	if err := cfg.process(configDir); err != nil {
 		return nil, err
 	}
 
@@ -410,18 +417,19 @@ func Default() *Config {
 }
 
 // process expands paths and parses duration strings.
-func (c *Config) process() error {
+// configDir is the directory containing the config file, used to resolve relative paths.
+func (c *Config) process(configDir string) error {
 	var err error
 
 	// Expand Store paths
-	c.Store.DBPath, err = expandPath(c.Store.DBPath)
+	c.Store.DBPath, err = resolvePath(c.Store.DBPath, configDir)
 	if err != nil {
 		return fmt.Errorf("expanding store.db_path: %w", err)
 	}
 
 	// Expand Perception Filesystem watch dirs
 	for i, dir := range c.Perception.Filesystem.WatchDirs {
-		expanded, err := expandPath(dir)
+		expanded, err := resolvePath(dir, configDir)
 		if err != nil {
 			return fmt.Errorf("expanding perception.filesystem.watch_dirs[%d]: %w", i, err)
 		}
@@ -429,7 +437,7 @@ func (c *Config) process() error {
 	}
 
 	// Expand Logging file path
-	c.Logging.File, err = expandPath(c.Logging.File)
+	c.Logging.File, err = resolvePath(c.Logging.File, configDir)
 	if err != nil {
 		return fmt.Errorf("expanding logging.file: %w", err)
 	}
@@ -486,7 +494,7 @@ func (c *Config) process() error {
 
 	// Expand AgentSDK evolution dir
 	if c.AgentSDK.EvolutionDir != "" {
-		c.AgentSDK.EvolutionDir, err = expandPath(c.AgentSDK.EvolutionDir)
+		c.AgentSDK.EvolutionDir, err = resolvePath(c.AgentSDK.EvolutionDir, configDir)
 		if err != nil {
 			return fmt.Errorf("expanding agent_sdk.evolution_dir: %w", err)
 		}
@@ -494,7 +502,7 @@ func (c *Config) process() error {
 
 	// Expand Coaching file path
 	if c.Coaching.CoachingFile != "" {
-		c.Coaching.CoachingFile, err = expandPath(c.Coaching.CoachingFile)
+		c.Coaching.CoachingFile, err = resolvePath(c.Coaching.CoachingFile, configDir)
 		if err != nil {
 			return fmt.Errorf("expanding coaching.coaching_file: %w", err)
 		}
@@ -582,6 +590,19 @@ func expandPath(path string) (string, error) {
 		return filepath.Join(home, path[2:]), nil
 	}
 
+	return path, nil
+}
+
+// resolvePath expands ~ to the user's home directory, and resolves relative
+// paths against configDir (the directory containing the config file).
+// Absolute paths are returned as-is.
+func resolvePath(path, configDir string) (string, error) {
+	if strings.HasPrefix(path, "~") {
+		return expandPath(path)
+	}
+	if !filepath.IsAbs(path) {
+		return filepath.Join(configDir, path), nil
+	}
 	return path, nil
 }
 
