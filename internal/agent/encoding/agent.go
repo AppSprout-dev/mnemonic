@@ -34,7 +34,6 @@ type EncodingAgent struct {
 	cancel             context.CancelFunc
 	wg                 sync.WaitGroup
 	subscriptionID     string
-	pollingTicker      *time.Ticker
 	pollingStopChan    chan struct{}
 	stopOnce           sync.Once
 	processingMutex    sync.Mutex
@@ -466,9 +465,8 @@ func (ea *EncodingAgent) encodeMemory(ctx context.Context, rawID string) error {
 	ea.log.Debug("compression completed", "raw_id", raw.ID, "summary_length", len(compression.Summary))
 
 	// Step 3: Generate embedding (truncate to avoid exceeding model context)
-	embedding := []float32{}
 	embeddingText := truncateContent(compression.Summary+" "+compression.Content, maxEmbeddingChars)
-	embedding, err = ea.llmProvider.Embed(ctx, embeddingText)
+	embedding, err := ea.llmProvider.Embed(ctx, embeddingText)
 	if err != nil {
 		ea.log.Warn("failed to generate embedding", "raw_id", raw.ID, "error", err)
 		// Continue without embedding; it's optional

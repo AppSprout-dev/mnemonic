@@ -501,7 +501,7 @@ func TestEventBufferFull(t *testing.T) {
 	// Publish multiple events to fill the buffer
 	// First one will block in the handler
 	go func() {
-		bus.Publish(context.Background(), event)
+		_ = bus.Publish(context.Background(), event)
 	}()
 
 	time.Sleep(50 * time.Millisecond)

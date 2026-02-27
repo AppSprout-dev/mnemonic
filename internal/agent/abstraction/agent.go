@@ -228,7 +228,7 @@ func (aa *AbstractionAgent) synthesizePrinciples(ctx context.Context, report *Cy
 		llmBudget--
 
 		if aa.bus != nil {
-			aa.bus.Publish(ctx, events.AbstractionCreated{
+			_ = aa.bus.Publish(ctx, events.AbstractionCreated{
 				AbstractionID: principle.ID,
 				Level:         2,
 				Title:         principle.Title,
@@ -305,7 +305,7 @@ func (aa *AbstractionAgent) synthesizeAxioms(ctx context.Context, report *CycleR
 		llmBudget--
 
 		if aa.bus != nil {
-			aa.bus.Publish(ctx, events.AbstractionCreated{
+			_ = aa.bus.Publish(ctx, events.AbstractionCreated{
 				AbstractionID: axiom.ID,
 				Level:         3,
 				Title:         axiom.Title,

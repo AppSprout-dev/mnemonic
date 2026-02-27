@@ -118,7 +118,9 @@ func HandleFeedback(s store.Store, log *slog.Logger) http.HandlerFunc {
 				if newSalience > 1.0 {
 					newSalience = 1.0
 				}
-				s.UpdateSalience(ctx, memID, newSalience)
+				if err := s.UpdateSalience(ctx, memID, newSalience); err != nil {
+					log.Warn("failed to update salience", "memory_id", memID, "error", err)
+				}
 			}
 
 		case "irrelevant":

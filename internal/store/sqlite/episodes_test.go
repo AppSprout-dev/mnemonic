@@ -72,7 +72,9 @@ func TestUpdateEpisode(t *testing.T) {
 		UpdatedAt:    time.Now(),
 	}
 
-	s.CreateEpisode(ctx, ep)
+	if err := s.CreateEpisode(ctx, ep); err != nil {
+		t.Fatalf("CreateEpisode failed: %v", err)
+	}
 
 	ep.Title = "Updated Title"
 	ep.Summary = "Updated summary"
@@ -110,7 +112,9 @@ func TestListEpisodes(t *testing.T) {
 		if i == 0 {
 			ep.State = "open"
 		}
-		s.CreateEpisode(ctx, ep)
+		if err := s.CreateEpisode(ctx, ep); err != nil {
+			t.Fatalf("CreateEpisode failed: %v", err)
+		}
 	}
 
 	// List all
@@ -147,7 +151,9 @@ func TestGetOpenEpisode(t *testing.T) {
 		CreatedAt:    time.Now(),
 		UpdatedAt:    time.Now(),
 	}
-	s.CreateEpisode(ctx, ep)
+	if err := s.CreateEpisode(ctx, ep); err != nil {
+		t.Fatalf("CreateEpisode failed: %v", err)
+	}
 
 	got, err := s.GetOpenEpisode(ctx)
 	if err != nil {
@@ -173,7 +179,9 @@ func TestCloseEpisode(t *testing.T) {
 		CreatedAt:    time.Now(),
 		UpdatedAt:    time.Now(),
 	}
-	s.CreateEpisode(ctx, ep)
+	if err := s.CreateEpisode(ctx, ep); err != nil {
+		t.Fatalf("CreateEpisode failed: %v", err)
+	}
 
 	err := s.CloseEpisode(ctx, "ep-close")
 	if err != nil {

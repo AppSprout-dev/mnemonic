@@ -286,7 +286,7 @@ func HandleGetMemory(s store.Store, log *slog.Logger) http.HandlerFunc {
 func writeError(w http.ResponseWriter, statusCode int, message string, code string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"error": message,
 		"code":  code,
 	})
@@ -296,5 +296,5 @@ func writeError(w http.ResponseWriter, statusCode int, message string, code stri
 func writeJSON(w http.ResponseWriter, statusCode int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(data)
+	_ = json.NewEncoder(w).Encode(data)
 }

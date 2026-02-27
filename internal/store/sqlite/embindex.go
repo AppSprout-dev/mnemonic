@@ -153,7 +153,7 @@ func (idx *embeddingIndex) Search(query []float32, k int) []searchResult {
 
 	out := make([]searchResult, len(results))
 	for i, r := range results {
-		out[i] = searchResult{id: r.id, score: r.score}
+		out[i] = searchResult(r)
 	}
 	return out
 }

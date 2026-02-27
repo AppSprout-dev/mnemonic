@@ -489,7 +489,9 @@ func TestEngine_ChainFires(t *testing.T) {
 	}
 
 	// Publish event — sync bus means it's handled immediately
-	bus.Publish(context.Background(), events.MetaCycleCompleted{Ts: time.Now()})
+	if err := bus.Publish(context.Background(), events.MetaCycleCompleted{Ts: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
 
 	if !fired {
 		t.Error("expected chain to fire")
@@ -521,12 +523,18 @@ func TestEngine_CooldownPreventsRefire(t *testing.T) {
 		Enabled:  true,
 	})
 
-	engine.Start(context.Background(), bus)
+	if err := engine.Start(context.Background(), bus); err != nil {
+		t.Fatal(err)
+	}
 
 	// First publish — should fire
-	bus.Publish(context.Background(), events.MetaCycleCompleted{Ts: time.Now()})
+	if err := bus.Publish(context.Background(), events.MetaCycleCompleted{Ts: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
 	// Second publish — should be blocked by cooldown
-	bus.Publish(context.Background(), events.MetaCycleCompleted{Ts: time.Now()})
+	if err := bus.Publish(context.Background(), events.MetaCycleCompleted{Ts: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
 
 	if fireCount != 1 {
 		t.Errorf("expected chain to fire exactly once (cooldown), got %d", fireCount)
@@ -570,8 +578,12 @@ func TestEngine_PriorityOrdering(t *testing.T) {
 		Enabled:  true,
 	})
 
-	engine.Start(context.Background(), bus)
-	bus.Publish(context.Background(), events.MetaCycleCompleted{Ts: time.Now()})
+	if err := engine.Start(context.Background(), bus); err != nil {
+		t.Fatal(err)
+	}
+	if err := bus.Publish(context.Background(), events.MetaCycleCompleted{Ts: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
 
 	if len(order) != 2 {
 		t.Fatalf("expected 2 chains to fire, got %d", len(order))
@@ -604,8 +616,12 @@ func TestEngine_DisabledChain(t *testing.T) {
 		Enabled:  false,
 	})
 
-	engine.Start(context.Background(), bus)
-	bus.Publish(context.Background(), events.MetaCycleCompleted{Ts: time.Now()})
+	if err := engine.Start(context.Background(), bus); err != nil {
+		t.Fatal(err)
+	}
+	if err := bus.Publish(context.Background(), events.MetaCycleCompleted{Ts: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
 
 	if fired {
 		t.Error("expected disabled chain to NOT fire")
@@ -644,8 +660,12 @@ func TestEngine_ConditionBlocking(t *testing.T) {
 		Enabled:  true,
 	})
 
-	engine.Start(context.Background(), bus)
-	bus.Publish(context.Background(), events.MetaCycleCompleted{Ts: time.Now()})
+	if err := engine.Start(context.Background(), bus); err != nil {
+		t.Fatal(err)
+	}
+	if err := bus.Publish(context.Background(), events.MetaCycleCompleted{Ts: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
 
 	if fired {
 		t.Error("expected chain to NOT fire when observation severity is below threshold")
@@ -707,13 +727,17 @@ func TestEngine_FullConsolidationChain(t *testing.T) {
 		Enabled:  true,
 	})
 
-	engine.Start(context.Background(), bus)
+	if err := engine.Start(context.Background(), bus); err != nil {
+		t.Fatal(err)
+	}
 
 	// Trigger the chain
-	bus.Publish(context.Background(), events.MetaCycleCompleted{
+	if err := bus.Publish(context.Background(), events.MetaCycleCompleted{
 		ObservationsLogged: 3,
 		Ts:                 time.Now(),
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	// The sync bus should have cascaded: MetaCycleCompleted → ConsolidationStarted → triggerCh
 	select {
@@ -796,13 +820,17 @@ func TestMetaOnConsolidationCompletedChain(t *testing.T) {
 		Enabled:  true,
 	})
 
-	engine.Start(context.Background(), bus)
+	if err := engine.Start(context.Background(), bus); err != nil {
+		t.Fatal(err)
+	}
 
-	bus.Publish(context.Background(), events.ConsolidationCompleted{
+	if err := bus.Publish(context.Background(), events.ConsolidationCompleted{
 		DurationMs:        1000,
 		MemoriesProcessed: 10,
 		Ts:                time.Now(),
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	select {
 	case <-metaTrigger:
@@ -843,14 +871,18 @@ func TestDreamingOnEpisodeClosedChain(t *testing.T) {
 		Enabled:  true,
 	})
 
-	engine.Start(context.Background(), bus)
+	if err := engine.Start(context.Background(), bus); err != nil {
+		t.Fatal(err)
+	}
 
-	bus.Publish(context.Background(), events.EpisodeClosed{
+	if err := bus.Publish(context.Background(), events.EpisodeClosed{
 		EpisodeID:  "ep-123",
 		Title:      "Test Episode",
 		EventCount: 5,
 		Ts:         time.Now(),
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	select {
 	case <-dreamTrigger:

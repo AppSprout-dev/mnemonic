@@ -156,7 +156,7 @@ func (ma *MetacognitionAgent) runCycle(ctx context.Context) (*CycleReport, error
 	actionsPerformed := ma.actOnObservations(ctx, observations) + feedbackActions
 
 	if ma.bus != nil {
-		ma.bus.Publish(ctx, events.MetaCycleCompleted{
+		_ = ma.bus.Publish(ctx, events.MetaCycleCompleted{
 			ObservationsLogged: len(observations),
 			Ts:                 time.Now(),
 		})
@@ -505,7 +505,9 @@ func (ma *MetacognitionAgent) actOnQualityIssues(ctx context.Context, obs store.
 			},
 			CreatedAt: time.Now(),
 		}
-		ma.store.WriteMetaObservation(ctx, action)
+		if err := ma.store.WriteMetaObservation(ctx, action); err != nil {
+			ma.log.Warn("failed to write meta observation", "error", err)
+		}
 	}
 
 	return reembedded
@@ -520,7 +522,7 @@ func (ma *MetacognitionAgent) actOnStaleConsolidation(ctx context.Context, obs s
 	ma.log.Warn("consolidation is stale, publishing system health warning")
 
 	if ma.bus != nil {
-		ma.bus.Publish(ctx, events.SystemHealth{
+		_ = ma.bus.Publish(ctx, events.SystemHealth{
 			LLMAvailable: true,
 			StoreHealthy: true,
 			Ts:           time.Now(),
@@ -553,7 +555,9 @@ func (ma *MetacognitionAgent) actOnPoorRetrieval(ctx context.Context, obs store.
 		},
 		CreatedAt: time.Now(),
 	}
-	ma.store.WriteMetaObservation(ctx, action)
+	if err := ma.store.WriteMetaObservation(ctx, action); err != nil {
+		ma.log.Warn("failed to write meta observation", "error", err)
+	}
 
 	return 1
 }
@@ -636,7 +640,9 @@ func (ma *MetacognitionAgent) reinforceMemories(ctx context.Context, memoryIDs [
 				newStrength = 1.0
 			}
 			if newStrength != assoc.Strength {
-				ma.store.UpdateAssociationStrength(ctx, assoc.SourceID, assoc.TargetID, newStrength)
+				if err := ma.store.UpdateAssociationStrength(ctx, assoc.SourceID, assoc.TargetID, newStrength); err != nil {
+					ma.log.Warn("failed to update association strength", "source", assoc.SourceID, "target", assoc.TargetID, "error", err)
+				}
 			}
 		}
 	}
@@ -676,7 +682,9 @@ func (ma *MetacognitionAgent) weakenMemories(ctx context.Context, memoryIDs []st
 				newStrength = 0.05
 			}
 			if newStrength != assoc.Strength {
-				ma.store.UpdateAssociationStrength(ctx, assoc.SourceID, assoc.TargetID, newStrength)
+				if err := ma.store.UpdateAssociationStrength(ctx, assoc.SourceID, assoc.TargetID, newStrength); err != nil {
+					ma.log.Warn("failed to update association strength", "source", assoc.SourceID, "target", assoc.TargetID, "error", err)
+				}
 			}
 		}
 	}

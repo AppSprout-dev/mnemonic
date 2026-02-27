@@ -224,12 +224,6 @@ CREATE INDEX IF NOT EXISTS idx_abstraction_state ON abstractions(state);
 CREATE INDEX IF NOT EXISTS idx_abstraction_confidence ON abstractions(confidence);
 `
 
-const pragmaStatements = `
-PRAGMA journal_mode=WAL;
-PRAGMA foreign_keys=ON;
-PRAGMA busy_timeout=5000;
-`
-
 // InitSchema initializes the SQLite database schema by creating all tables,
 // indexes, and triggers if they don't already exist. It also configures
 // important PRAGMA settings for performance and safety.
@@ -269,7 +263,9 @@ func InitSchema(db *sql.DB) error {
 			return fmt.Errorf("failed to add episode_id column: %w", err)
 		}
 	}
-	db.Exec(`CREATE INDEX IF NOT EXISTS idx_memory_episode ON memories(episode_id)`)
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_memory_episode ON memories(episode_id)`); err != nil {
+		return fmt.Errorf("failed to create idx_memory_episode index: %w", err)
+	}
 
 	// Migration 003: Add concepts, files_modified, and event_timeline to episodes
 	migration003Columns := []struct {
@@ -310,10 +306,18 @@ func InitSchema(db *sql.DB) error {
 			return fmt.Errorf("failed to add %s.%s column: %w", col.table, col.column, err)
 		}
 	}
-	db.Exec(`CREATE INDEX IF NOT EXISTS idx_memory_project ON memories(project)`)
-	db.Exec(`CREATE INDEX IF NOT EXISTS idx_memory_session ON memories(session_id)`)
-	db.Exec(`CREATE INDEX IF NOT EXISTS idx_raw_project ON raw_memories(project)`)
-	db.Exec(`CREATE INDEX IF NOT EXISTS idx_episode_project ON episodes(project)`)
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_memory_project ON memories(project)`); err != nil {
+		return fmt.Errorf("failed to create idx_memory_project index: %w", err)
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_memory_session ON memories(session_id)`); err != nil {
+		return fmt.Errorf("failed to create idx_memory_session index: %w", err)
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_raw_project ON raw_memories(project)`); err != nil {
+		return fmt.Errorf("failed to create idx_raw_project index: %w", err)
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_episode_project ON episodes(project)`); err != nil {
+		return fmt.Errorf("failed to create idx_episode_project index: %w", err)
+	}
 
 	return nil
 }

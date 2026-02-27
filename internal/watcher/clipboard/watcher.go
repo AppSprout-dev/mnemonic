@@ -255,7 +255,7 @@ func (cw *ClipboardWatcher) checkForClipboardChange() {
 // hashContent computes a hash of the content.
 func (cw *ClipboardWatcher) hashContent(content string) string {
 	h := md5.New()
-	io.WriteString(h, content)
+	_, _ = io.WriteString(h, content)
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 

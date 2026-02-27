@@ -116,9 +116,9 @@ func HandleWebSocket(bus events.Bus, log *slog.Logger) http.HandlerFunc {
 		log.Debug("websocket subscribed to all event types", "subscription_count", len(wsConn.subscriptionIDs))
 
 		// Set up ping/pong to keep connection alive and detect disconnection
-		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 		conn.SetPongHandler(func(string) error {
-			conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+			_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 			return nil
 		})
 
@@ -135,7 +135,7 @@ func HandleWebSocket(bus events.Bus, log *slog.Logger) http.HandlerFunc {
 					return
 				}
 				// Reset read deadline on each message to keep connection alive
-				conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+				_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 			}
 		}()
 

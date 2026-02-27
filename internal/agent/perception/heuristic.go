@@ -329,7 +329,7 @@ func (h *HeuristicFilter) evaluateClipboard(content string) (float32, string) {
 
 	// Skip if content looks like just a URL
 	if (strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://")) &&
-		strings.IndexAny(trimmed, " \t\n") == -1 {
+		!strings.ContainsAny(trimmed, " \t\n") {
 		return 0.0, "clipboard: URL-only content"
 	}
 

@@ -205,16 +205,6 @@ type openAIEmbeddingResponse struct {
 	Data []openAIEmbeddingData `json:"data"`
 }
 
-// openAIModelData represents a single model in the models list response.
-type openAIModelData struct {
-	ID string `json:"id"`
-}
-
-// openAIModelsResponse is the response format from the OpenAI-compatible models API.
-type openAIModelsResponse struct {
-	Data []openAIModelData `json:"data"`
-}
-
 // stringPtr returns a pointer to a string value.
 func stringPtr(s string) *string { return &s }
 

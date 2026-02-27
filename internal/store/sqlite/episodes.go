@@ -179,7 +179,7 @@ func scanEpisode(row *sql.Row) (store.Episode, error) {
 	ep.Concepts, _ = decodeStringSlice(conceptsStr.String)
 	ep.FilesModified, _ = decodeStringSlice(filesStr.String)
 	if timelineStr.Valid && timelineStr.String != "" {
-		json.Unmarshal([]byte(timelineStr.String), &ep.EventTimeline)
+		_ = json.Unmarshal([]byte(timelineStr.String), &ep.EventTimeline)
 	}
 
 	return ep, nil
@@ -218,7 +218,7 @@ func scanEpisodeRow(rows *sql.Rows) (store.Episode, error) {
 	ep.Concepts, _ = decodeStringSlice(conceptsStr.String)
 	ep.FilesModified, _ = decodeStringSlice(filesStr.String)
 	if timelineStr.Valid && timelineStr.String != "" {
-		json.Unmarshal([]byte(timelineStr.String), &ep.EventTimeline)
+		_ = json.Unmarshal([]byte(timelineStr.String), &ep.EventTimeline)
 	}
 
 	return ep, nil

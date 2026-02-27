@@ -138,12 +138,12 @@ func (rw *rotatingWriter) rotate() error {
 		if i == rw.maxBackups {
 			os.Remove(src)
 		} else {
-			os.Rename(src, dst)
+			_ = os.Rename(src, dst)
 		}
 	}
 
 	// Rename current file to .1
-	os.Rename(rw.path, rw.path+".1")
+	_ = os.Rename(rw.path, rw.path+".1")
 
 	// Open a new file
 	f, err := os.OpenFile(rw.path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)

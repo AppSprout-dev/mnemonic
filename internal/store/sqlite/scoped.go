@@ -117,10 +117,6 @@ func (s *SQLiteStore) GetProjectSummary(ctx context.Context, project string) (ma
 			}
 		}
 		// Get top 10 concepts
-		type conceptCount struct {
-			concept string
-			count   int
-		}
 		var topConcepts []string
 		for concept := range conceptCounts {
 			topConcepts = append(topConcepts, concept)

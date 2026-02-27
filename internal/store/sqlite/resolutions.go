@@ -92,10 +92,10 @@ func (s *SQLiteStore) GetConceptSet(ctx context.Context, memoryID string) (store
 		return cs, fmt.Errorf("failed to get concept set: %w", err)
 	}
 
-	json.Unmarshal([]byte(topicsStr), &cs.Topics)
-	json.Unmarshal([]byte(entitiesStr), &cs.Entities)
-	json.Unmarshal([]byte(actionsStr), &cs.Actions)
-	json.Unmarshal([]byte(causalityStr), &cs.Causality)
+	_ = json.Unmarshal([]byte(topicsStr), &cs.Topics)
+	_ = json.Unmarshal([]byte(entitiesStr), &cs.Entities)
+	_ = json.Unmarshal([]byte(actionsStr), &cs.Actions)
+	_ = json.Unmarshal([]byte(causalityStr), &cs.Causality)
 	cs.Significance = significance.String
 	cs.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
 

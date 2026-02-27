@@ -165,7 +165,7 @@ func (o *Orchestrator) runMonitorCycle(ctx context.Context) {
 		healthy := o.llmHealthy
 		o.mu.Unlock()
 
-		o.bus.Publish(ctx, events.SystemHealth{
+		_ = o.bus.Publish(ctx, events.SystemHealth{
 			LLMAvailable: healthy,
 			StoreHealthy: true,
 			MemoryCount:  memCount,
@@ -397,7 +397,10 @@ func (o *Orchestrator) writeHealthReport() {
 	}
 
 	dir := filepath.Dir(o.config.HealthReportPath)
-	os.MkdirAll(dir, 0755)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		o.log.Warn("failed to create health report directory", "path", dir, "error", err)
+		return
+	}
 
 	if err := os.WriteFile(o.config.HealthReportPath, data, 0644); err != nil {
 		o.log.Warn("failed to write health report", "path", o.config.HealthReportPath, "error", err)

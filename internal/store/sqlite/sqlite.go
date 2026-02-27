@@ -1111,7 +1111,7 @@ func (s *SQLiteStore) BatchUpdateSalience(ctx context.Context, updates map[strin
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	query := `UPDATE memories SET salience = ?, updated_at = ? WHERE id = ?`
 	now := time.Now().Format(time.RFC3339)
@@ -1136,7 +1136,7 @@ func (s *SQLiteStore) BatchMergeMemories(ctx context.Context, sourceIDs []string
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// Write the gist memory
 	conceptsStr, err := encodeStringSlice(gist.Concepts)

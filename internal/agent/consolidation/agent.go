@@ -241,7 +241,7 @@ func (ca *ConsolidationAgent) runCycle(ctx context.Context) (*CycleReport, error
 
 	// Publish consolidation completed event
 	if ca.bus != nil {
-		ca.bus.Publish(ctx, events.ConsolidationCompleted{
+		_ = ca.bus.Publish(ctx, events.ConsolidationCompleted{
 			DurationMs:         report.Duration.Milliseconds(),
 			MemoriesProcessed:  report.MemoriesProcessed,
 			MemoriesDecayed:    report.MemoriesDecayed,
@@ -755,7 +755,7 @@ func (ca *ConsolidationAgent) processPatternClusters(ctx context.Context, cluste
 
 		// Publish pattern discovered event
 		if ca.bus != nil {
-			ca.bus.Publish(ctx, events.PatternDiscovered{
+			_ = ca.bus.Publish(ctx, events.PatternDiscovered{
 				PatternID:     pattern.ID,
 				Title:         pattern.Title,
 				PatternType:   pattern.PatternType,

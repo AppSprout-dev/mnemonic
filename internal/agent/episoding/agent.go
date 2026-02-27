@@ -251,7 +251,9 @@ func (ea *EpisodingAgent) checkIdleEpisode(ctx context.Context) error {
 			return ea.closeEpisode(ctx, &openEp)
 		}
 		// Too few events — just close without synthesis
-		ea.store.CloseEpisode(ctx, openEp.ID)
+		if err := ea.store.CloseEpisode(ctx, openEp.ID); err != nil {
+			ea.log.Warn("failed to close sparse episode", "id", openEp.ID, "error", err)
+		}
 		ea.log.Info("closed sparse episode without synthesis",
 			"id", openEp.ID,
 			"events", len(openEp.RawMemoryIDs),
@@ -316,7 +318,9 @@ func (ea *EpisodingAgent) closeEpisode(ctx context.Context, ep *store.Episode) e
 	ep.EventTimeline = timeline
 
 	if len(eventTexts) == 0 {
-		ea.store.CloseEpisode(ctx, ep.ID)
+		if err := ea.store.CloseEpisode(ctx, ep.ID); err != nil {
+			ea.log.Warn("failed to close empty episode", "id", ep.ID, "error", err)
+		}
 		return nil
 	}
 
@@ -403,11 +407,13 @@ Respond with ONLY a JSON object (no prose, no fences):
 		return fmt.Errorf("failed to update closed episode: %w", err)
 	}
 
-	ea.store.CloseEpisode(ctx, ep.ID)
+	if err := ea.store.CloseEpisode(ctx, ep.ID); err != nil {
+		ea.log.Warn("failed to close episode", "id", ep.ID, "error", err)
+	}
 
 	// Publish event
 	if ea.bus != nil {
-		ea.bus.Publish(ctx, events.EpisodeClosed{
+		_ = ea.bus.Publish(ctx, events.EpisodeClosed{
 			EpisodeID:   ep.ID,
 			Title:       ep.Title,
 			EventCount:  len(ep.RawMemoryIDs),

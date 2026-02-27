@@ -36,7 +36,10 @@ func ingestCommand(configPath string, args []string) {
 	fs := flag.NewFlagSet("ingest", flag.ExitOnError)
 	dryRun := fs.Bool("dry-run", false, "scan and report without writing")
 	projectName := fs.String("project", "", "project name (default: directory basename)")
-	fs.Parse(append(flagArgs, posArgs...))
+	if err := fs.Parse(append(flagArgs, posArgs...)); err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing flags: %v\n", err)
+		os.Exit(1)
+	}
 
 	if fs.NArg() < 1 {
 		fmt.Fprintf(os.Stderr, "Usage: mnemonic ingest <directory> [--dry-run] [--project NAME]\n")

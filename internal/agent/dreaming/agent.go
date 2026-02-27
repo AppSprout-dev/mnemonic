@@ -180,7 +180,7 @@ func (da *DreamingAgent) runCycle(ctx context.Context) (*DreamReport, error) {
 
 	// Publish event
 	if da.bus != nil {
-		da.bus.Publish(ctx, events.DreamCycleCompleted{
+		_ = da.bus.Publish(ctx, events.DreamCycleCompleted{
 			MemoriesReplayed:         report.MemoriesReplayed,
 			AssociationsStrengthened: report.AssociationsStrengthened,
 			NewAssociationsCreated:   report.NewAssociationsCreated,

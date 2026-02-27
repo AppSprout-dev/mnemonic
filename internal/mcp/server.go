@@ -99,7 +99,9 @@ func (srv *MCPServer) Run(ctx context.Context) error {
 		var req jsonRPCRequest
 		if err := json.Unmarshal(line, &req); err != nil {
 			srv.log.Debug("parse error", "error", err)
-			enc.Encode(errorResponse(nil, -32700, "Parse error"))
+			if err := enc.Encode(errorResponse(nil, -32700, "Parse error")); err != nil {
+				srv.log.Warn("failed to encode error response to stdout", "error", err)
+			}
 			continue
 		}
 
@@ -109,7 +111,9 @@ func (srv *MCPServer) Run(ctx context.Context) error {
 
 		// Skip encoding nil responses (for notifications)
 		if resp != nil {
-			enc.Encode(resp)
+			if err := enc.Encode(resp); err != nil {
+				srv.log.Warn("failed to encode response to stdout", "error", err)
+			}
 		}
 	}
 

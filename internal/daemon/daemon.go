@@ -223,19 +223,18 @@ func Stop() error {
 		select {
 		case <-timeout:
 			// Process didn't exit, send SIGKILL
-			if err := process.Signal(syscall.SIGKILL); err != nil {
-				// Process may already be dead
-			}
+			// Process may already be dead; ignore SIGKILL error.
+			_ = process.Signal(syscall.SIGKILL)
 			// Wait a bit for SIGKILL to take effect
 			time.Sleep(500 * time.Millisecond)
 			// Clean up PID file
-			RemovePID()
+			_ = RemovePID()
 			return nil
 		case <-ticker.C:
 			// Check if process still exists
 			if err := process.Signal(syscall.Signal(0)); err != nil {
 				// Process is gone
-				RemovePID()
+				_ = RemovePID()
 				return nil
 			}
 		}

@@ -29,7 +29,9 @@ func TestWriteAndGetMemoryResolution(t *testing.T) {
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
-	s.WriteMemory(ctx, mem)
+	if err := s.WriteMemory(ctx, mem); err != nil {
+		t.Fatalf("WriteMemory failed: %v", err)
+	}
 
 	res := store.MemoryResolution{
 		MemoryID:     "mem-res-1",
@@ -75,7 +77,9 @@ func TestWriteAndGetConceptSet(t *testing.T) {
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
-	s.WriteMemory(ctx, mem)
+	if err := s.WriteMemory(ctx, mem); err != nil {
+		t.Fatalf("WriteMemory failed: %v", err)
+	}
 
 	cs := store.ConceptSet{
 		MemoryID: "mem-cs-1",
@@ -126,7 +130,9 @@ func TestWriteAndGetMemoryAttributes(t *testing.T) {
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
-	s.WriteMemory(ctx, mem)
+	if err := s.WriteMemory(ctx, mem); err != nil {
+		t.Fatalf("WriteMemory failed: %v", err)
+	}
 
 	attrs := store.MemoryAttributes{
 		MemoryID:       "mem-attr-1",
