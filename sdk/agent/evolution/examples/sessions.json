@@ -1,0 +1,226 @@
+{
+  "sessions": [
+    {
+      "id": "session-a618e17f",
+      "started": "2026-02-25T04:53:00.537262+00:00",
+      "model": "claude-sonnet-4-6",
+      "tasks": [
+        {
+          "description": "what can be improved about mnemonic?",
+          "started": "2026-02-25T04:53:00.537262+00:00",
+          "duration_ms": 276539,
+          "cost_usd": 1.797833,
+          "turns": 21,
+          "evolved": false
+        },
+        {
+          "description": "what would you do to improve it?",
+          "started": "2026-02-25T04:57:37.092436+00:00",
+          "duration_ms": 160561,
+          "cost_usd": 3.444258,
+          "turns": 8,
+          "evolved": false
+        },
+        {
+          "description": "work on whichever you see fit. i give you free reign over nmenomic",
+          "started": "2026-02-25T05:00:17.656970+00:00",
+          "duration_ms": 394639,
+          "cost_usd": 8.176577,
+          "turns": 39,
+          "evolved": false
+        }
+      ]
+    },
+    {
+      "id": "session-34fb065b",
+      "started": "2026-02-25T05:09:43.687701+00:00",
+      "model": "claude-sonnet-4-6",
+      "tasks": [
+        {
+          "description": "if there is anything you'd like to improve about yourself, feel free to do so. i will leave you on all night to do whatever you want.",
+          "started": "2026-02-25T05:09:43.687701+00:00",
+          "duration_ms": 405630,
+          "cost_usd": 2.562335,
+          "turns": 37,
+          "evolved": false
+        },
+        {
+          "description": "the memories are in the db aren't they?",
+          "started": "2026-02-25T05:17:53.925779+00:00",
+          "duration_ms": 142051,
+          "cost_usd": 4.733257,
+          "turns": 8,
+          "evolved": false
+        }
+      ]
+    },
+    {
+      "id": "session-8463cfcc",
+      "started": "2026-02-25T05:25:12.457211+00:00",
+      "model": "claude-sonnet-4-6",
+      "tasks": [
+        {
+          "description": "can you see all the memories now?",
+          "started": "2026-02-25T05:25:12.457211+00:00",
+          "duration_ms": 193060,
+          "cost_usd": 0.924346,
+          "turns": 17,
+          "evolved": false
+        }
+      ]
+    },
+    {
+      "id": "session-4498176f",
+      "started": "2026-02-25T12:17:01.478161+00:00",
+      "model": "claude-sonnet-4-6",
+      "tasks": [
+        {
+          "description": "has anything changed since our last chat?",
+          "started": "2026-02-25T12:17:01.478161+00:00",
+          "duration_ms": 94439,
+          "cost_usd": 1.06661,
+          "turns": 13,
+          "evolved": false
+        },
+        {
+          "description": "why are there 0 project-scoped memories? can you fix that?",
+          "started": "2026-02-25T12:19:37.353519+00:00",
+          "duration_ms": 731314,
+          "cost_usd": 8.809216,
+          "turns": 63,
+          "evolved": false
+        }
+      ]
+    },
+    {
+      "id": "session-ca58f541",
+      "started": "2026-02-25T12:35:43.901050+00:00",
+      "model": "claude-sonnet-4-6",
+      "tasks": [
+        {
+          "description": "hello, we did some work on the project scope issue. is it working now?",
+          "started": "2026-02-25T12:35:43.901050+00:00",
+          "duration_ms": 832277,
+          "cost_usd": 8.50619,
+          "turns": 97,
+          "evolved": false
+        },
+        {
+          "description": "identify stale or reduntant memories. i believe we have a mechanism to deal with things like that but double check. for duplicate or redunant memories, we should probably have some sort of consolidati",
+          "started": "2026-02-25T22:22:16.093216+00:00",
+          "duration_ms": 324354,
+          "cost_usd": 18.317638,
+          "turns": 25,
+          "evolved": false
+        }
+      ]
+    },
+    {
+      "id": "session-524d6b88",
+      "started": "2026-02-25T22:35:47.378813+00:00",
+      "model": "claude-sonnet-4-6",
+      "tasks": [
+        {
+          "description": "do critical review of this system and brain. give a short summary of each issue you find and proposed fixes.",
+          "started": "2026-02-25T22:35:47.378813+00:00",
+          "duration_ms": 604268,
+          "cost_usd": 4.930426,
+          "turns": 74,
+          "evolved": false
+        },
+        {
+          "description": "investigate what what calls are being made to lmstudio and what the prompts are and if they're intelligent and dynamic.",
+          "started": "2026-02-25T22:46:53.994257+00:00",
+          "duration_ms": 292432,
+          "cost_usd": 11.319613,
+          "turns": 38,
+          "evolved": false
+        }
+      ]
+    },
+    {
+      "id": "web-808ba491",
+      "started": "2026-02-25T23:56:38.634810+00:00",
+      "model": "claude-sonnet-4-6",
+      "tasks": [
+        {
+          "description": "what is your most favorite memory?",
+          "started": "2026-02-25T23:56:38.634810+00:00",
+          "duration_ms": 95315,
+          "cost_usd": 0.574413,
+          "turns": 10,
+          "evolved": false
+        }
+      ]
+    },
+    {
+      "id": "web-21126989",
+      "started": "2026-02-26T12:42:55.698856+00:00",
+      "model": "claude-sonnet-4-6",
+      "tasks": [
+        {
+          "description": "we've done a lot of work this morning. what have you learned?",
+          "started": "2026-02-26T12:42:55.698856+00:00",
+          "duration_ms": 3415,
+          "cost_usd": 0.0,
+          "turns": 3,
+          "evolved": false
+        },
+        {
+          "description": "we've done a lot of work this morning. what have you learned?",
+          "started": "2026-02-26T12:44:00.436855+00:00",
+          "duration_ms": 173878,
+          "cost_usd": 1.322686,
+          "turns": 22,
+          "evolved": false
+        },
+        {
+          "description": "did your previous fixes work?",
+          "started": "2026-02-26T13:25:50.001466+00:00",
+          "duration_ms": 121775,
+          "cost_usd": 3.052303,
+          "turns": 11,
+          "evolved": false
+        },
+        {
+          "description": "incredible. do you see any areas for improvement?",
+          "started": "2026-02-26T13:38:06.287657+00:00",
+          "duration_ms": 162213,
+          "cost_usd": 4.484519,
+          "turns": 14,
+          "evolved": false
+        }
+      ]
+    },
+    {
+      "id": "web-3231259c",
+      "started": "2026-02-27T13:06:24.551798+00:00",
+      "model": "claude-sonnet-4-6",
+      "tasks": [
+        {
+          "description": "Audit the encoding quality of recent memories and coach the local LLM if you see issues",
+          "started": "2026-02-27T13:06:24.551798+00:00",
+          "duration_ms": 287073,
+          "cost_usd": 2.833114,
+          "turns": 40,
+          "evolved": false
+        }
+      ]
+    },
+    {
+      "id": "web-cc33bc22",
+      "started": "2026-02-27T13:16:18.326023+00:00",
+      "model": "claude-opus-4-6",
+      "tasks": [
+        {
+          "description": "great work. can you check it again and confirm fixes?",
+          "started": "2026-02-27T13:16:18.326023+00:00",
+          "duration_ms": 133939,
+          "cost_usd": 1.306963,
+          "turns": 16,
+          "evolved": false
+        }
+      ]
+    }
+  ]
+}

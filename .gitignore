@@ -20,9 +20,13 @@ __pycache__/
 Mnemonic_Pitch.pptx
 scripts/create_pitch.py
 
-# SDK local data
-sdk/agent/evolution/conversations/
+# SDK evolution data (user-generated, not shipped)
+sdk/agent/evolution/principles.yaml
+sdk/agent/evolution/strategies.yaml
+sdk/agent/evolution/prompt_patches.yaml
 sdk/agent/evolution/sessions.json
+sdk/agent/evolution/changelog.md
+sdk/agent/evolution/conversations/
 
 # IDE / local config
 .claude/settings.local.json
