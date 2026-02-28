@@ -8,6 +8,7 @@
 - Branch naming: `feat/<description>`, `fix/<description>`
 - Before branching: `git stash` (if dirty), `git pull origin main`, then `git checkout -b <branch>`
 - **All changes go through a PR** — push the branch, open a PR with `gh pr create`, get it reviewed
+- **Closing issues:** When a PR resolves a GitHub issue, comment on the issue with a reference to the PR before or after closing it. Never close issues silently.
 - No blind commits to main, no YOLO pushes
 
 ## Forbidden Operations
