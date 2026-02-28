@@ -211,20 +211,30 @@ func (ca *ConsolidationAgent) runCycle(ctx context.Context) (*CycleReport, error
 	}
 	report.AssociationsPruned = pruned
 
-	// Step 4: Merge highly similar memory clusters into gists
-	merges, err := ca.mergeClusters(ctx)
-	if err != nil {
-		ca.log.Warn("cluster merging failed", "error", err)
-		// Non-fatal, continue
+	// Steps 4-5 require LLM — skip if unavailable to avoid timeout loops
+	llmAvailable := ca.llmProvider != nil && ca.llmProvider.Health(ctx) == nil
+	if !llmAvailable {
+		ca.log.Warn("skipping LLM-dependent steps (merge, pattern extraction): LLM unavailable")
 	}
-	report.MergesPerformed = merges
+
+	// Step 4: Merge highly similar memory clusters into gists
+	if llmAvailable {
+		merges, err := ca.mergeClusters(ctx)
+		if err != nil {
+			ca.log.Warn("cluster merging failed", "error", err)
+			// Non-fatal, continue
+		}
+		report.MergesPerformed = merges
+	}
 
 	// Step 5: Extract patterns from memory clusters
-	patternsExtracted, err := ca.extractPatterns(ctx)
-	if err != nil {
-		ca.log.Warn("pattern extraction failed", "error", err)
+	if llmAvailable {
+		patternsExtracted, err := ca.extractPatterns(ctx)
+		if err != nil {
+			ca.log.Warn("pattern extraction failed", "error", err)
+		}
+		report.PatternsExtracted = patternsExtracted
 	}
-	report.PatternsExtracted = patternsExtracted
 
 	// Step 6: Delete expired archived memories
 	deleted, err := ca.deleteExpired(ctx)
@@ -284,12 +294,12 @@ func (ca *ConsolidationAgent) decaySalience(ctx context.Context) (decayed, proce
 			hoursSinceAccess = time.Since(mem.CreatedAt).Hours()
 		}
 
-		// Recency protection: 0-24h = 0.5x decay, 24-168h = 0.8x decay, >168h = full decay
+		// Recency protection: 0-24h = 0.8x decay, 24-168h = 0.9x decay, >168h = full decay
 		recencyFactor := 1.0
 		if hoursSinceAccess < 24 {
-			recencyFactor = 0.5
-		} else if hoursSinceAccess < 168 { // 7 days
 			recencyFactor = 0.8
+		} else if hoursSinceAccess < 168 { // 7 days
+			recencyFactor = 0.9
 		}
 
 		// Access count bonus: frequently accessed memories resist decay
@@ -903,10 +913,10 @@ func (ca *ConsolidationAgent) findMatchingPattern(ctx context.Context, cluster [
 		return nil, fmt.Errorf("no matching patterns")
 	}
 
-	// Check if the top match is close enough (0.8 threshold)
+	// Check if the top match is close enough (0.70 threshold)
 	if len(patterns[0].Embedding) > 0 {
 		sim := cosineSimilarity(avgEmb, patterns[0].Embedding)
-		if sim >= 0.8 {
+		if sim >= 0.70 {
 			return &patterns[0], nil
 		}
 	}
