@@ -339,7 +339,8 @@ mnemonic/
 │   ├── tests/                             # SDK tests
 │   └── pyproject.toml
 ├── migrations/                            # SQLite schema migrations
-├── evolution/                             # Agent evolution data (principles, strategies)
+├── evolution/                             # Agent evolution data (created at runtime, gitignored)
+│   └── examples/                         # Example evolution data for reference
 ├── scripts/                               # Utility scripts (pitch deck generator)
 ├── tests/                                 # User acceptance tests
 ├── config.yaml
