@@ -911,9 +911,18 @@ func serveCommand(configPath string) {
 
 	if cfg.Perception.Enabled {
 		if cfg.Perception.Filesystem.Enabled {
+			// Auto-detect noisy app directories and merge with configured exclusions
+			autoExclusions := fswatcher.DetectNoisyApps(log)
+			allExclusions := cfg.Perception.Filesystem.ExcludePatterns
+			for _, pattern := range autoExclusions {
+				if !fswatcher.MatchesExcludePattern(pattern, allExclusions) {
+					allExclusions = append(allExclusions, pattern)
+				}
+			}
+
 			fsw, err := fswatcher.NewFilesystemWatcher(fswatcher.Config{
 				WatchDirs:       cfg.Perception.Filesystem.WatchDirs,
-				ExcludePatterns: cfg.Perception.Filesystem.ExcludePatterns,
+				ExcludePatterns: allExclusions,
 				MaxContentBytes: cfg.Perception.Filesystem.MaxContentBytes,
 			}, log)
 			if err != nil {
