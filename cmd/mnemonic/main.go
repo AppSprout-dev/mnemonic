@@ -40,6 +40,7 @@ import (
 
 	clipwatcher "github.com/appsprout/mnemonic/internal/watcher/clipboard"
 	fswatcher "github.com/appsprout/mnemonic/internal/watcher/filesystem"
+	gitwatcher "github.com/appsprout/mnemonic/internal/watcher/git"
 	termwatcher "github.com/appsprout/mnemonic/internal/watcher/terminal"
 
 	"github.com/google/uuid"
@@ -921,9 +922,14 @@ func serveCommand(configPath string) {
 			}
 
 			fsw, err := fswatcher.NewFilesystemWatcher(fswatcher.Config{
-				WatchDirs:       cfg.Perception.Filesystem.WatchDirs,
-				ExcludePatterns: allExclusions,
-				MaxContentBytes: cfg.Perception.Filesystem.MaxContentBytes,
+				WatchDirs:          cfg.Perception.Filesystem.WatchDirs,
+				ExcludePatterns:    allExclusions,
+				MaxContentBytes:    cfg.Perception.Filesystem.MaxContentBytes,
+				MaxWatches:         cfg.Perception.Filesystem.MaxWatches,
+				ShallowDepth:       cfg.Perception.Filesystem.ShallowDepth,
+				PollIntervalSec:    cfg.Perception.Filesystem.PollIntervalSec,
+				PromotionThreshold: cfg.Perception.Filesystem.PromotionThreshold,
+				DemotionTimeoutMin: cfg.Perception.Filesystem.DemotionTimeoutMin,
 			}, log)
 			if err != nil {
 				log.Error("failed to create filesystem watcher", "error", err)
@@ -957,6 +963,20 @@ func serveCommand(configPath string) {
 			} else {
 				watchers = append(watchers, cw)
 				log.Info("clipboard watcher configured")
+			}
+		}
+
+		if cfg.Perception.Git.Enabled {
+			gw, err := gitwatcher.NewGitWatcher(gitwatcher.Config{
+				WatchDirs:       cfg.Perception.Filesystem.WatchDirs,
+				PollIntervalSec: cfg.Perception.Git.PollIntervalSec,
+				MaxRepoDepth:    cfg.Perception.Git.MaxRepoDepth,
+			}, log)
+			if err != nil {
+				log.Warn("git watcher not available", "error", err)
+			} else {
+				watchers = append(watchers, gw)
+				log.Info("git watcher configured")
 			}
 		}
 

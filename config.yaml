@@ -109,6 +109,31 @@ perception:
     # Maximum file content size to process (in bytes)
     max_content_bytes: 102400
 
+    # --- Attention-based watching (Linux only, ignored on macOS) ---
+    # Hard cap on inotify watches to prevent starving VS Code and other apps.
+    # Linux default inotify limit is 65536; we leave headroom for other apps.
+    max_watches: 20000
+
+    # How deep to add inotify watches at startup (shallow = fast, safe).
+    # Deeper directories are polled in the background instead.
+    shallow_depth: 3
+
+    # How often (seconds) to poll cold (non-inotify) directories for changes.
+    poll_interval_sec: 45
+
+    # How many changes in a poll window before promoting a cold dir to inotify.
+    promotion_threshold: 3
+
+    # Minutes of inactivity before an inotify watch is demoted back to polling.
+    demotion_timeout_min: 30
+
+  # Git perception (monitors git repos for working tree changes)
+  # Provides richer context than raw filesystem events and uses zero inotify watches.
+  git:
+    enabled: true
+    poll_interval_sec: 45
+    max_repo_depth: 3
+
   # Terminal perception (captures shell commands and output)
   terminal:
     enabled: true
