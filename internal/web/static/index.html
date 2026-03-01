@@ -1264,8 +1264,12 @@
             var html = '<div class="episode-card" onclick="toggleExpand(this)">';
             var epTitle = ep.title || (ep.state === 'open' ? 'Episode in progress\u2026' : 'Untitled Episode');
             html += '<div class="episode-header"><span class="episode-title">' + escapeHtml(epTitle) + '</span>';
-            if (ep.outcome) html += '<span class="badge ' + outcomeBadge + '">' + ep.outcome + '</span>';
-            html += '<span class="badge ' + stateBadge + '">' + (ep.state || 'open') + '</span></div>';
+            if (ep.outcome) {
+                html += '<span class="badge ' + outcomeBadge + '">' + ep.outcome + '</span>';
+            } else {
+                html += '<span class="badge ' + stateBadge + '">' + (ep.state || 'open') + '</span>';
+            }
+            html += '</div>';
             if (ep.summary) {
                 html += '<div class="episode-summary">' + escapeHtml(ep.summary) + '</div>';
             } else if (ep.state === 'open') {
