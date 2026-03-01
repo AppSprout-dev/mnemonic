@@ -39,7 +39,7 @@ type DreamingAgent struct {
 type DreamReport struct {
 	Duration                 time.Duration
 	MemoriesReplayed         int
-	AssociationsStrengthened  int
+	AssociationsStrengthened int
 	NewAssociationsCreated   int
 	CrossProjectLinks        int
 	PatternLinks             int
@@ -137,6 +137,15 @@ func (da *DreamingAgent) loop() {
 }
 
 func (da *DreamingAgent) runCycle(ctx context.Context) (*DreamReport, error) {
+	// Gate on LLM availability — without LLM, dreaming blindly strengthens
+	// associations without being able to generate insights or judge quality.
+	if da.llmProvider != nil {
+		if err := da.llmProvider.Health(ctx); err != nil {
+			da.log.Warn("skipping dream cycle: LLM unavailable", "error", err)
+			return nil, nil
+		}
+	}
+
 	startTime := time.Now()
 	report := &DreamReport{}
 
@@ -544,11 +553,11 @@ func clusterByConceptOverlap(memories []store.Memory) [][]store.Memory {
 }
 
 type insightResponse struct {
-	Title       string   `json:"title"`
-	Insight     string   `json:"insight"`
-	Concepts    []string `json:"concepts"`
-	Confidence  float64  `json:"confidence"`
-	HasInsight  bool     `json:"has_insight"`
+	Title      string   `json:"title"`
+	Insight    string   `json:"insight"`
+	Concepts   []string `json:"concepts"`
+	Confidence float64  `json:"confidence"`
+	HasInsight bool     `json:"has_insight"`
 }
 
 // synthesizeInsight asks the LLM to identify a higher-order insight from a cluster of memories.

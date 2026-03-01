@@ -15,7 +15,7 @@ if ! echo "$COMMAND" | grep -q 'git '; then
 fi
 
 # Block: git push --force or git push -f
-if echo "$COMMAND" | grep -qE 'git push\s.*(-f|--force)'; then
+if echo "$COMMAND" | grep -qE 'git push\s.*(\s-f\b|\s--force\b)'; then
   echo "BLOCKED: force push is not allowed. It can destroy remote branch history." >&2
   exit 2
 fi

@@ -252,6 +252,24 @@ func (h *HeuristicFilter) evaluateFilesystem(path, content string) (float32, str
 		}
 	}
 
+	// Suppress application-internal state directories — these produce high-volume
+	// noise that is never useful for memory (browser storage, desktop state, etc.)
+	appInternalDirs := []string{
+		"/google-chrome/", "/chromium/", "/BraveSoftware/",
+		"/LM Studio/", "/lm-studio/",
+		"/Trash/", "/.local/share/Trash/",
+		"/leveldb/", "/IndexedDB/", "/Local Storage/", "/Session Storage/",
+		"/Cache/", "/GPUCache/", "/ShaderCache/", "/Code Cache/",
+		"/dconf/", "/gconf/",
+		"/pulse/", "/pipewire/",
+	}
+	lowerPathCheck := strings.ToLower(path)
+	for _, dir := range appInternalDirs {
+		if strings.Contains(lowerPathCheck, strings.ToLower(dir)) {
+			return 0.0, fmt.Sprintf("filesystem: application-internal path '%s'", dir)
+		}
+	}
+
 	score := float32(0.3)
 	rationale := "filesystem event"
 

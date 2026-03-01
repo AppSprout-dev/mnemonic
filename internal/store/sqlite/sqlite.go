@@ -861,7 +861,9 @@ func (s *SQLiteStore) SearchByFullText(ctx context.Context, query string, limit 
 	       m.salience, m.access_count, m.last_accessed, m.state, m.gist_of, m.episode_id,
 	       m.project, m.session_id, m.created_at, m.updated_at
 	FROM memories m
-	WHERE m.rowid IN (SELECT rowid FROM memories_fts WHERE memories_fts MATCH ?)
+	JOIN memories_fts ON m.rowid = memories_fts.rowid
+	WHERE memories_fts MATCH ?
+	ORDER BY memories_fts.rank
 	LIMIT ?
 	`
 

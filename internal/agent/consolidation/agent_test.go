@@ -691,9 +691,9 @@ func TestDecaySalience(t *testing.T) {
 
 		updates := ms.batchUpdateSalienceCalls[0]
 		newSalience := updates["recent-mem"]
-		// recencyFactor=0.5, accessBonus=1.0, effective = 0.95^0.5 ≈ 0.9747
-		// newSalience = 0.8 * 0.9747 ≈ 0.7798
-		effectiveDecay := math.Pow(0.95, 0.5)
+		// recencyFactor=0.8, accessBonus=1.0, effective = 0.95^0.8 ≈ 0.9592
+		// newSalience = 0.8 * 0.9592 ≈ 0.7674
+		effectiveDecay := math.Pow(0.95, 0.8)
 		expectedSalience := float32(0.8 * effectiveDecay)
 		if !almostEqual(newSalience, expectedSalience, 0.01) {
 			t.Errorf("expected salience ~%f for recently accessed memory, got %f", expectedSalience, newSalience)
