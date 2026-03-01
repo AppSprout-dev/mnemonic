@@ -768,7 +768,7 @@ func startAgentWebServer(cfg *config.Config, log *slog.Logger) *exec.Cmd {
 	args = append(args,
 		"--port", fmt.Sprintf("%d", port),
 		"--mnemonic-config", filepath.Join(projectRoot, "config.yaml"),
-		"--mnemonic-binary", filepath.Join(projectRoot, "mnemonic"),
+		"--mnemonic-binary", filepath.Join(projectRoot, "bin", "mnemonic"),
 	)
 
 	cmd := exec.Command(pythonBin, args...)

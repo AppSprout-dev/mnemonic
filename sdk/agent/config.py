@@ -18,7 +18,7 @@ class Config:
     mnemonic_binary: str = field(
         default_factory=lambda: os.environ.get(
             "MNEMONIC_BINARY",
-            str(Path(__file__).resolve().parents[2] / "mnemonic"),
+            str(Path(__file__).resolve().parents[2] / "bin" / "mnemonic"),
         )
     )
     mnemonic_config: str = field(
