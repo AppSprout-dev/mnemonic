@@ -1262,10 +1262,16 @@
             var concepts = (ep.concepts || []).slice(0, 6);
             var dateStr = ep.start_time ? relativeTime(new Date(ep.start_time)) : '';
             var html = '<div class="episode-card" onclick="toggleExpand(this)">';
-            html += '<div class="episode-header"><span class="episode-title">' + escapeHtml(ep.title || 'Untitled Episode') + '</span>';
+            var epTitle = ep.title || (ep.state === 'open' ? 'Episode in progress\u2026' : 'Untitled Episode');
+            html += '<div class="episode-header"><span class="episode-title">' + escapeHtml(epTitle) + '</span>';
             if (ep.outcome) html += '<span class="badge ' + outcomeBadge + '">' + ep.outcome + '</span>';
             html += '<span class="badge ' + stateBadge + '">' + (ep.state || 'open') + '</span></div>';
-            if (ep.summary) html += '<div class="episode-summary">' + escapeHtml(ep.summary) + '</div>';
+            if (ep.summary) {
+                html += '<div class="episode-summary">' + escapeHtml(ep.summary) + '</div>';
+            } else if (ep.state === 'open') {
+                var evtCount = (ep.raw_memory_ids || []).length;
+                html += '<div class="episode-summary" style="font-style:italic">' + evtCount + ' event' + (evtCount !== 1 ? 's' : '') + ' so far &mdash; still accumulating</div>';
+            }
             html += '<div class="episode-meta"><div class="episode-concepts">';
             concepts.forEach(function(c) { html += '<span class="concept-tag">' + escapeHtml(c) + '</span>'; });
             html += '</div><span class="episode-date">' + dateStr + '</span></div>';
@@ -1639,8 +1645,8 @@
             var results = await Promise.all([fetch(CONFIG.API_BASE + '/health'), fetch(CONFIG.API_BASE + '/stats')]);
             var health = await results[0].json();
             var stats = await results[1].json();
-            document.getElementById('navMemoryCount').textContent = health.memory_count || 0;
-            document.getElementById('navEpisodeCount').textContent = stats.total_episodes || 0;
+            document.getElementById('navMemoryCount').textContent = (stats.store && stats.store.active_memories) || health.memory_count || 0;
+            document.getElementById('navEpisodeCount').textContent = (stats.store && stats.store.total_episodes) || 0;
             var dot = document.getElementById('navHealth');
             dot.className = health.status === 'ok' ? 'nav-health' : 'nav-health degraded';
             dot.title = health.status === 'ok' ? 'System healthy' : 'System degraded';
