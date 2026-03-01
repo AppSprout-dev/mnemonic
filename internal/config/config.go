@@ -63,6 +63,7 @@ type PerceptionConfig struct {
 	LLMGatingEnabled      bool                       `yaml:"llm_gating_enabled"`
 	LearnedExclusionsPath string                     `yaml:"learned_exclusions_path"`
 	Filesystem            FilesystemPerceptionConfig `yaml:"filesystem"`
+	Git                   GitPerceptionConfig        `yaml:"git"`
 	Terminal              TerminalPerceptionConfig   `yaml:"terminal"`
 	Clipboard             ClipboardPerceptionConfig  `yaml:"clipboard"`
 	Heuristics            HeuristicsConfig           `yaml:"heuristics"`
@@ -70,10 +71,22 @@ type PerceptionConfig struct {
 
 // FilesystemPerceptionConfig holds filesystem perception settings.
 type FilesystemPerceptionConfig struct {
-	Enabled         bool     `yaml:"enabled"`
-	WatchDirs       []string `yaml:"watch_dirs"`
-	ExcludePatterns []string `yaml:"exclude_patterns"`
-	MaxContentBytes int      `yaml:"max_content_bytes"`
+	Enabled            bool     `yaml:"enabled"`
+	WatchDirs          []string `yaml:"watch_dirs"`
+	ExcludePatterns    []string `yaml:"exclude_patterns"`
+	MaxContentBytes    int      `yaml:"max_content_bytes"`
+	MaxWatches         int      `yaml:"max_watches"`          // hard cap on inotify watches (Linux only, 0 = unlimited)
+	ShallowDepth       int      `yaml:"shallow_depth"`        // inotify watch depth at startup (default: 3)
+	PollIntervalSec    int      `yaml:"poll_interval_sec"`    // how often to scan cold directories (default: 45)
+	PromotionThreshold int      `yaml:"promotion_threshold"`  // changes in poll window to promote to hot (default: 3)
+	DemotionTimeoutMin int      `yaml:"demotion_timeout_min"` // minutes of inactivity before demotion (default: 30)
+}
+
+// GitPerceptionConfig holds git repository watching settings.
+type GitPerceptionConfig struct {
+	Enabled         bool `yaml:"enabled"`
+	PollIntervalSec int  `yaml:"poll_interval_sec"` // how often to check each repo (default: 45)
+	MaxRepoDepth    int  `yaml:"max_repo_depth"`    // how deep to scan for .git/ dirs (default: 3)
 }
 
 // TerminalPerceptionConfig holds terminal perception settings.
@@ -295,7 +308,17 @@ func Default() *Config {
 					"node_modules/",
 					".DS_Store",
 				},
-				MaxContentBytes: 102400,
+				MaxContentBytes:    102400,
+				MaxWatches:         20000,
+				ShallowDepth:       3,
+				PollIntervalSec:    45,
+				PromotionThreshold: 3,
+				DemotionTimeoutMin: 30,
+			},
+			Git: GitPerceptionConfig{
+				Enabled:         true,
+				PollIntervalSec: 45,
+				MaxRepoDepth:    3,
 			},
 			Terminal: TerminalPerceptionConfig{
 				Enabled:         true,

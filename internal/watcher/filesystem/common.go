@@ -10,9 +10,14 @@ import (
 
 // Config holds configuration for the filesystem watcher.
 type Config struct {
-	WatchDirs       []string
-	ExcludePatterns []string
-	MaxContentBytes int
+	WatchDirs          []string
+	ExcludePatterns    []string
+	MaxContentBytes    int
+	MaxWatches         int // hard cap on inotify watches (Linux only, 0 = unlimited)
+	ShallowDepth       int // inotify watch depth at startup (default: 3)
+	PollIntervalSec    int // how often to scan cold directories (default: 45)
+	PromotionThreshold int // changes in poll window to promote to hot (default: 3)
+	DemotionTimeoutMin int // minutes of inactivity before demotion (default: 30)
 }
 
 // MatchesExcludePattern checks if a path matches any exclude pattern.
