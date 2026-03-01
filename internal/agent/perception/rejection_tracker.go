@@ -35,14 +35,6 @@ type rejectionTrackerConfig struct {
 	PersistPath string        // file to persist learned exclusions (empty = no persistence)
 }
 
-func defaultRejectionTrackerConfig() rejectionTrackerConfig {
-	return rejectionTrackerConfig{
-		Threshold:   50,
-		Window:      1 * time.Hour,
-		MaxPromoted: 20,
-	}
-}
-
 func newRejectionTracker(cfg rejectionTrackerConfig, log *slog.Logger, onPromote func(string)) *rejectionTracker {
 	if cfg.Threshold == 0 {
 		cfg.Threshold = 50
