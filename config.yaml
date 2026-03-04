@@ -327,6 +327,26 @@ abstraction:
   # Maximum LLM calls per abstraction cycle
   max_llm_calls: 5
 
+# Orchestrator Configuration (autonomous scheduler and health monitoring)
+orchestrator:
+  # Enable orchestrator
+  enabled: true
+
+  # Dynamically adjust agent intervals based on system load
+  adaptive_intervals: true
+
+  # Maximum database size in MB before triggering consolidation
+  max_db_size_mb: 500
+
+  # Interval between retrieval self-tests (e.g., "6h", "12h")
+  self_test_interval: "12h"
+
+  # Automatically restart failed agents
+  auto_recovery: true
+
+  # Interval between health monitoring checks (e.g., "5m", "15m")
+  monitor_interval: "5m"
+
 # MCP Server Configuration (Model Context Protocol for AI agents)
 mcp:
   # Enable MCP server (run with: mnemonic mcp)

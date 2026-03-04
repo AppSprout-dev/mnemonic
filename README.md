@@ -20,7 +20,7 @@ The "analog LLM" vision: the association graph IS the model. Memories build into
 **Setup:**
 ```bash
 git clone https://github.com/CalebisGross/mnemonic.git
-cd mem
+cd mnemonic
 # Edit config.yaml: set llm.endpoint, llm.chat_model, llm.embedding_model
 make build
 ./bin/mnemonic start
@@ -37,7 +37,7 @@ make build
 
 ## Architecture
 
-Mnemonic implements an eight-agent cognitive pipeline plus an autonomous orchestrator:
+Mnemonic implements a nine-agent cognitive pipeline plus an autonomous orchestrator and event-driven reactor:
 
 1. **Perception** — Watch filesystem, terminal, clipboard, MCP events. Pre-filter with heuristics (size, patterns, frequency, batch edit detection, recall-aware salience boosting).
 2. **Encoding** — LLM-powered compression of raw events into memories. Extract structured concepts, generate embeddings, find related memories, create association links. Heuristic fallback when LLM unavailable.
@@ -47,6 +47,7 @@ Mnemonic implements an eight-agent cognitive pipeline plus an autonomous orchest
 6. **Metacognition** — Periodic self-reflection. Audit memory quality, analyze retrieval feedback, re-embed orphaned memories, trigger consolidation when needed.
 7. **Dreaming** — Replay memories, strengthen associations, cross-pollinate across projects, link memories to patterns, generate higher-order insights.
 8. **Abstraction** — Build hierarchical knowledge: patterns → principles (level 2) → axioms (level 3). Verify grounding, demote abstractions that lose evidence.
+9. **Reactor** — Event-driven rule engine. Fires chains of conditions → actions in response to system events (e.g., trigger consolidation when DB grows too large, kick off dreaming when an episode closes).
 
 **Orchestrator** — Autonomous scheduler: health monitoring, LLM health checks, DB size monitoring, periodic retrieval self-tests, health report generation (`~/.mnemonic/health.json`).
 
@@ -75,8 +76,10 @@ For architectural deep dive, see [ARCHITECTURE.md](ARCHITECTURE.md).
 | **MCP** | `mcp` | Run MCP server (stdio) |
 | **Monitor** | `status` | System health snapshot |
 | **Monitor** | `watch` | Live event stream |
-| **Setup** | `install` | macOS LaunchAgent auto-start |
+| **Setup** | `install` | Auto-start (macOS LaunchAgent / Linux systemd) |
+| **Setup** | `uninstall` | Remove auto-start service |
 | **Setup** | `version` | Show version |
+| **Danger** | `purge` | Stop daemon and delete all data (fresh start) |
 
 ## MCP Integration
 
@@ -94,7 +97,7 @@ Expose Mnemonic as an MCP server for Claude Code or other AI agents:
 }
 ```
 
-**Available MCP tools (10):** `remember`, `recall`, `forget`, `status`, `recall_project`, `recall_timeline`, `session_summary`, `get_patterns`, `get_insights`, `feedback`
+**Available MCP tools (13):** `remember`, `recall`, `forget`, `status`, `recall_project`, `recall_timeline`, `session_summary`, `get_patterns`, `get_insights`, `feedback`, `audit_encodings`, `coach_local_llm`, `ingest_project`
 
 See [CLAUDE.md](CLAUDE.md) for Claude Code usage guidelines.
 
@@ -105,14 +108,19 @@ All settings live in `config.yaml`. Key sections:
 - **llm** — LM Studio endpoint, chat model, embedding model, timeouts
 - **store** — SQLite path, journal mode (use WAL for faster writes)
 - **perception** — Watch directories, shell, clipboard; heuristic thresholds
-- **encoding** — Concept extraction limits, similarity search
+- **encoding** — Concept extraction limits, similarity search, contextual encoding
 - **consolidation** — Decay rate, salience thresholds, budget (100 memories/cycle max), pattern extraction
-- **retrieval** — Spread activation hops, activation decay, result limit, pattern/abstraction inclusion
+- **retrieval** — Spread activation hops, activation decay, result limit, synthesis tokens
 - **metacognition** — Reflection interval, feedback processing
-- **dreaming** — Replay interval, batch size, association boost, cross-project linking, insight generation
+- **episoding** — Episode window size, minimum events per episode
+- **dreaming** — Replay interval, batch size, association boost, noise pruning
 - **abstraction** — Interval, min pattern strength, max LLM calls per cycle
 - **orchestrator** — Adaptive intervals, max DB size, self-test interval, auto-recovery
-- **api** — Server host/port
+- **mcp** — Enable/disable MCP server
+- **agent_sdk** — Agent SDK dashboard, evolution directory, WebSocket port
+- **coaching** — Coaching file path for LLM prompt improvements
+- **api** — Server host/port, request timeout
+- **web** — Enable/disable embedded dashboard
 - **logging** — Level, format, output file
 
 See `config.yaml` for all defaults with inline documentation.
@@ -121,44 +129,46 @@ See `config.yaml` for all defaults with inline documentation.
 
 Open `http://127.0.0.1:9999` for the embedded web UI:
 
-- **Live feed** — Real-time events (raw perceptions, encoded memories, consolidations, dream cycles)
-- **Memory browser** — Episodes, association graph, raw events
-- **Patterns** — Discovered recurring patterns with strength and evidence counts
-- **Abstractions** — Hierarchical knowledge (principles and axioms)
-- **Association graph** — D3.js visualization of memory relationships
-- **Query tester** — Try searches, see retrieval scores and synthesized responses
-- **System health** — LLM status, store stats, project breakdown
+- **Recall** — Query tester: try searches, see retrieval scores and synthesized responses
+- **Explore** — Browse episodes, memories, patterns, and abstractions in sub-tabs
+- **Graph** — D3.js visualization of memory associations
+- **Agent** — SDK evolution dashboard: principles, strategies, session timeline, chat (requires `agent_sdk.enabled: true`)
+- **Activity drawer** — Slide-out panel with live event feed and metacognition insights
 
 ## Project Structure
 
 ```
 internal/
-  llm/              LLM provider interface + LM Studio implementation
-  embedding/        Embedding provider + caching
-  store/            Store interface + SQLite implementation with FTS5
+  llm/              LLM provider interface + LM Studio implementation (chat + embeddings)
+  store/            Store interface + SQLite implementation with FTS5 + vector search
   events/           Event bus (pub/sub)
-  watcher/          Filesystem, terminal, clipboard watchers
+  watcher/          Filesystem, terminal, clipboard, git watchers
   agent/            Cognitive agents (perception, encoding, episoding, consolidation,
-                      retrieval, metacognition, dreaming, abstraction, orchestrator)
+                      retrieval, metacognition, dreaming, abstraction, orchestrator, reactor)
+  ingest/           Project ingestion engine
   api/              HTTP + WebSocket server
   web/              Embedded dashboard
   config/           Configuration loading
   logger/           Structured logging
   daemon/           Daemon management (macOS launchd + Linux systemd)
-  mcp/              MCP server implementation
+  mcp/              MCP server implementation (13 tools)
   backup/           Backup/restore logic
 cmd/mnemonic/       Main entry point
 cmd/benchmark/      End-to-end benchmark suite
 migrations/         SQLite schema
+sdk/                Python agent SDK (self-evolving assistant)
 ```
 
 ## Development
 
 ```bash
 make build          # Compile binary
+make run            # Build and run in foreground (serve mode)
 make test           # Run tests
 make fmt            # Format code
-make vet            # Lint
+make vet            # Static analysis
+make lint           # Run golangci-lint
+make tidy           # go mod tidy
 make clean          # Remove binaries
 make check          # fmt + vet
 make benchmark      # Build benchmark binary
@@ -176,7 +186,7 @@ make setup-hooks    # Configure git pre-commit hooks
 | Platform | Status | Notes |
 |----------|--------|-------|
 | macOS ARM (M-series) | **Full** | Primary development platform |
-| macOS x86 | Untested | Should work via CGO cross-compile |
+| macOS x86 | Untested | Should work with CGO enabled |
 | Linux x86_64 | **Full** | All features including systemd daemon management |
 | Windows | Not supported | Clipboard watcher has Windows code; daemon does not |
 

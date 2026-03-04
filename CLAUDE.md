@@ -1,6 +1,6 @@
 # Mnemonic — Development Guide
 
-Mnemonic is a local-first, air-gapped semantic memory system built in Go. It uses 8 cognitive agents, SQLite with FTS5 + vector search, and a local LLM (via LM Studio) for semantic understanding.
+Mnemonic is a local-first, air-gapped semantic memory system built in Go. It uses 9 cognitive agents + orchestrator + reactor, SQLite with FTS5 + vector search, and a local LLM (via LM Studio) for semantic understanding.
 
 ## Build & Test
 
@@ -22,7 +22,7 @@ golangci-lint run             # Lint (uses .golangci.yml config)
 cmd/mnemonic/          CLI + daemon entry point
 cmd/benchmark/         End-to-end benchmark
 internal/
-  agent/               8 cognitive agents + orchestrator + reactor
+  agent/               9 cognitive agents + orchestrator + reactor
     perception/        Watch filesystem/terminal/clipboard, heuristic filter
     encoding/          LLM compression, concept extraction, association linking
     episoding/         Temporal episode clustering
@@ -35,7 +35,7 @@ internal/
     reactor/           Event-driven rule engine
   api/                 REST API server + routes
   web/                 Embedded dashboard (single index.html, D3.js graph)
-  mcp/                 MCP server (10 tools for Claude Code)
+  mcp/                 MCP server (13 tools for Claude Code)
   store/               Store interface + SQLite implementation
   llm/                 LLM provider interface + LM Studio client
   watcher/             Filesystem (FSEvents/fsnotify), terminal, clipboard
@@ -84,7 +84,7 @@ See [GitHub Issues](https://github.com/CalebisGross/mnemonic/issues) for tracked
 
 ## MCP Tools Available
 
-You have 10 tools via the `mnemonic` MCP server:
+You have 13 tools via the `mnemonic` MCP server:
 
 | Tool | When to Use |
 |------|-------------|
@@ -98,6 +98,9 @@ You have 10 tools via the `mnemonic` MCP server:
 | `get_patterns` | View discovered recurring patterns |
 | `get_insights` | View metacognition observations and abstractions |
 | `feedback` | Report recall quality (helps system learn) |
+| `audit_encodings` | Review recent encoding quality and suggest improvements |
+| `coach_local_llm` | Write coaching guidance to improve local LLM prompts |
+| `ingest_project` | Bulk-ingest a project directory into memory |
 
 ### At Session Start
 
