@@ -10,21 +10,55 @@ The system runs local LLMs via LM Studio for semantic understanding, stores ever
 
 The "analog LLM" vision: the association graph IS the model. Memories build into patterns, patterns into principles, principles into axioms. The system learns, self-corrects, and gets smarter autonomously.
 
-## Quick Start
+## Installation
 
-**Prerequisites:**
-- Go 1.23+
-- LM Studio running locally — see [LM Studio Setup](docs/setup-lmstudio.md)
-- CGO enabled (for SQLite)
+### Pre-built Binaries (recommended)
 
-**Setup:**
+Download the latest release for your platform from [GitHub Releases](https://github.com/CalebisGross/mnemonic/releases):
+
+```bash
+# macOS Apple Silicon
+curl -L https://github.com/CalebisGross/mnemonic/releases/latest/download/mnemonic_darwin_arm64.tar.gz | tar xz
+sudo mv mnemonic /usr/local/bin/
+
+# macOS Intel
+curl -L https://github.com/CalebisGross/mnemonic/releases/latest/download/mnemonic_darwin_amd64.tar.gz | tar xz
+sudo mv mnemonic /usr/local/bin/
+
+# Linux x86_64
+curl -L https://github.com/CalebisGross/mnemonic/releases/latest/download/mnemonic_linux_amd64.tar.gz | tar xz
+sudo mv mnemonic /usr/local/bin/
+```
+
+### Homebrew (macOS/Linux)
+
+```bash
+brew install CalebisGross/tap/mnemonic
+```
+
+### Build from Source
+
+Requires Go 1.23+ and CGO (C compiler).
+
 ```bash
 git clone https://github.com/CalebisGross/mnemonic.git
 cd mnemonic
-# Edit config.yaml: set llm.chat_model, llm.embedding_model
-# See docs/setup-lmstudio.md for recommended models and settings
 make build
-./bin/mnemonic serve   # Run in foreground (recommended for first run)
+# Binary at ./bin/mnemonic
+```
+
+## Quick Start
+
+**Prerequisites:**
+- LM Studio running locally — see [LM Studio Setup](docs/setup-lmstudio.md)
+
+**Setup:**
+```bash
+# Copy the example config and edit it
+cp config.yaml ~/.mnemonic/config.yaml
+# Edit ~/.mnemonic/config.yaml: set llm.chat_model, llm.embedding_model
+# See docs/setup-lmstudio.md for recommended models and settings
+mnemonic serve   # Run in foreground (recommended for first run)
 # Open http://127.0.0.1:9999
 ```
 
@@ -32,11 +66,11 @@ The data directory (`~/.mnemonic/`) is created automatically on first run.
 
 **First commands:**
 ```bash
-./bin/mnemonic status    # System health
-./bin/mnemonic diagnose  # Check config, DB, LLM connectivity
-./bin/mnemonic remember "I'm learning about memory systems"
-./bin/mnemonic recall "memory"
-./bin/mnemonic watch     # Live event stream
+mnemonic status    # System health
+mnemonic diagnose  # Check config, DB, LLM connectivity
+mnemonic remember "I'm learning about memory systems"
+mnemonic recall "memory"
+mnemonic watch     # Live event stream
 ```
 
 ## Architecture
