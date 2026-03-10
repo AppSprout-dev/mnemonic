@@ -482,8 +482,8 @@
         .strength-fill { height: 100%; border-radius: 2px; background: linear-gradient(90deg, var(--accent-teal), var(--accent-green)); }
 
         /* ── Graph View ── */
-        .graph-view { position: relative; overflow: hidden !important; }
-        .graph-view svg { width: 100%; height: 100%; }
+        .graph-view { position: relative; overflow: hidden !important; height: 100%; }
+        .graph-view svg { width: 100%; height: 100%; display: block; }
         .graph-controls {
             position: absolute; bottom: 20px; left: 20px;
             background: var(--bg-secondary); border: 1px solid var(--border-color);
@@ -914,7 +914,7 @@
 
             <!-- Graph View -->
             <section class="view graph-view" id="view-graph">
-                <svg id="graphSvg"></svg>
+                <svg id="graphSvg" preserveAspectRatio="xMidYMid meet"></svg>
                 <div id="graphTooltip"></div>
                 <div class="graph-legend" id="graphLegend">
                     <h4>States</h4>
@@ -1475,6 +1475,7 @@
         svg.selectAll('*').remove();
         var width = container.clientWidth;
         var height = container.clientHeight;
+        svg.attr('viewBox', '0 0 ' + width + ' ' + height);
         var nodes = (data.nodes || []).map(function(n) { return Object.assign({}, n); });
         var edges = (data.edges || []).map(function(e) { return Object.assign({}, e); });
 
@@ -1496,10 +1497,16 @@
         var relColor = { similar: '#64748b', caused_by: '#3b82f6', contradicts: '#ef4444', temporal: '#06b6d4', reinforces: '#10b981', part_of: '#8b5cf6' };
         var relDash = { similar: '', caused_by: '6,3', contradicts: '3,3', temporal: '8,4', reinforces: '', part_of: '4,2' };
 
+        // Adaptive force parameters based on node count
+        var n = nodes.length;
+        var chargeStrength = Math.max(-500, Math.min(-80, -300 * (30 / Math.max(n, 1))));
+        var linkDistance = Math.max(40, Math.min(160, 60 + n * 0.5));
+        var centerStrength = n < 20 ? 0.1 : 0.05;
+
         var simulation = d3.forceSimulation(nodes)
-            .force('link', d3.forceLink(validEdges).id(function(d) { return d.id; }).distance(80))
-            .force('charge', d3.forceManyBody().strength(-300))
-            .force('center', d3.forceCenter(width / 2, height / 2).strength(0.05))
+            .force('link', d3.forceLink(validEdges).id(function(d) { return d.id; }).distance(linkDistance))
+            .force('charge', d3.forceManyBody().strength(chargeStrength))
+            .force('center', d3.forceCenter(width / 2, height / 2).strength(centerStrength))
             .force('collision', d3.forceCollide().radius(function(d) { return Math.max(8, (d.salience || 0.5) * 30) + 4; }));
         state.graphSimulation = simulation;
 
@@ -1589,13 +1596,47 @@
     function closeGraphDetail() { document.getElementById('graphDetail').classList.remove('open'); }
 
     function fitGraph() {
-        if (!state.graphSvg || !state.graphZoom) return;
+        if (!state.graphSvg || !state.graphZoom || !state.graphSimulation) return;
         var container = document.getElementById('view-graph');
-        state.graphSvg.transition().duration(500).call(state.graphZoom.transform, d3.zoomIdentity.translate(container.clientWidth / 2, container.clientHeight / 2).scale(0.8).translate(-container.clientWidth / 2, -container.clientHeight / 2));
-        if (state.graphSimulation) state.graphSimulation.alpha(0.3).restart();
+        var width = container.clientWidth;
+        var height = container.clientHeight;
+        var nodes = state.graphSimulation.nodes();
+        if (nodes.length === 0) return;
+
+        var padding = 60;
+        var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        nodes.forEach(function(d) {
+            if (d.x < minX) minX = d.x;
+            if (d.y < minY) minY = d.y;
+            if (d.x > maxX) maxX = d.x;
+            if (d.y > maxY) maxY = d.y;
+        });
+
+        var bw = maxX - minX || 1;
+        var bh = maxY - minY || 1;
+        var scale = Math.min((width - padding * 2) / bw, (height - padding * 2) / bh, 2);
+        var cx = (minX + maxX) / 2;
+        var cy = (minY + maxY) / 2;
+        var tx = width / 2 - cx * scale;
+        var ty = height / 2 - cy * scale;
+
+        state.graphSvg.transition().duration(500).call(
+            state.graphZoom.transform,
+            d3.zoomIdentity.translate(tx, ty).scale(scale)
+        );
     }
 
-    function resizeGraph() { if (state.graphData) renderGraph(state.graphData); }
+    function resizeGraph() {
+        if (!state.graphSvg) { if (state.graphData) renderGraph(state.graphData); return; }
+        var container = document.getElementById('view-graph');
+        var width = container.clientWidth;
+        var height = container.clientHeight;
+        state.graphSvg.attr('viewBox', '0 0 ' + width + ' ' + height);
+        if (state.graphSimulation) {
+            state.graphSimulation.force('center', d3.forceCenter(width / 2, height / 2));
+            state.graphSimulation.alpha(0.1).restart();
+        }
+    }
 
     // ── Activity Drawer ──
     function toggleDrawer() {
