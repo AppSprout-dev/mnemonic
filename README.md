@@ -188,7 +188,7 @@ make setup-hooks    # Configure git pre-commit hooks
 | macOS ARM (M-series) | **Full** | Primary development platform |
 | macOS x86 | Untested | Should work with CGO enabled |
 | Linux x86_64 | **Full** | All features including systemd daemon management |
-| Windows | Not supported | Clipboard watcher has Windows code; daemon does not |
+| Windows | **Not supported** | Compiles but `start`/`stop`/`install` return errors. Use `mnemonic serve` for foreground mode. Full support planned for a future release. |
 
 ## License
 
