@@ -184,6 +184,8 @@ func startCommand(configPath string) {
 			fmt.Printf("%sMnemonic started%s (%s, PID %d)\n", colorGreen, colorReset, svc.ServiceName(), pid)
 			if cfg != nil {
 				fmt.Printf("  Dashboard: http://%s:%d\n", cfg.API.Host, cfg.API.Port)
+				healthURL := fmt.Sprintf("http://%s:%d/api/v1/health", cfg.API.Host, cfg.API.Port)
+				checkLLMFromAPI(healthURL, cfg.LLM.Endpoint)
 			}
 			fmt.Printf("  Logs:      %s\n", daemon.LogPath())
 		} else {
@@ -249,9 +251,33 @@ func startCommand(configPath string) {
 		fmt.Printf("  Dashboard: http://%s:%d\n", cfg.API.Host, cfg.API.Port)
 		fmt.Printf("  Logs:      %s\n", daemon.LogPath())
 		fmt.Printf("  PID file:  %s\n", daemon.PIDFilePath())
+
+		// Check if LLM is available via health endpoint
+		checkLLMFromAPI(apiURL, cfg.LLM.Endpoint)
 	} else {
 		fmt.Printf("%sWarning:%s Daemon started (PID %d) but health check failed.\n", colorYellow, colorReset, pid)
 		fmt.Printf("  Check logs: %s\n", daemon.LogPath())
+	}
+}
+
+// checkLLMFromAPI queries the health endpoint and warns if LLM is unavailable.
+func checkLLMFromAPI(healthURL, llmEndpoint string) {
+	resp, err := http.Get(healthURL)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+
+	var health map[string]interface{}
+	if json.NewDecoder(resp.Body).Decode(&health) != nil {
+		return
+	}
+
+	llmAvail, _ := health["llm_available"].(bool)
+	if !llmAvail {
+		fmt.Printf("\n  %s⚠ LM Studio is not reachable at %s%s\n", colorYellow, llmEndpoint, colorReset)
+		fmt.Printf("  Memory encoding will not work until LM Studio is running.\n")
+		fmt.Printf("  Run 'mnemonic diagnose' for details.\n")
 	}
 }
 
@@ -571,6 +597,30 @@ func statusCommand(configPath string) {
 				fmt.Printf("    Merged:         %d\n", stats.MergedMemories)
 				fmt.Printf("    Associations:   %d\n", stats.TotalAssociations)
 				fmt.Printf("    DB size:        %.1f KB\n", float64(stats.StorageSizeBytes)/1024)
+			}
+		}
+	}
+
+	// Encoding queue depth — direct DB query
+	fmt.Printf("\n  %sEncoding Queue%s\n", colorBold, colorReset)
+	{
+		db, err := sqlite.NewSQLiteStore(cfg.Store.DBPath)
+		if err == nil {
+			defer db.Close()
+			ctx := context.Background()
+			var unprocessed int
+			row := db.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM raw_memories WHERE processed = 0")
+			if row.Scan(&unprocessed) == nil {
+				queueColor := colorGreen
+				queueNote := ""
+				if unprocessed > 500 {
+					queueColor = colorRed
+					queueNote = " (LLM may be down — run 'mnemonic diagnose')"
+				} else if unprocessed > 100 {
+					queueColor = colorYellow
+					queueNote = " (processing)"
+				}
+				fmt.Printf("    Unprocessed:    %s%d%s%s\n", queueColor, unprocessed, colorReset, queueNote)
 			}
 		}
 	}
@@ -1028,10 +1078,14 @@ func serveCommand(configPath string) {
 	bus := events.NewInMemoryBus(bufferSize)
 	defer bus.Close()
 
-	// Check LLM health (log warning if unavailable, don't fail startup)
+	// Check LLM health (warn loudly if unavailable, don't fail startup)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.LLM.TimeoutSec)*time.Second)
 	if err := llmProvider.Health(ctx); err != nil {
 		log.Warn("LLM provider unavailable at startup", "endpoint", cfg.LLM.Endpoint, "error", err)
+		fmt.Fprintf(os.Stderr, "\n%s⚠ WARNING: LM Studio is not reachable at %s%s\n", colorYellow, cfg.LLM.Endpoint, colorReset)
+		fmt.Fprintf(os.Stderr, "  Memory encoding will not work until LM Studio is running.\n")
+		fmt.Fprintf(os.Stderr, "  Raw observations will queue and be processed once LM Studio is available.\n")
+		fmt.Fprintf(os.Stderr, "  Run 'mnemonic diagnose' for a full health check.\n\n")
 	}
 	cancel()
 
