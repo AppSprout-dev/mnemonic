@@ -13,6 +13,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/appsprout/mnemonic/internal/llm"
 	store "github.com/appsprout/mnemonic/internal/store"
 )
 
@@ -1874,6 +1875,119 @@ func (s *SQLiteStore) GetSourceDistribution(ctx context.Context) (map[string]int
 		dist[source] = count
 	}
 	return dist, rows.Err()
+}
+
+// RecordLLMUsage inserts an LLM usage record.
+func (s *SQLiteStore) RecordLLMUsage(ctx context.Context, record llm.LLMUsageRecord) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO llm_usage (timestamp, operation, caller, model, prompt_tokens, completion_tokens, total_tokens, latency_ms, success, error_message)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		record.Timestamp.UTC().Format(time.RFC3339),
+		record.Operation,
+		record.Caller,
+		record.Model,
+		record.PromptTokens,
+		record.CompletionTokens,
+		record.TotalTokens,
+		record.LatencyMs,
+		record.Success,
+		record.ErrorMessage,
+	)
+	if err != nil {
+		return fmt.Errorf("recording LLM usage: %w", err)
+	}
+	return nil
+}
+
+// GetLLMUsageSummary returns aggregated LLM usage since the given time.
+func (s *SQLiteStore) GetLLMUsageSummary(ctx context.Context, since time.Time) (store.LLMUsageSummary, error) {
+	sinceStr := since.UTC().Format(time.RFC3339)
+	summary := store.LLMUsageSummary{
+		ByAgent:     make(map[string]store.AgentUsage),
+		ByOperation: make(map[string]int),
+	}
+
+	// Totals
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*), COALESCE(SUM(total_tokens),0), COALESCE(SUM(prompt_tokens),0),
+		        COALESCE(SUM(completion_tokens),0), COALESCE(AVG(latency_ms),0),
+		        COALESCE(SUM(CASE WHEN success=0 THEN 1 ELSE 0 END),0)
+		 FROM llm_usage WHERE timestamp >= ?`, sinceStr,
+	).Scan(&summary.TotalRequests, &summary.TotalTokens, &summary.PromptTokens,
+		&summary.CompletionTokens, &summary.AvgLatencyMs, &summary.ErrorCount)
+	if err != nil {
+		return summary, fmt.Errorf("querying LLM usage totals: %w", err)
+	}
+
+	// By agent
+	agentRows, err := s.db.QueryContext(ctx,
+		`SELECT caller, COUNT(*), COALESCE(SUM(total_tokens),0)
+		 FROM llm_usage WHERE timestamp >= ? GROUP BY caller`, sinceStr)
+	if err != nil {
+		return summary, fmt.Errorf("querying LLM usage by agent: %w", err)
+	}
+	defer agentRows.Close()
+	for agentRows.Next() {
+		var caller string
+		var au store.AgentUsage
+		if err := agentRows.Scan(&caller, &au.Requests, &au.TotalTokens); err != nil {
+			return summary, fmt.Errorf("scanning agent usage: %w", err)
+		}
+		summary.ByAgent[caller] = au
+	}
+	if err := agentRows.Err(); err != nil {
+		return summary, fmt.Errorf("iterating agent usage: %w", err)
+	}
+
+	// By operation
+	opRows, err := s.db.QueryContext(ctx,
+		`SELECT operation, COUNT(*) FROM llm_usage WHERE timestamp >= ? GROUP BY operation`, sinceStr)
+	if err != nil {
+		return summary, fmt.Errorf("querying LLM usage by operation: %w", err)
+	}
+	defer opRows.Close()
+	for opRows.Next() {
+		var op string
+		var count int
+		if err := opRows.Scan(&op, &count); err != nil {
+			return summary, fmt.Errorf("scanning operation usage: %w", err)
+		}
+		summary.ByOperation[op] = count
+	}
+	if err := opRows.Err(); err != nil {
+		return summary, fmt.Errorf("iterating operation usage: %w", err)
+	}
+
+	return summary, nil
+}
+
+// GetLLMUsageLog returns the most recent LLM usage records.
+func (s *SQLiteStore) GetLLMUsageLog(ctx context.Context, limit int) ([]llm.LLMUsageRecord, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT timestamp, operation, caller, model, prompt_tokens, completion_tokens,
+		        total_tokens, latency_ms, success, error_message
+		 FROM llm_usage ORDER BY timestamp DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("querying LLM usage log: %w", err)
+	}
+	defer rows.Close()
+
+	var records []llm.LLMUsageRecord
+	for rows.Next() {
+		var r llm.LLMUsageRecord
+		var ts string
+		if err := rows.Scan(&ts, &r.Operation, &r.Caller, &r.Model,
+			&r.PromptTokens, &r.CompletionTokens, &r.TotalTokens,
+			&r.LatencyMs, &r.Success, &r.ErrorMessage); err != nil {
+			return nil, fmt.Errorf("scanning LLM usage record: %w", err)
+		}
+		r.Timestamp, _ = time.Parse(time.RFC3339, ts)
+		records = append(records, r)
+	}
+	return records, rows.Err()
 }
 
 // Close closes the database connection.

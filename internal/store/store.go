@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/appsprout/mnemonic/internal/llm"
 )
 
 // ErrNotFound is returned when a requested entity does not exist.
@@ -84,6 +86,24 @@ type ActivationConfig struct {
 	ActivationThreshold float32 `json:"activation_threshold"`
 	DecayFactor         float32 `json:"decay_factor"`
 	MaxResults          int     `json:"max_results"`
+}
+
+// LLMUsageSummary aggregates LLM usage metrics over a time period.
+type LLMUsageSummary struct {
+	TotalRequests    int                   `json:"total_requests"`
+	TotalTokens      int                   `json:"total_tokens"`
+	PromptTokens     int                   `json:"prompt_tokens"`
+	CompletionTokens int                   `json:"completion_tokens"`
+	AvgLatencyMs     float64               `json:"avg_latency_ms"`
+	ErrorCount       int                   `json:"error_count"`
+	ByAgent          map[string]AgentUsage `json:"by_agent"`
+	ByOperation      map[string]int        `json:"by_operation"`
+}
+
+// AgentUsage tracks per-agent LLM usage.
+type AgentUsage struct {
+	Requests    int `json:"requests"`
+	TotalTokens int `json:"total_tokens"`
 }
 
 // StoreStatistics aggregates memory health metrics.
@@ -381,6 +401,11 @@ type Store interface {
 
 	// --- Housekeeping ---
 	GetStatistics(ctx context.Context) (StoreStatistics, error)
+
+	// --- LLM usage tracking ---
+	RecordLLMUsage(ctx context.Context, record llm.LLMUsageRecord) error
+	GetLLMUsageSummary(ctx context.Context, since time.Time) (LLMUsageSummary, error)
+	GetLLMUsageLog(ctx context.Context, limit int) ([]llm.LLMUsageRecord, error)
 
 	// --- Lifecycle ---
 	Close() error
