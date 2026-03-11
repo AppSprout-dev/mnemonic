@@ -314,6 +314,17 @@ func (m *mockStore) DeleteOldMetaObservations(_ context.Context, _ time.Time) (i
 	return 0, nil
 }
 
+// --- LLM usage tracking ---
+func (m *mockStore) RecordLLMUsage(_ context.Context, _ llm.LLMUsageRecord) error {
+	return nil
+}
+func (m *mockStore) GetLLMUsageSummary(_ context.Context, _ time.Time) (store.LLMUsageSummary, error) {
+	return store.LLMUsageSummary{}, nil
+}
+func (m *mockStore) GetLLMUsageLog(_ context.Context, _ int) ([]llm.LLMUsageRecord, error) {
+	return nil, nil
+}
+
 func (m *mockStore) Close() error { return nil }
 
 // ---------------------------------------------------------------------------

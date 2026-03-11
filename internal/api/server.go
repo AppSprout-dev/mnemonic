@@ -110,6 +110,9 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/abstractions", routes.HandleListAbstractions(s.deps.Store, s.deps.Log))
 	s.mux.HandleFunc("GET /api/v1/projects", routes.HandleListProjects(s.deps.Store, s.deps.Log))
 
+	// LLM usage monitoring
+	s.mux.HandleFunc("GET /api/v1/llm/usage", routes.HandleLLMUsage(s.deps.Store, s.deps.Log))
+
 	// Graph data for D3.js visualization
 	s.mux.HandleFunc("GET /api/v1/graph", routes.HandleGraph(s.deps.Store, s.deps.Log))
 

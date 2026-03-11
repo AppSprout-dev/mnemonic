@@ -233,6 +233,25 @@ CREATE TABLE IF NOT EXISTS system_meta (
 );
 `
 
+const migration006 = `
+-- Migration 006: LLM usage tracking
+CREATE TABLE IF NOT EXISTS llm_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+    operation TEXT NOT NULL,
+    caller TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+    completion_tokens INTEGER NOT NULL DEFAULT 0,
+    total_tokens INTEGER NOT NULL DEFAULT 0,
+    latency_ms INTEGER NOT NULL DEFAULT 0,
+    success INTEGER NOT NULL DEFAULT 1,
+    error_message TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_llm_usage_timestamp ON llm_usage(timestamp);
+CREATE INDEX IF NOT EXISTS idx_llm_usage_caller ON llm_usage(caller);
+`
+
 // InitSchema initializes the SQLite database schema by creating all tables,
 // indexes, and triggers if they don't already exist. It also configures
 // important PRAGMA settings for performance and safety.
@@ -331,6 +350,11 @@ func InitSchema(db *sql.DB) error {
 	// Apply migration 005: System metadata
 	if _, err := db.Exec(migration005); err != nil {
 		return fmt.Errorf("failed to apply migration 005: %w", err)
+	}
+
+	// Apply migration 006: LLM usage tracking
+	if _, err := db.Exec(migration006); err != nil {
+		return fmt.Errorf("failed to apply migration 006: %w", err)
 	}
 
 	return nil
