@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/appsprout/mnemonic/internal/store"
+	"github.com/appsprout-dev/mnemonic/internal/store"
 	"github.com/google/uuid"
 )
 

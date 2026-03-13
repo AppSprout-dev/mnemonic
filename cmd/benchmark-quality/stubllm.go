@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/appsprout/mnemonic/internal/llm"
+	"github.com/appsprout-dev/mnemonic/internal/llm"
 )
 
 const bowDims = 128

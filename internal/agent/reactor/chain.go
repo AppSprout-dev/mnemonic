@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/appsprout/mnemonic/internal/events"
-	"github.com/appsprout/mnemonic/internal/store"
+	"github.com/appsprout-dev/mnemonic/internal/events"
+	"github.com/appsprout-dev/mnemonic/internal/store"
 )
 
 // Chain is a declarative autonomous behavior rule.

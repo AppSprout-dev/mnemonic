@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/appsprout/mnemonic/internal/events"
+	"github.com/appsprout-dev/mnemonic/internal/events"
 )
 
 // CooldownCondition checks that enough time has elapsed since this chain last fired.

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	store "github.com/appsprout/mnemonic/internal/store"
+	store "github.com/appsprout-dev/mnemonic/internal/store"
 )
 
 // episodeColumns is the standard column list for episode queries.

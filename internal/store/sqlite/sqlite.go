@@ -13,8 +13,8 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
-	"github.com/appsprout/mnemonic/internal/llm"
-	store "github.com/appsprout/mnemonic/internal/store"
+	"github.com/appsprout-dev/mnemonic/internal/llm"
+	store "github.com/appsprout-dev/mnemonic/internal/store"
 )
 
 // scanner is satisfied by both *sql.Row and *sql.Rows.

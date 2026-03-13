@@ -4,35 +4,35 @@ All notable changes to Mnemonic will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follows [Semantic Versioning](https://semver.org/).
 
-## [0.10.0](https://github.com/CalebisGross/mnemonic/compare/v0.9.0...v0.10.0) (2026-03-13)
+## [0.10.0](https://github.com/appsprout-dev/mnemonic/compare/v0.9.0...v0.10.0) (2026-03-13)
 
 
 ### Features
 
-* add ISO 8601 timestamps to evolution files ([cf76e54](https://github.com/CalebisGross/mnemonic/commit/cf76e5499a38f6dc5d20fec4fd611ce5e039aaca))
-* add ISO 8601 timestamps to evolution files ([f1e42dc](https://github.com/CalebisGross/mnemonic/commit/f1e42dcfcb97d6b3d763fcd406f30a5dab2a618f))
+* add ISO 8601 timestamps to evolution files ([cf76e54](https://github.com/appsprout-dev/mnemonic/commit/cf76e5499a38f6dc5d20fec4fd611ce5e039aaca))
+* add ISO 8601 timestamps to evolution files ([f1e42dc](https://github.com/appsprout-dev/mnemonic/commit/f1e42dcfcb97d6b3d763fcd406f30a5dab2a618f))
 
-## [0.9.0](https://github.com/CalebisGross/mnemonic/compare/v0.8.2...v0.9.0) (2026-03-13)
+## [0.9.0](https://github.com/appsprout-dev/mnemonic/compare/v0.8.2...v0.9.0) (2026-03-13)
 
 
 ### Features
 
-* config sweep + full pipeline benchmark ([de6fc47](https://github.com/CalebisGross/mnemonic/commit/de6fc47564cb1448c2798ee7e0aad172a476345f))
+* config sweep + full pipeline benchmark ([de6fc47](https://github.com/appsprout-dev/mnemonic/commit/de6fc47564cb1448c2798ee7e0aad172a476345f))
 
-## [0.8.2](https://github.com/CalebisGross/mnemonic/compare/v0.8.1...v0.8.2) (2026-03-13)
-
-
-### Bug Fixes
-
-* render markdown in evolution timeline changelog ([f675737](https://github.com/CalebisGross/mnemonic/commit/f675737965c7565ed663fb6916b20fa99705ee14))
-* render markdown in evolution timeline changelog ([95486a2](https://github.com/CalebisGross/mnemonic/commit/95486a215a9f9b445b8f9035d7252de8c41c39e7))
-
-## [0.8.1](https://github.com/CalebisGross/mnemonic/compare/v0.8.0...v0.8.1) (2026-03-13)
+## [0.8.2](https://github.com/appsprout-dev/mnemonic/compare/v0.8.1...v0.8.2) (2026-03-13)
 
 
 ### Bug Fixes
 
-* correct CHANGELOG date, agent counts, and release-please marker ([65b64a6](https://github.com/CalebisGross/mnemonic/commit/65b64a619ca91f956c3d6672ad64672a58e3e941))
+* render markdown in evolution timeline changelog ([f675737](https://github.com/appsprout-dev/mnemonic/commit/f675737965c7565ed663fb6916b20fa99705ee14))
+* render markdown in evolution timeline changelog ([95486a2](https://github.com/appsprout-dev/mnemonic/commit/95486a215a9f9b445b8f9035d7252de8c41c39e7))
+
+## [0.8.1](https://github.com/appsprout-dev/mnemonic/compare/v0.8.0...v0.8.1) (2026-03-13)
+
+
+### Bug Fixes
+
+* correct CHANGELOG date, agent counts, and release-please marker ([65b64a6](https://github.com/appsprout-dev/mnemonic/commit/65b64a619ca91f956c3d6672ad64672a58e3e941))
 
 ## [0.8.0] - 2026-03-13
 

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/appsprout/mnemonic/internal/llm"
+	"github.com/appsprout-dev/mnemonic/internal/llm"
 )
 
 // ErrNotFound is returned when a requested entity does not exist.

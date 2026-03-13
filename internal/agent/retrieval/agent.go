@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/appsprout/mnemonic/internal/llm"
-	"github.com/appsprout/mnemonic/internal/store"
+	"github.com/appsprout-dev/mnemonic/internal/llm"
+	"github.com/appsprout-dev/mnemonic/internal/store"
 	"github.com/google/uuid"
 )
 

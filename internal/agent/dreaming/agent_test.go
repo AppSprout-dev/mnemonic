@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/appsprout/mnemonic/internal/store/storetest"
+	"github.com/appsprout-dev/mnemonic/internal/store/storetest"
 )
 
 // TestNewDreamingAgent tests that NewDreamingAgent creates an agent with correct config.

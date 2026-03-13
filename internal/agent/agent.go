@@ -3,7 +3,7 @@ package agent
 import (
 	"context"
 
-	"github.com/appsprout/mnemonic/internal/events"
+	"github.com/appsprout-dev/mnemonic/internal/events"
 )
 
 // Agent is the base interface for all cognitive layer agents.

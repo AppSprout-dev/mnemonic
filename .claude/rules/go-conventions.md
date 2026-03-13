@@ -44,5 +44,5 @@
 
 ## Module Path
 
-- Go module: `github.com/appsprout/mnemonic` (this is the company module path, keep it)
-- Import paths follow this: `github.com/appsprout/mnemonic/internal/...`
+- Go module: `github.com/appsprout-dev/mnemonic`
+- Import paths follow this: `github.com/appsprout-dev/mnemonic/internal/...`
