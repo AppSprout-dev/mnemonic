@@ -22,16 +22,20 @@ type evolutionResponse struct {
 }
 
 type principle struct {
-	ID         string  `json:"id" yaml:"id"`
-	Text       string  `json:"text" yaml:"text"`
-	Source     string  `json:"source" yaml:"source"`
-	Confidence float64 `json:"confidence" yaml:"confidence"`
-	Created    string  `json:"created,omitempty" yaml:"created"`
+	ID             string  `json:"id" yaml:"id"`
+	Text           string  `json:"text" yaml:"text"`
+	Source         string  `json:"source" yaml:"source"`
+	Confidence     float64 `json:"confidence" yaml:"confidence"`
+	Created        string  `json:"created,omitempty" yaml:"created"`
+	LastReinforced string  `json:"last_reinforced,omitempty" yaml:"last_reinforced"`
 }
 
 type strategy struct {
-	Steps []string `json:"steps" yaml:"steps"`
-	Tips  []string `json:"tips,omitempty" yaml:"tips"`
+	Description string   `json:"description,omitempty" yaml:"description"`
+	Steps       []string `json:"steps" yaml:"steps"`
+	Tips        []string `json:"tips,omitempty" yaml:"tips"`
+	LearnedFrom string   `json:"learned_from,omitempty" yaml:"learned_from"`
+	LastUpdated string   `json:"last_updated,omitempty" yaml:"last_updated"`
 }
 
 type patch struct {

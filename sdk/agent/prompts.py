@@ -43,8 +43,8 @@ Add new principles when you discover a reliable rule through experience:
   text: "The principle in imperative form"
   source: "How/when you learned this"
   confidence: 0.5  # start at 0.5, increase with validation
-  created: "<today's date>"
-  last_reinforced: "<today's date>"  # reset when confidence increases
+  created: "<current ISO 8601 datetime>"   # e.g. 2026-03-13T14:32:00-04:00
+  last_reinforced: "<current ISO 8601 datetime>"  # reset when confidence increases
 ```
 Note: Principles decay automatically (~2%/day after 14 days without reinforcement).
 When you validate a principle, update both `confidence` and `last_reinforced`.
@@ -53,12 +53,14 @@ When you validate a principle, update both `confidence` and `last_reinforced`.
 Add or refine strategies for task types (bug_fix, new_feature, refactor, etc.):
 ```yaml
 task_type:
+  description: "When this strategy applies"
   steps:
     - "Step 1"
     - "Step 2"
   tips:
     - "Helpful tip"
   learned_from: "Description of experience"
+  last_updated: "<current ISO 8601 datetime>"  # update whenever strategy changes
 ```
 
 ### evolution/prompt_patches.yaml
@@ -67,11 +69,11 @@ If you notice a gap in your own behavior, add an instruction:
 - id: pp<next_number>
   instruction: "The instruction to add to your prompt"
   reason: "Why this is needed"
-  created: "<today's date>"
+  created: "<current ISO 8601 datetime>"  # e.g. 2026-03-13T14:32:00-04:00
 ```
 
 ### Rules:
-- ALWAYS log changes in evolution/changelog.md with date, what changed, and why.
+- ALWAYS log changes in evolution/changelog.md with ISO 8601 datetime, what changed, and why.
 - NEVER modify core infrastructure (main.py, session.py, options.py, config.py).
 - Only modify files inside the evolution/ directory.
 - Be conservative — only add principles with real evidence, not speculation.
@@ -95,7 +97,7 @@ Reflect on the task you just completed:
 3. If you discovered a new reliable principle, add it to evolution/principles.yaml.
 4. If you developed a better strategy for this task type, update evolution/strategies.yaml.
 5. If you realized your prompt is missing something, add to evolution/prompt_patches.yaml.
-6. Log any evolution/ changes in evolution/changelog.md with today's date and rationale.
+6. Log any evolution/ changes in evolution/changelog.md with current ISO 8601 datetime and rationale.
 Be concise. Focus on what's genuinely worth preserving.
 """
 
@@ -104,14 +106,14 @@ Time for a self-improvement cycle. Reflect deeply on recent experience:
 1. Call mcp__mnemonic__get_insights to review metacognition observations.
 2. Call mcp__mnemonic__get_patterns to review recurring patterns.
 3. Read evolution/principles.yaml — remove stale principles, increase confidence on validated ones.
-   When you increase a principle's confidence, also set `last_reinforced: "<today's date>"` (YYYY-MM-DD).
+   When you increase a principle's confidence, also set `last_reinforced` to the current ISO 8601 datetime.
    This resets the automatic decay timer. Principles that go unreinforced for 14+ days lose confidence
    at ~2%/day and are pruned below 0.3 — so only reinforce principles you have fresh evidence for.
 4. Read evolution/strategies.yaml — refine strategies based on recent experience.
 5. Consider adding new prompt_patches if you notice behavioral gaps.
 6. Call mcp__mnemonic__audit_encodings (limit=5) — review recent encoding quality.
    If you see systematic quality gaps, call mcp__mnemonic__coach_local_llm to improve them.
-7. Log ALL changes in evolution/changelog.md with today's date, what changed, and why.
+7. Log ALL changes in evolution/changelog.md with current ISO 8601 datetime, what changed, and why.
 Only change things you have evidence for. Don't speculate.
 """
 
@@ -172,7 +174,9 @@ def _decay_stale_principles(evolution_dir: str) -> None:
             continue
 
         try:
-            anchor = datetime.strptime(str(anchor_str), "%Y-%m-%d")
+            raw = str(anchor_str)
+            # Support both date-only (YYYY-MM-DD) and ISO 8601 datetime
+            anchor = datetime.fromisoformat(raw[:10])
         except ValueError:
             surviving.append(p)
             continue
