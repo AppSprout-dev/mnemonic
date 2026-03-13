@@ -1,4 +1,4 @@
-module github.com/appsprout/mnemonic
+module github.com/appsprout-dev/mnemonic
 
 go 1.23
 

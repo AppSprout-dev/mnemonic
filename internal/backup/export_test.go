@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/appsprout/mnemonic/internal/store"
-	"github.com/appsprout/mnemonic/internal/store/sqlite"
+	"github.com/appsprout-dev/mnemonic/internal/store"
+	"github.com/appsprout-dev/mnemonic/internal/store/sqlite"
 )
 
 // setupTestStore creates a temporary SQLite store seeded with test data.

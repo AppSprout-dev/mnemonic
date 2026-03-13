@@ -8,9 +8,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/appsprout/mnemonic/internal/config"
-	"github.com/appsprout/mnemonic/internal/ingest"
-	"github.com/appsprout/mnemonic/internal/store/sqlite"
+	"github.com/appsprout-dev/mnemonic/internal/config"
+	"github.com/appsprout-dev/mnemonic/internal/ingest"
+	"github.com/appsprout-dev/mnemonic/internal/store/sqlite"
 )
 
 func ingestCommand(configPath string, args []string) {

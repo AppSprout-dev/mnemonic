@@ -14,26 +14,26 @@ The "analog LLM" vision: the association graph IS the model. Memories build into
 
 ### Pre-built Binaries (recommended)
 
-Download the latest release for your platform from [GitHub Releases](https://github.com/CalebisGross/mnemonic/releases):
+Download the latest release for your platform from [GitHub Releases](https://github.com/appsprout-dev/mnemonic/releases):
 
 ```bash
 # macOS Apple Silicon
-curl -L https://github.com/CalebisGross/mnemonic/releases/latest/download/mnemonic_darwin_arm64.tar.gz | tar xz
+curl -L https://github.com/appsprout-dev/mnemonic/releases/latest/download/mnemonic_darwin_arm64.tar.gz | tar xz
 sudo mv mnemonic /usr/local/bin/
 
 # macOS Intel
-curl -L https://github.com/CalebisGross/mnemonic/releases/latest/download/mnemonic_darwin_amd64.tar.gz | tar xz
+curl -L https://github.com/appsprout-dev/mnemonic/releases/latest/download/mnemonic_darwin_amd64.tar.gz | tar xz
 sudo mv mnemonic /usr/local/bin/
 
 # Linux x86_64
-curl -L https://github.com/CalebisGross/mnemonic/releases/latest/download/mnemonic_linux_amd64.tar.gz | tar xz
+curl -L https://github.com/appsprout-dev/mnemonic/releases/latest/download/mnemonic_linux_amd64.tar.gz | tar xz
 sudo mv mnemonic /usr/local/bin/
 ```
 
 ### Homebrew (macOS/Linux)
 
 ```bash
-brew install CalebisGross/tap/mnemonic
+brew install appsprout-dev/tap/mnemonic
 ```
 
 ### Build from Source
@@ -41,7 +41,7 @@ brew install CalebisGross/tap/mnemonic
 Requires Go 1.23+ and CGO (C compiler).
 
 ```bash
-git clone https://github.com/CalebisGross/mnemonic.git
+git clone https://github.com/appsprout-dev/mnemonic.git
 cd mnemonic
 make build
 # Binary at ./bin/mnemonic

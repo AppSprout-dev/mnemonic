@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/appsprout/mnemonic/internal/llm"
-	"github.com/appsprout/mnemonic/internal/store"
+	"github.com/appsprout-dev/mnemonic/internal/llm"
+	"github.com/appsprout-dev/mnemonic/internal/store"
 )
 
 // HealthResponse is the JSON response for the health check endpoint.

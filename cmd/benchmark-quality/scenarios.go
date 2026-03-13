@@ -5,7 +5,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/appsprout/mnemonic/internal/store"
+	"github.com/appsprout-dev/mnemonic/internal/store"
 )
 
 // syntheticEmbedding creates a deterministic embedding vector.
@@ -613,7 +613,7 @@ func needleScenario() scenario {
 		{"Chrome: opened 3 tabs from Google search results", "Browser activity: multiple tabs opened", 0.35},
 		{"File watcher: node_modules/.cache updated", "Build cache write", 0.38},
 		{"Terminal: ran 'ls -la internal/agent/' to list files", "Directory listing in agent package", 0.42},
-		{"Clipboard: copied import path github.com/appsprout/mnemonic", "Go import path copied", 0.45},
+		{"Clipboard: copied import path github.com/appsprout-dev/mnemonic", "Go import path copied", 0.45},
 		{"Chrome: read Go blog post about generics", "Browser: reading technical content", 0.48},
 		{"File watcher: .git/FETCH_HEAD modified after git fetch", "Git metadata update", 0.35},
 		{"Terminal: ran 'go doc context.WithTimeout'", "Go documentation lookup", 0.50},

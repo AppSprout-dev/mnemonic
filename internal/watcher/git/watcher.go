@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/appsprout/mnemonic/internal/watcher"
+	"github.com/appsprout-dev/mnemonic/internal/watcher"
 	"github.com/google/uuid"
 )
 

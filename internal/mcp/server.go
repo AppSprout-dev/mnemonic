@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/appsprout/mnemonic/internal/agent/retrieval"
-	"github.com/appsprout/mnemonic/internal/events"
-	"github.com/appsprout/mnemonic/internal/ingest"
-	"github.com/appsprout/mnemonic/internal/store"
+	"github.com/appsprout-dev/mnemonic/internal/agent/retrieval"
+	"github.com/appsprout-dev/mnemonic/internal/events"
+	"github.com/appsprout-dev/mnemonic/internal/ingest"
+	"github.com/appsprout-dev/mnemonic/internal/store"
 	"github.com/google/uuid"
 )
 

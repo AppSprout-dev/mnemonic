@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/appsprout/mnemonic/internal/events"
+	"github.com/appsprout-dev/mnemonic/internal/events"
 	"gopkg.in/yaml.v3"
 )
 

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/appsprout/mnemonic/internal/store"
+	"github.com/appsprout-dev/mnemonic/internal/store"
 )
 
 type GraphNode struct {

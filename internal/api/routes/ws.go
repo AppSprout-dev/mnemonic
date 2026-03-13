@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/appsprout/mnemonic/internal/events"
+	"github.com/appsprout-dev/mnemonic/internal/events"
 	"github.com/gorilla/websocket"
 )
 

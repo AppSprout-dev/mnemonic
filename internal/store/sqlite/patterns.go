@@ -7,7 +7,7 @@ import (
 	"sort"
 	"time"
 
-	store "github.com/appsprout/mnemonic/internal/store"
+	store "github.com/appsprout-dev/mnemonic/internal/store"
 )
 
 // patternColumns is the standard column list for pattern queries.

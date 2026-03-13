@@ -9,13 +9,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/appsprout/mnemonic/internal/agent/abstraction"
-	"github.com/appsprout/mnemonic/internal/agent/consolidation"
-	"github.com/appsprout/mnemonic/internal/agent/dreaming"
-	"github.com/appsprout/mnemonic/internal/agent/encoding"
-	"github.com/appsprout/mnemonic/internal/agent/episoding"
-	"github.com/appsprout/mnemonic/internal/agent/retrieval"
-	"github.com/appsprout/mnemonic/internal/store/sqlite"
+	"github.com/appsprout-dev/mnemonic/internal/agent/abstraction"
+	"github.com/appsprout-dev/mnemonic/internal/agent/consolidation"
+	"github.com/appsprout-dev/mnemonic/internal/agent/dreaming"
+	"github.com/appsprout-dev/mnemonic/internal/agent/encoding"
+	"github.com/appsprout-dev/mnemonic/internal/agent/episoding"
+	"github.com/appsprout-dev/mnemonic/internal/agent/retrieval"
+	"github.com/appsprout-dev/mnemonic/internal/store/sqlite"
 )
 
 // runPipelineScenario executes a full pipeline scenario:

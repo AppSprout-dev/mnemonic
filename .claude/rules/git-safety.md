@@ -2,7 +2,7 @@
 
 ## Branch Workflow
 
-- Remote: `origin` (https://github.com/CalebisGross/mnemonic.git)
+- Remote: `origin` (https://github.com/appsprout-dev/mnemonic.git)
 - Primary branch: `main`
 - **All new work starts on a feature branch** — never commit directly to `main`
 - Branch naming: `feat/<description>`, `fix/<description>`

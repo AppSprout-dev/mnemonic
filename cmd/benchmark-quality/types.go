@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/appsprout/mnemonic/internal/store"
+	"github.com/appsprout-dev/mnemonic/internal/store"
 )
 
 // labeledMemory wraps a memory with its ground-truth label.

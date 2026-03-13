@@ -50,17 +50,17 @@ changelog:
 
 release:
   github:
-    owner: CalebisGross
+    owner: appsprout-dev
     name: mnemonic
   draft: false
   prerelease: auto
 
 brews:
   - repository:
-      owner: CalebisGross
+      owner: appsprout-dev
       name: homebrew-tap
     name: mnemonic
-    homepage: "https://github.com/CalebisGross/mnemonic"
+    homepage: "https://github.com/appsprout-dev/mnemonic"
     description: "Local-first semantic memory system with cognitive agents"
     license: "AGPL-3.0"
     install: |

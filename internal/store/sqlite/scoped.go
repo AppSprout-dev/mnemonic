@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	store "github.com/appsprout/mnemonic/internal/store"
+	store "github.com/appsprout-dev/mnemonic/internal/store"
 )
 
 // SearchByProject searches memories within a specific project using FTS.

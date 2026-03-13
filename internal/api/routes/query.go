@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/appsprout/mnemonic/internal/agent/retrieval"
-	"github.com/appsprout/mnemonic/internal/events"
-	"github.com/appsprout/mnemonic/internal/store"
+	"github.com/appsprout-dev/mnemonic/internal/agent/retrieval"
+	"github.com/appsprout-dev/mnemonic/internal/events"
+	"github.com/appsprout-dev/mnemonic/internal/store"
 )
 
 // QueryRequestBody is the JSON request body for a query.

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	store "github.com/appsprout/mnemonic/internal/store"
+	store "github.com/appsprout-dev/mnemonic/internal/store"
 )
 
 // Helper function to create a test store with a temporary database

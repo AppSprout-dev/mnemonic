@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/appsprout/mnemonic/internal/store"
+	"github.com/appsprout-dev/mnemonic/internal/store"
 )
 
 // configMockStore embeds the zero-value mockStore and overrides specific methods via callbacks.

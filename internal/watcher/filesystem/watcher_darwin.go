@@ -13,7 +13,7 @@ import (
 	"github.com/fsnotify/fsevents"
 	"github.com/google/uuid"
 
-	"github.com/appsprout/mnemonic/internal/watcher"
+	"github.com/appsprout-dev/mnemonic/internal/watcher"
 )
 
 // FilesystemWatcher implements the watcher.Watcher interface using macOS FSEvents.

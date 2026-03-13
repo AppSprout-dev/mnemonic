@@ -78,7 +78,7 @@ scripts/               Utility scripts
 
 ## Known Issues
 
-See [GitHub Issues](https://github.com/CalebisGross/mnemonic/issues) for tracked bugs. Key areas:
+See [GitHub Issues](https://github.com/appsprout-dev/mnemonic/issues) for tracked bugs. Key areas:
 - Graph visualization needs major rework (#3, #6, #7, #8, #9, #10)
 - Dashboard error handling is poor (#5)
 

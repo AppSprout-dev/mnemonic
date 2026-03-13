@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/appsprout/mnemonic/internal/agent/agentutil"
-	"github.com/appsprout/mnemonic/internal/events"
-	"github.com/appsprout/mnemonic/internal/llm"
-	"github.com/appsprout/mnemonic/internal/store"
-	"github.com/appsprout/mnemonic/internal/store/storetest"
+	"github.com/appsprout-dev/mnemonic/internal/agent/agentutil"
+	"github.com/appsprout-dev/mnemonic/internal/events"
+	"github.com/appsprout-dev/mnemonic/internal/llm"
+	"github.com/appsprout-dev/mnemonic/internal/store"
+	"github.com/appsprout-dev/mnemonic/internal/store/storetest"
 )
 
 // ---------------------------------------------------------------------------

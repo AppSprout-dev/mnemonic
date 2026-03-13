@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/appsprout/mnemonic/internal/store"
+	"github.com/appsprout-dev/mnemonic/internal/store"
 )
 
 type ImportMode string
