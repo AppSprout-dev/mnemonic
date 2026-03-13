@@ -3432,10 +3432,8 @@
         return div;
     }
 
-    function scrollChatBottom(force) {
+    function scrollChatBottom() {
         var el = document.getElementById('chatMessages');
-        // Don't auto-scroll while user is reading an expanded tool detail
-        if (!force && el.querySelector('.chat-tool-detail.visible')) return;
         var nearBottom = (el.scrollHeight - el.scrollTop - el.clientHeight) < 80;
         if (nearBottom) el.scrollTop = el.scrollHeight;
     }

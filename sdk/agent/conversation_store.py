@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -34,7 +35,6 @@ class ConversationStore:
         Guards against path traversal by ensuring the resolved path stays
         inside self._dir and the ID matches the expected format.
         """
-        import re
         if not re.fullmatch(r"conv-[0-9a-f]{8}", conv_id):
             logger.warning("Rejected invalid conversation ID: %r", conv_id)
             return None
@@ -104,22 +104,26 @@ class ConversationStore:
 
     def list_conversations(self) -> list[dict[str, Any]]:
         """Return conversation summaries sorted by updated_at desc."""
-        index = self._load_index()
-        return sorted(
-            index.get("conversations", []),
-            key=lambda c: c.get("updated_at", ""),
-            reverse=True,
-        )
+        with self._lock:
+            index = self._load_index()
+            return sorted(
+                index.get("conversations", []),
+                key=lambda c: c.get("updated_at", ""),
+                reverse=True,
+            )
 
     def get_conversation(self, conv_id: str) -> dict[str, Any] | None:
         """Load a full conversation including messages."""
-        return self._load_conversation(conv_id)
+        with self._lock:
+            return self._load_conversation(conv_id)
 
     def delete_conversation(self, conv_id: str) -> bool:
         """Delete a conversation file and remove from index."""
         with self._lock:
             path = self._safe_conv_path(conv_id)
-            if path is not None and path.exists():
+            if path is None:
+                return False
+            if path.exists():
                 path.unlink()
             index = self._load_index()
             index["conversations"] = [
@@ -145,10 +149,11 @@ class ConversationStore:
 
     def get_session_id(self, conv_id: str) -> str | None:
         """Retrieve the stored CLI session ID, or None for old conversations."""
-        conv = self._load_conversation(conv_id)
-        if conv is None:
-            return None
-        return conv.get("session_id")
+        with self._lock:
+            conv = self._load_conversation(conv_id)
+            if conv is None:
+                return None
+            return conv.get("session_id")
 
     # ── Crash-safe streaming persistence ─────────────────────────
 

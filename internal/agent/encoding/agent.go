@@ -347,6 +347,11 @@ func (ea *EncodingAgent) handleRawMemoryCreated(ctx context.Context, event event
 				ea.log.Warn("encoding failed from event, polling will retry",
 					"raw_id", e.ID, "attempt", count, "error", err)
 			}
+		} else {
+			// Success — clean up any prior failure tracking for this ID
+			ea.processingMutex.Lock()
+			delete(ea.failureCounts, e.ID)
+			ea.processingMutex.Unlock()
 		}
 	}()
 
@@ -707,18 +712,18 @@ const maxLLMContentChars = 8000
 // Roughly ~500 tokens, well under the 2048 token limit of small embedding models.
 const maxEmbeddingChars = 4000
 
-// truncateContent truncates a string to maxRunes runes, adding "..." if truncated.
+// truncateContent truncates a string to maxChars characters, adding "..." if truncated.
 // Uses rune-aware slicing to avoid splitting multi-byte UTF-8 characters.
-func truncateContent(content string, maxRunes int) string {
-	if len(content) <= maxRunes {
+func truncateContent(content string, maxChars int) string {
+	if len(content) <= maxChars {
 		// Fast path: byte length fits, so rune count fits too.
 		return content
 	}
 	runes := []rune(content)
-	if len(runes) <= maxRunes {
+	if len(runes) <= maxChars {
 		return content
 	}
-	return string(runes[:maxRunes]) + "..."
+	return string(runes[:maxChars]) + "..."
 }
 
 // stripHTMLTags removes HTML/XML tags and collapses whitespace to extract readable text.
@@ -1504,7 +1509,7 @@ func joinConcepts(concepts []string) string {
 	return strings.Join(concepts, ", ")
 }
 
-// truncateString truncates a string to maxLen runes.
+// truncateString truncates a string to maxLen characters.
 // Uses rune-aware slicing to avoid splitting multi-byte UTF-8 characters.
 func truncateString(s string, maxLen int) string {
 	if len(s) <= maxLen {

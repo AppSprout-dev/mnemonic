@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from dataclasses import replace
@@ -398,7 +399,6 @@ class WebSocketSession:
         if not new_model:
             return False
         # Only allow known model name patterns (alphanumeric, hyphens, dots, slashes)
-        import re
         if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9._/-]{0,99}", new_model):
             await _send(self._ws, {
                 "type": "error",
