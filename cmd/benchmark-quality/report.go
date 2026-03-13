@@ -148,10 +148,10 @@ func writeMarkdownReport(results []scenarioResult, agg aggregateResult, cycles i
 	var sb strings.Builder
 
 	sb.WriteString("# Mnemonic Memory Quality Benchmark\n\n")
-	sb.WriteString(fmt.Sprintf("**Version:** %s | **LLM:** synthetic | **Cycles:** %d\n\n", Version, cycles))
+	fmt.Fprintf(&sb, "**Version:** %s | **LLM:** synthetic | **Cycles:** %d\n\n", Version, cycles)
 
 	for _, r := range results {
-		sb.WriteString(fmt.Sprintf("## %s\n\n", r.Name))
+		fmt.Fprintf(&sb, "## %s\n\n", r.Name)
 		sb.WriteString("| Metric | Score | Grade |\n|---|---|---|\n")
 
 		var avgPrec, avgMRR, avgNDCG float64
@@ -167,30 +167,30 @@ func writeMarkdownReport(results []scenarioResult, agg aggregateResult, cycles i
 			avgNDCG /= n
 		}
 
-		sb.WriteString(fmt.Sprintf("| Precision@5 | %.2f | %s |\n", avgPrec, grade(avgPrec, threshPassPrecision, threshWarnPrecision)))
-		sb.WriteString(fmt.Sprintf("| MRR | %.2f | %s |\n", avgMRR, grade(avgMRR, threshPassMRR, threshWarnMRR)))
-		sb.WriteString(fmt.Sprintf("| nDCG | %.2f | %s |\n", avgNDCG, grade(avgNDCG, 0.60, 0.40)))
-		sb.WriteString(fmt.Sprintf("| Noise Suppression | %.2f | %s |\n", r.SystemMetrics.NoiseSuppression, grade(r.SystemMetrics.NoiseSuppression, threshPassNoise, threshWarnNoise)))
-		sb.WriteString(fmt.Sprintf("| Signal Retention | %.2f | %s |\n", r.SystemMetrics.SignalRetention, grade(r.SystemMetrics.SignalRetention, threshPassSignal, threshWarnSignal)))
+		fmt.Fprintf(&sb, "| Precision@5 | %.2f | %s |\n", avgPrec, grade(avgPrec, threshPassPrecision, threshWarnPrecision))
+		fmt.Fprintf(&sb, "| MRR | %.2f | %s |\n", avgMRR, grade(avgMRR, threshPassMRR, threshWarnMRR))
+		fmt.Fprintf(&sb, "| nDCG | %.2f | %s |\n", avgNDCG, grade(avgNDCG, 0.60, 0.40))
+		fmt.Fprintf(&sb, "| Noise Suppression | %.2f | %s |\n", r.SystemMetrics.NoiseSuppression, grade(r.SystemMetrics.NoiseSuppression, threshPassNoise, threshWarnNoise))
+		fmt.Fprintf(&sb, "| Signal Retention | %.2f | %s |\n", r.SystemMetrics.SignalRetention, grade(r.SystemMetrics.SignalRetention, threshPassSignal, threshWarnSignal))
 		sb.WriteString("\n")
 
 		// Per-query breakdown.
 		sb.WriteString("### Query Results (Post-Consolidation)\n\n")
 		sb.WriteString("| Query | P@5 | MRR | nDCG |\n|---|---|---|---|\n")
 		for _, q := range r.PostQueries {
-			sb.WriteString(fmt.Sprintf("| %s | %.2f | %.2f | %.2f |\n", q.Query, q.PrecisionAtK, q.MRR, q.NDCG))
+			fmt.Fprintf(&sb, "| %s | %.2f | %.2f | %.2f |\n", q.Query, q.PrecisionAtK, q.MRR, q.NDCG)
 		}
 		sb.WriteString("\n")
 	}
 
 	sb.WriteString("## Aggregate\n\n")
 	sb.WriteString("| Metric | Score | Grade |\n|---|---|---|\n")
-	sb.WriteString(fmt.Sprintf("| Precision@5 | %.2f | %s |\n", agg.AvgPrecision, grade(agg.AvgPrecision, threshPassPrecision, threshWarnPrecision)))
-	sb.WriteString(fmt.Sprintf("| MRR | %.2f | %s |\n", agg.AvgMRR, grade(agg.AvgMRR, threshPassMRR, threshWarnMRR)))
-	sb.WriteString(fmt.Sprintf("| nDCG | %.2f | %s |\n", agg.AvgNDCG, grade(agg.AvgNDCG, 0.60, 0.40)))
-	sb.WriteString(fmt.Sprintf("| Noise Suppression | %.2f | %s |\n", agg.AvgNoiseSuppression, grade(agg.AvgNoiseSuppression, threshPassNoise, threshWarnNoise)))
-	sb.WriteString(fmt.Sprintf("| Signal Retention | %.2f | %s |\n", agg.AvgSignalRetention, grade(agg.AvgSignalRetention, threshPassSignal, threshWarnSignal)))
-	sb.WriteString(fmt.Sprintf("\n**Overall: %s**\n", agg.Overall))
+	fmt.Fprintf(&sb, "| Precision@5 | %.2f | %s |\n", agg.AvgPrecision, grade(agg.AvgPrecision, threshPassPrecision, threshWarnPrecision))
+	fmt.Fprintf(&sb, "| MRR | %.2f | %s |\n", agg.AvgMRR, grade(agg.AvgMRR, threshPassMRR, threshWarnMRR))
+	fmt.Fprintf(&sb, "| nDCG | %.2f | %s |\n", agg.AvgNDCG, grade(agg.AvgNDCG, 0.60, 0.40))
+	fmt.Fprintf(&sb, "| Noise Suppression | %.2f | %s |\n", agg.AvgNoiseSuppression, grade(agg.AvgNoiseSuppression, threshPassNoise, threshWarnNoise))
+	fmt.Fprintf(&sb, "| Signal Retention | %.2f | %s |\n", agg.AvgSignalRetention, grade(agg.AvgSignalRetention, threshPassSignal, threshWarnSignal))
+	fmt.Fprintf(&sb, "\n**Overall: %s**\n", agg.Overall)
 
 	return os.WriteFile("benchmark-results.md", []byte(sb.String()), 0644)
 }

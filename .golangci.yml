@@ -1,5 +1,3 @@
-version: "2"
-
 run:
   timeout: 5m
   build-tags:
@@ -8,6 +6,8 @@ run:
 linters:
   enable:
     - errcheck
+    - gosimple
     - govet
+    - ineffassign
     - staticcheck
     - unused
