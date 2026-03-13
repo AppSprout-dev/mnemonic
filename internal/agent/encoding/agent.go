@@ -273,6 +273,31 @@ func (ea *EncodingAgent) Stop() error {
 	return stopErr
 }
 
+// EncodeAllPending processes all unprocessed raw memories synchronously.
+// This is intended for batch/benchmark usage where the event bus is not running.
+// Returns the number of memories successfully encoded.
+func (ea *EncodingAgent) EncodeAllPending(ctx context.Context) (int, error) {
+	encoded := 0
+	for {
+		unprocessed, err := ea.store.ListRawUnprocessed(ctx, 50)
+		if err != nil {
+			return encoded, fmt.Errorf("listing unprocessed: %w", err)
+		}
+		if len(unprocessed) == 0 {
+			return encoded, nil
+		}
+		for _, raw := range unprocessed {
+			if err := ea.encodeMemory(ctx, raw.ID); err != nil {
+				ea.log.Warn("encoding failed in batch mode", "raw_id", raw.ID, "error", err)
+				// Mark as processed to avoid infinite loop on persistent failures.
+				_ = ea.store.MarkRawProcessed(ctx, raw.ID)
+				continue
+			}
+			encoded++
+		}
+	}
+}
+
 // Health checks if the encoding agent is functioning.
 func (ea *EncodingAgent) Health(ctx context.Context) error {
 	// Check if the LLM provider is available
@@ -684,12 +709,14 @@ func (ea *EncodingAgent) encodeMemory(ctx context.Context, rawID string) error {
 		Ts:                  time.Now(),
 	}
 
-	if err := ea.bus.Publish(ctx, encodedEvent); err != nil {
-		ea.log.Warn("failed to publish MemoryEncoded event", "memory_id", memoryID, "error", err)
+	if ea.bus != nil {
+		if err := ea.bus.Publish(ctx, encodedEvent); err != nil {
+			ea.log.Warn("failed to publish MemoryEncoded event", "memory_id", memoryID, "error", err)
+		}
 	}
 
 	// Publish classification candidates for background LLM reclassification
-	if len(classificationCandidates) > 0 {
+	if ea.bus != nil && len(classificationCandidates) > 0 {
 		classEvent := events.AssociationsPendingClassification{
 			Candidates: classificationCandidates,
 			Ts:         time.Now(),

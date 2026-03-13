@@ -10,7 +10,11 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/appsprout/mnemonic/internal/agent/abstraction"
 	"github.com/appsprout/mnemonic/internal/agent/consolidation"
+	"github.com/appsprout/mnemonic/internal/agent/dreaming"
+	"github.com/appsprout/mnemonic/internal/agent/encoding"
+	"github.com/appsprout/mnemonic/internal/agent/episoding"
 	"github.com/appsprout/mnemonic/internal/agent/retrieval"
 	"github.com/appsprout/mnemonic/internal/store"
 	"github.com/appsprout/mnemonic/internal/store/sqlite"
@@ -18,18 +22,60 @@ import (
 
 var Version = "dev"
 
+// benchConfig holds all tunable parameters for a benchmark run.
+type benchConfig struct {
+	Retrieval     retrieval.RetrievalConfig
+	Consolidation consolidation.ConsolidationConfig
+	Encoding      encoding.EncodingConfig
+	Dreaming      dreaming.DreamingConfig
+	Episoding     episoding.EpisodingConfig
+	Abstraction   abstraction.AbstractionConfig
+	BenchDecay    float32 // per-cycle salience decay (default 0.92)
+}
+
+// defaultBenchConfig returns a benchConfig with sensible defaults.
+func defaultBenchConfig() benchConfig {
+	return benchConfig{
+		Retrieval:     retrieval.DefaultConfig(),
+		Consolidation: consolidation.DefaultConfig(),
+		Encoding:      encoding.DefaultConfig(),
+		Dreaming: dreaming.DreamingConfig{
+			Interval:               time.Hour,
+			BatchSize:              60,
+			SalienceThreshold:      0.3,
+			AssociationBoostFactor: 1.15,
+			NoisePruneThreshold:    0.15,
+		},
+		Episoding: episoding.EpisodingConfig{
+			EpisodeWindowSizeMin: 10,
+			MinEventsPerEpisode:  2,
+			PollingInterval:      10 * time.Second,
+		},
+		Abstraction: abstraction.AbstractionConfig{
+			Interval:    time.Hour,
+			MinStrength: 0.4,
+			MaxLLMCalls: 5,
+		},
+		BenchDecay: 0.92,
+	}
+}
+
 func main() {
 	var (
-		verbose bool
-		cycles  int
-		report  string
-		llmMode bool
+		verbose   bool
+		cycles    int
+		report    string
+		llmMode   bool
+		sweepFile string
+		setFlags  setFlagList
 	)
 
 	flag.BoolVar(&verbose, "verbose", false, "verbose output")
 	flag.IntVar(&cycles, "cycles", 5, "number of consolidation cycles")
 	flag.StringVar(&report, "report", "", "output format: 'markdown' writes benchmark-results.md")
 	flag.BoolVar(&llmMode, "llm", false, "use real LLM for embeddings (requires LM Studio)")
+	flag.StringVar(&sweepFile, "sweep", "", "path to sweep YAML file for parameter tuning")
+	flag.Var(&setFlags, "set", "override a config parameter (repeatable, format: key=value)")
 	flag.Parse()
 
 	if llmMode {
@@ -43,33 +89,68 @@ func main() {
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel}))
 
-	// Create temp directory for the benchmark DB.
-	tmpDir, err := os.MkdirTemp("", "mnemonic-bench-*")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating temp dir: %v\n", err)
-		os.Exit(1)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	dbPath := filepath.Join(tmpDir, "bench.db")
-	s, err := sqlite.NewSQLiteStore(dbPath, 5000)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating store: %v\n", err)
-		os.Exit(1)
-	}
-	defer s.Close()
-
-	// Create agents with default configs and stub LLM.
-	stub := &stubProvider{}
-	retAgent := retrieval.NewRetrievalAgent(s, stub, retrieval.DefaultConfig(), log)
-	consolAgent := consolidation.NewConsolidationAgent(s, stub, consolidation.DefaultConfig(), log)
-
 	ctx := context.Background()
 	scenarios := allScenarios()
 
+	// Parse -set overrides into a map.
+	overrides := make(map[string]float64)
+	for _, s := range setFlags {
+		key, val, parseErr := parseSetFlag(s)
+		if parseErr != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", parseErr)
+			os.Exit(1)
+		}
+		overrides[key] = val
+	}
+
+	// Sweep mode: run parameter sweep and exit.
+	if sweepFile != "" {
+		def, loadErr := loadSweepDefinition(sweepFile)
+		if loadErr != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", loadErr)
+			os.Exit(1)
+		}
+
+		fmt.Println()
+		fmt.Println("  Mnemonic Config Sweep")
+		fmt.Printf("  Version: %s  |  LLM: semantic-stub  |  Params: %d\n", Version, len(def.Sweeps))
+		fmt.Println()
+
+		sweepReport, sweepErr := runSweep(ctx, def, scenarios, cycles, verbose, log)
+		if sweepErr != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", sweepErr)
+			os.Exit(1)
+		}
+
+		printSweepReport(sweepReport)
+
+		if report == "markdown" {
+			sweepCycles := cycles
+			if def.Cycles > 0 {
+				sweepCycles = def.Cycles
+			}
+			if writeErr := writeSweepMarkdownReport(sweepReport, sweepCycles); writeErr != nil {
+				fmt.Fprintf(os.Stderr, "Error writing sweep report: %v\n", writeErr)
+			} else {
+				fmt.Println("  Sweep report written to sweep-results.md")
+			}
+		}
+		fmt.Println()
+		os.Exit(0)
+	}
+
+	// Standard mode: run all scenarios with optional -set overrides.
+	cfg := defaultBenchConfig()
+	if len(overrides) > 0 {
+		if overrideErr := applyOverrides(&cfg, overrides); overrideErr != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", overrideErr)
+			os.Exit(1)
+		}
+	}
+
 	fmt.Println()
 	fmt.Println("  Mnemonic Memory Quality Benchmark")
-	fmt.Printf("  Version: %s  |  LLM: synthetic  |  Cycles: %d\n", Version, cycles)
+	fmt.Printf("  Version: %s  |  LLM: semantic-stub  |  Cycles: %d\n", Version, cycles)
 	fmt.Println()
 
 	var allResults []scenarioResult
@@ -79,7 +160,7 @@ func main() {
 			fmt.Printf("  Running: %s\n", sc.Name)
 		}
 
-		result, runErr := runScenario(ctx, s, retAgent, consolAgent, sc, cycles, verbose, log)
+		result, runErr := runScenario(ctx, sc, cfg, cycles, verbose, log)
 		if runErr != nil {
 			fmt.Fprintf(os.Stderr, "  Error in scenario %q: %v\n", sc.Name, runErr)
 			os.Exit(1)
@@ -89,9 +170,34 @@ func main() {
 		printScenarioResult(result)
 	}
 
-	// Aggregate and print final results.
+	// Aggregate and print direct scenario results.
 	agg := aggregateResults(allResults)
 	printAggregate(agg)
+
+	// Run pipeline scenarios.
+	pipelineScenarios := allPipelineScenarios()
+	var pipelineResults []pipelineResult
+
+	if len(pipelineScenarios) > 0 {
+		fmt.Println()
+		fmt.Println("  Pipeline Scenarios")
+		fmt.Println()
+
+		for _, ps := range pipelineScenarios {
+			if verbose {
+				fmt.Printf("  Running pipeline: %s\n", ps.Name)
+			}
+
+			pr, runErr := runPipelineScenario(ctx, ps, cfg, cycles, verbose, log)
+			if runErr != nil {
+				fmt.Fprintf(os.Stderr, "  Error in pipeline scenario %q: %v\n", ps.Name, runErr)
+				os.Exit(1)
+			}
+
+			pipelineResults = append(pipelineResults, pr)
+			printPipelineResult(pr)
+		}
+	}
 
 	if report == "markdown" {
 		if writeErr := writeMarkdownReport(allResults, agg, cycles); writeErr != nil {
@@ -101,6 +207,8 @@ func main() {
 		}
 	}
 
+	_ = pipelineResults // used in future for combined reporting
+
 	fmt.Println()
 
 	if agg.Overall == "PASS" {
@@ -109,17 +217,35 @@ func main() {
 	os.Exit(1)
 }
 
+// runScenario executes a single benchmark scenario with its own isolated DB.
+// Each call creates a fresh temp DB, store, and agents to prevent cross-contamination.
 func runScenario(
 	ctx context.Context,
-	s *sqlite.SQLiteStore,
-	retAgent *retrieval.RetrievalAgent,
-	consolAgent *consolidation.ConsolidationAgent,
 	sc scenario,
+	cfg benchConfig,
 	cycles int,
 	verbose bool,
 	log *slog.Logger,
 ) (scenarioResult, error) {
 	result := scenarioResult{Name: sc.Name}
+
+	// Create an isolated temp DB for this scenario.
+	tmpDir, err := os.MkdirTemp("", "mnemonic-bench-*")
+	if err != nil {
+		return result, fmt.Errorf("creating temp dir: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	dbPath := filepath.Join(tmpDir, "bench.db")
+	s, err := sqlite.NewSQLiteStore(dbPath, 5000)
+	if err != nil {
+		return result, fmt.Errorf("creating store: %w", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	stub := &semanticStubProvider{}
+	retAgent := retrieval.NewRetrievalAgent(s, stub, cfg.Retrieval, log)
+	consolAgent := consolidation.NewConsolidationAgent(s, stub, cfg.Consolidation, log)
 
 	// Phase 1: Create a dummy raw memory so FK constraints are satisfied,
 	// then ingest all benchmark memories referencing it.
@@ -183,18 +309,18 @@ func runScenario(
 		}
 		updates := make(map[string]float32, len(allMems))
 		for _, m := range allMems {
-			updates[m.ID] = m.Salience * 0.92
+			updates[m.ID] = m.Salience * cfg.BenchDecay
 		}
 		if err := s.BatchUpdateSalience(ctx, updates); err != nil {
 			return result, fmt.Errorf("batch update salience: %w", err)
 		}
 
-		report, err := consolAgent.RunOnce(ctx)
+		rpt, err := consolAgent.RunOnce(ctx)
 		if err != nil {
 			log.Warn("consolidation cycle error", "cycle", i+1, "error", err)
-		} else if verbose && report != nil {
+		} else if verbose && rpt != nil {
 			fmt.Printf("    Cycle %d: decayed=%d, fading=%d, archived=%d\n",
-				i+1, report.MemoriesDecayed, report.TransitionedFading, report.TransitionedArchived)
+				i+1, rpt.MemoriesDecayed, rpt.TransitionedFading, rpt.TransitionedArchived)
 		}
 	}
 

@@ -1008,7 +1008,7 @@ func (s *SQLiteStore) SearchByFullText(ctx context.Context, query string, limit 
 	ftsQuery := `
 	SELECT m.id, m.raw_id, m.timestamp, m.content, m.summary, m.concepts, m.embedding,
 	       m.salience, m.access_count, m.last_accessed, m.state, m.gist_of, m.episode_id,
-	       m.project, m.session_id, m.created_at, m.updated_at
+	       m.source, m.project, m.session_id, m.created_at, m.updated_at
 	FROM memories m
 	JOIN memories_fts ON m.rowid = memories_fts.rowid
 	WHERE memories_fts MATCH ?

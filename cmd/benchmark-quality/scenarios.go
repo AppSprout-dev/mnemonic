@@ -40,12 +40,14 @@ func allScenarios() []scenario {
 		debuggingScenario(),
 		architectureScenario(),
 		learningScenario(),
+		investigationScenario(),
+		needleScenario(),
 	}
 }
 
 func debuggingScenario() scenario {
 	now := time.Now()
-	const dims = 64
+	const dims = 128
 
 	// Signal memories — debugging-related.
 	signal := []labeledMemory{
@@ -131,7 +133,7 @@ func debuggingScenario() scenario {
 				Summary:   nc.summary,
 				Content:   nc.content,
 				Concepts:  []string{"system", "filesystem"},
-				Embedding: syntheticEmbedding(32+i, dims, 0.05), // Noise in different region.
+				Embedding: syntheticEmbedding(32+i, dims, 0.05), // Debugging noise region.
 				Salience:  0.3 + float32(i%3)*0.05,
 				State:     "active",
 				Timestamp: now.Add(-time.Duration(i*20) * time.Minute),
@@ -169,7 +171,7 @@ func debuggingScenario() scenario {
 
 func architectureScenario() scenario {
 	now := time.Now()
-	const dims = 64
+	const dims = 128
 
 	signal := []labeledMemory{
 		{Label: "signal", Memory: store.Memory{
@@ -253,7 +255,7 @@ func architectureScenario() scenario {
 				Summary:   nc.summary,
 				Content:   nc.content,
 				Concepts:  []string{"system", "desktop"},
-				Embedding: syntheticEmbedding(32+i, dims, 0.05),
+				Embedding: syntheticEmbedding(48+i, dims, 0.05), // Architecture noise region.
 				Salience:  0.3 + float32(i%3)*0.05,
 				State:     "active",
 				Timestamp: now.Add(-time.Duration(i*15) * time.Minute),
@@ -289,7 +291,7 @@ func architectureScenario() scenario {
 
 func learningScenario() scenario {
 	now := time.Now()
-	const dims = 64
+	const dims = 128
 
 	signal := []labeledMemory{
 		{Label: "signal", Memory: store.Memory{
@@ -373,7 +375,7 @@ func learningScenario() scenario {
 				Summary:   nc.summary,
 				Content:   nc.content,
 				Concepts:  []string{"system", "terminal"},
-				Embedding: syntheticEmbedding(32+i, dims, 0.05),
+				Embedding: syntheticEmbedding(64+i, dims, 0.05), // Learning noise region.
 				Salience:  0.3 + float32(i%3)*0.05,
 				State:     "active",
 				Timestamp: now.Add(-time.Duration(i*12) * time.Minute),
@@ -400,6 +402,274 @@ func learningScenario() scenario {
 
 	return scenario{
 		Name:         "Learning & Insights",
+		Memories:     allMems,
+		Associations: assocs,
+		Queries:      queries,
+	}
+}
+
+// investigationScenario tests deep spread activation. Signal memories form
+// a 6-node causal chain (A->B->C->D->E->F) with lateral branches.
+// Queries require 3-4 hop traversal to find all relevant results.
+// Differentiates: retrieval.max_hops, retrieval.decay_factor, retrieval.activation_threshold.
+func investigationScenario() scenario {
+	now := time.Now()
+	const dims = 128
+
+	// Signal memories forming a deep causal chain about a production incident.
+	signal := []labeledMemory{
+		{Label: "signal", Memory: store.Memory{
+			ID: "inv-1", Summary: "Alert: API latency spike detected in monitoring dashboard",
+			Content:   "PagerDuty alert fired for p99 latency exceeding 5s on /api/v1/search endpoint. Dashboard shows gradual degradation starting 2 hours ago.",
+			Concepts:  []string{"alert", "latency", "monitoring", "api"},
+			Embedding: syntheticEmbedding(0, dims, 0.15), Salience: 0.6, State: "active",
+			Timestamp: now.Add(-6 * time.Hour), CreatedAt: now.Add(-6 * time.Hour), UpdatedAt: now.Add(-6 * time.Hour),
+		}},
+		{Label: "signal", Memory: store.Memory{
+			ID: "inv-2", Summary: "Traced latency to database query in search handler",
+			Content:   "Profiling shows 90% of latency in SearchHandler.Query(). The FTS5 query is doing a full table scan instead of using the index. EXPLAIN QUERY PLAN confirms index bypass.",
+			Concepts:  []string{"database", "query", "fts5", "performance", "profiling"},
+			Embedding: syntheticEmbedding(1, dims, 0.15), Salience: 0.65, State: "active",
+			Timestamp: now.Add(-5 * time.Hour), CreatedAt: now.Add(-5 * time.Hour), UpdatedAt: now.Add(-5 * time.Hour),
+		}},
+		{Label: "signal", Memory: store.Memory{
+			ID: "inv-3", Summary: "FTS5 index corruption caused by direct DELETE without rebuild",
+			Content:   "Found the root cause: a cleanup job was running DELETE FROM memories_fts WHERE rowid IN (...) directly. FTS5 requires using the content table for deletes. The index became inconsistent, forcing fallback to full scan.",
+			Concepts:  []string{"fts5", "index", "corruption", "root cause", "delete"},
+			Embedding: syntheticEmbedding(2, dims, 0.15), Salience: 0.75, State: "active",
+			Timestamp: now.Add(-4 * time.Hour), CreatedAt: now.Add(-4 * time.Hour), UpdatedAt: now.Add(-4 * time.Hour),
+		}},
+		{Label: "signal", Memory: store.Memory{
+			ID: "inv-4", Summary: "Fix: rebuilt FTS5 index using INSERT INTO memories_fts(memories_fts) VALUES('rebuild')",
+			Content:   "Rebuilt the FTS5 index with the rebuild command. Latency immediately dropped back to normal (p99 < 200ms). Need to fix the cleanup job to prevent recurrence.",
+			Concepts:  []string{"fts5", "fix", "rebuild", "index", "performance"},
+			Embedding: syntheticEmbedding(3, dims, 0.15), Salience: 0.8, State: "active",
+			Timestamp: now.Add(-3 * time.Hour), CreatedAt: now.Add(-3 * time.Hour), UpdatedAt: now.Add(-3 * time.Hour),
+		}},
+		{Label: "signal", Memory: store.Memory{
+			ID: "inv-5", Summary: "Prevention: rewrote cleanup job to use content table DELETE pattern",
+			Content:   "Rewrote the cleanup job to delete from the content table instead of directly from the FTS5 table. Added a post-cleanup integrity check that verifies FTS5 index consistency.",
+			Concepts:  []string{"cleanup", "prevention", "fts5", "integrity", "fix"},
+			Embedding: syntheticEmbedding(4, dims, 0.15), Salience: 0.7, State: "active",
+			Timestamp: now.Add(-2 * time.Hour), CreatedAt: now.Add(-2 * time.Hour), UpdatedAt: now.Add(-2 * time.Hour),
+		}},
+		{Label: "signal", Memory: store.Memory{
+			ID: "inv-6", Summary: "Post-mortem: added FTS5 index health check to monitoring suite",
+			Content:   "Added automated FTS5 integrity check to the health monitoring suite. Runs every hour, alerts if index divergence detected. Also added a runbook for the rebuild procedure.",
+			Concepts:  []string{"monitoring", "health check", "post-mortem", "fts5", "automation"},
+			Embedding: syntheticEmbedding(5, dims, 0.15), Salience: 0.65, State: "active",
+			Timestamp: now.Add(-1 * time.Hour), CreatedAt: now.Add(-1 * time.Hour), UpdatedAt: now.Add(-1 * time.Hour),
+		}},
+		// Lateral branch: related but not in the main chain.
+		{Label: "signal", Memory: store.Memory{
+			ID: "inv-7", Summary: "Similar issue last month: embedding index got stale after bulk import",
+			Content:   "Recalled a similar incident where the embedding similarity index became stale after a bulk import. The pattern is the same: bypassing the normal write path corrupts secondary indexes.",
+			Concepts:  []string{"embedding", "index", "bulk import", "pattern", "incident"},
+			Embedding: syntheticEmbedding(6, dims, 0.15), Salience: 0.55, State: "active",
+			Timestamp: now.Add(-90 * time.Minute), CreatedAt: now.Add(-90 * time.Minute), UpdatedAt: now.Add(-90 * time.Minute),
+		}},
+		{Label: "signal", Memory: store.Memory{
+			ID: "inv-8", Summary: "General principle: always use the ORM/content table path for writes, never raw SQL on derived tables",
+			Content:   "This is the second time bypassing the content table path caused index corruption. Establishing a rule: all writes must go through the store interface, never direct SQL on FTS5 or embedding tables.",
+			Concepts:  []string{"principle", "store interface", "architecture", "rule", "decision"},
+			Embedding: syntheticEmbedding(7, dims, 0.15), Salience: 0.7, State: "active",
+			Timestamp: now.Add(-45 * time.Minute), CreatedAt: now.Add(-45 * time.Minute), UpdatedAt: now.Add(-45 * time.Minute),
+		}},
+		// Another lateral: deployment timeline context.
+		{Label: "signal", Memory: store.Memory{
+			ID: "inv-9", Summary: "The cleanup job was deployed 3 days ago in release v0.7.2",
+			Content:   "Git blame shows the problematic cleanup job was added in commit abc123 as part of v0.7.2. It was a well-intentioned optimization to reduce DB size but skipped the content table pattern.",
+			Concepts:  []string{"deployment", "release", "git", "timeline", "investigation"},
+			Embedding: syntheticEmbedding(8, dims, 0.15), Salience: 0.5, State: "active",
+			Timestamp: now.Add(-150 * time.Minute), CreatedAt: now.Add(-150 * time.Minute), UpdatedAt: now.Add(-150 * time.Minute),
+		}},
+		{Label: "signal", Memory: store.Memory{
+			ID: "inv-10", Summary: "Lesson: need pre-deploy check that validates FTS5 writes go through content table",
+			Content:   "Adding a CI lint rule that scans for direct INSERT/DELETE on *_fts tables. Any FTS5 modification must go through the store layer. This would have caught the bug before deploy.",
+			Concepts:  []string{"ci", "lint", "prevention", "fts5", "learning"},
+			Embedding: syntheticEmbedding(9, dims, 0.15), Salience: 0.6, State: "active",
+			Timestamp: now.Add(-30 * time.Minute), CreatedAt: now.Add(-30 * time.Minute), UpdatedAt: now.Add(-30 * time.Minute),
+		}},
+	}
+
+	// Noise memories.
+	noise := make([]labeledMemory, 12)
+	noiseContents := []struct{ summary, content string }{
+		{"Terminal: ran 'htop' for system monitoring", "Process monitoring activity"},
+		{"Chrome: browsed SQLite documentation page", "Browser navigation"},
+		{"File watcher: go.sum changed after dependency update", "Dependency file change"},
+		{"Clipboard: copied SQL query from chat", "Clipboard event"},
+		{"Terminal: ran 'git status' in project directory", "Git status check"},
+		{"GNOME: screen brightness adjusted", "Display settings change"},
+		{"Terminal: ran 'df -h' to check disk space", "Disk space check"},
+		{"Chrome: visited GitHub issues page", "Browser navigation"},
+		{"PipeWire: audio output volume changed", "Audio settings adjustment"},
+		{"Terminal: ran 'make test' in project root", "Test execution"},
+		{"File watcher: /tmp/benchmark-* directory created", "Temp file creation"},
+		{"Terminal: ran 'tail -f /var/log/syslog'", "Log monitoring"},
+	}
+	for i, nc := range noiseContents {
+		noise[i] = labeledMemory{
+			Label: "noise",
+			Memory: store.Memory{
+				ID:        fmt.Sprintf("noise-inv-%d", i+1),
+				Summary:   nc.summary,
+				Content:   nc.content,
+				Concepts:  []string{"system", "terminal"},
+				Embedding: syntheticEmbedding(80+i, dims, 0.05), // Investigation noise region.
+				Salience:  0.3 + float32(i%3)*0.05,
+				State:     "active",
+				Timestamp: now.Add(-time.Duration(i*18) * time.Minute),
+				CreatedAt: now.Add(-time.Duration(i*18) * time.Minute),
+				UpdatedAt: now.Add(-time.Duration(i*18) * time.Minute),
+			},
+		}
+	}
+
+	allMems := append(signal, noise...)
+
+	// Deep causal chain: 1->2->3->4->5->6 (6 hops end-to-end).
+	// Plus lateral branches: 3->7, 7->8, 1->9, 5->10.
+	assocs := []store.Association{
+		// Main chain.
+		{SourceID: "inv-1", TargetID: "inv-2", Strength: 0.9, RelationType: "caused_by", CreatedAt: now, LastActivated: now, ActivationCount: 1},
+		{SourceID: "inv-2", TargetID: "inv-3", Strength: 0.85, RelationType: "caused_by", CreatedAt: now, LastActivated: now, ActivationCount: 1},
+		{SourceID: "inv-3", TargetID: "inv-4", Strength: 0.9, RelationType: "caused_by", CreatedAt: now, LastActivated: now, ActivationCount: 1},
+		{SourceID: "inv-4", TargetID: "inv-5", Strength: 0.8, RelationType: "caused_by", CreatedAt: now, LastActivated: now, ActivationCount: 1},
+		{SourceID: "inv-5", TargetID: "inv-6", Strength: 0.75, RelationType: "temporal", CreatedAt: now, LastActivated: now, ActivationCount: 1},
+		// Lateral branches.
+		{SourceID: "inv-3", TargetID: "inv-7", Strength: 0.6, RelationType: "similar", CreatedAt: now, LastActivated: now, ActivationCount: 1},
+		{SourceID: "inv-7", TargetID: "inv-8", Strength: 0.7, RelationType: "reinforces", CreatedAt: now, LastActivated: now, ActivationCount: 1},
+		{SourceID: "inv-1", TargetID: "inv-9", Strength: 0.5, RelationType: "temporal", CreatedAt: now, LastActivated: now, ActivationCount: 1},
+		{SourceID: "inv-5", TargetID: "inv-10", Strength: 0.65, RelationType: "reinforces", CreatedAt: now, LastActivated: now, ActivationCount: 1},
+	}
+
+	// Queries designed to require multi-hop traversal.
+	queries := []benchmarkQuery{
+		// Starting from the alert, should follow chain to find the fix (3 hops away).
+		{Query: "How did we fix the latency issue", ExpectedIDs: []string{"inv-3", "inv-4", "inv-5"}},
+		// Starting from the post-mortem, should traverse back to root cause (4+ hops).
+		{Query: "What caused the FTS5 index corruption", ExpectedIDs: []string{"inv-2", "inv-3", "inv-9"}},
+		// Should find the principle (inv-8) which is only reachable via inv-3->inv-7->inv-8 (3 hops from many entry points).
+		{Query: "What principles did we establish from this incident", ExpectedIDs: []string{"inv-8", "inv-10"}},
+		// Cross-chain: connect the two lateral branches.
+		{Query: "What similar incidents have we seen before", ExpectedIDs: []string{"inv-7"}},
+	}
+
+	return scenario{
+		Name:         "Deep Graph Investigation",
+		Memories:     allMems,
+		Associations: assocs,
+		Queries:      queries,
+	}
+}
+
+// needleScenario tests noise suppression under high noise pressure.
+// Only 4 signal memories buried in 25 noise with salience close to signal.
+// Differentiates: consolidation.fade_threshold, consolidation.archive_threshold,
+// consolidation.decay_rate, bench.decay_per_cycle.
+func needleScenario() scenario {
+	now := time.Now()
+	const dims = 128
+
+	// 4 signal memories — clear decisions/insights with moderate salience.
+	signal := []labeledMemory{
+		{Label: "signal", Memory: store.Memory{
+			ID: "needle-1", Summary: "Decision: use WAL mode for SQLite to improve concurrent read performance",
+			Content:   "Switched SQLite to WAL journal mode. This allows concurrent readers while a write is in progress. Critical for the daemon where the API serves reads while agents write.",
+			Concepts:  []string{"sqlite", "wal", "performance", "decision", "concurrency"},
+			Embedding: syntheticEmbedding(10, dims, 0.12), Salience: 0.65, State: "active",
+			Timestamp: now.Add(-3 * time.Hour), CreatedAt: now.Add(-3 * time.Hour), UpdatedAt: now.Add(-3 * time.Hour),
+		}},
+		{Label: "signal", Memory: store.Memory{
+			ID: "needle-2", Summary: "Insight: slog structured logging is significantly better than fmt.Printf for debugging agents",
+			Content:   "After switching all agent logging to slog, debugging became much easier. Structured fields like agent=encoding, memory_id=abc123 make it possible to filter and trace individual memory lifecycles.",
+			Concepts:  []string{"slog", "logging", "debugging", "insight", "agents"},
+			Embedding: syntheticEmbedding(11, dims, 0.12), Salience: 0.6, State: "active",
+			Timestamp: now.Add(-2 * time.Hour), CreatedAt: now.Add(-2 * time.Hour), UpdatedAt: now.Add(-2 * time.Hour),
+		}},
+		{Label: "signal", Memory: store.Memory{
+			ID: "needle-3", Summary: "Error: nil pointer in consolidation agent when processing memories with no embedding",
+			Content:   "Consolidation agent panicked on memories that had empty embeddings (encoding failed). Added nil check before cosine similarity calculation. Need to ensure all code paths handle missing embeddings gracefully.",
+			Concepts:  []string{"nil pointer", "consolidation", "embedding", "error", "fix"},
+			Embedding: syntheticEmbedding(12, dims, 0.12), Salience: 0.7, State: "active",
+			Timestamp: now.Add(-1 * time.Hour), CreatedAt: now.Add(-1 * time.Hour), UpdatedAt: now.Add(-1 * time.Hour),
+		}},
+		{Label: "signal", Memory: store.Memory{
+			ID: "needle-4", Summary: "Learning: Go's context.WithTimeout doesn't cancel if you forget to defer cancel()",
+			Content:   "Found a goroutine leak in the retrieval agent. context.WithTimeout returns a cancel func that MUST be deferred. Without it, the internal timer goroutine leaks. Added go vet check for this.",
+			Concepts:  []string{"go", "context", "goroutine", "leak", "learning"},
+			Embedding: syntheticEmbedding(13, dims, 0.12), Salience: 0.6, State: "active",
+			Timestamp: now.Add(-30 * time.Minute), CreatedAt: now.Add(-30 * time.Minute), UpdatedAt: now.Add(-30 * time.Minute),
+		}},
+	}
+
+	// 25 noise memories with salience dangerously close to signal (0.35-0.55).
+	noise := make([]labeledMemory, 25)
+	noiseContents := []struct {
+		summary, content string
+		salience         float32
+	}{
+		{"Chrome: opened 3 tabs from Google search results", "Browser activity: multiple tabs opened", 0.35},
+		{"File watcher: node_modules/.cache updated", "Build cache write", 0.38},
+		{"Terminal: ran 'ls -la internal/agent/' to list files", "Directory listing in agent package", 0.42},
+		{"Clipboard: copied import path github.com/appsprout/mnemonic", "Go import path copied", 0.45},
+		{"Chrome: read Go blog post about generics", "Browser: reading technical content", 0.48},
+		{"File watcher: .git/FETCH_HEAD modified after git fetch", "Git metadata update", 0.35},
+		{"Terminal: ran 'go doc context.WithTimeout'", "Go documentation lookup", 0.50},
+		{"GNOME: notification from Signal: 2 new messages", "Desktop notification from messaging app", 0.36},
+		{"File watcher: internal/store/sqlite/store.go saved", "File save event in editor", 0.44},
+		{"Terminal: ran 'curl localhost:9999/api/v1/health'", "Health check API call", 0.47},
+		{"Chrome: visited pkg.go.dev/database/sql", "Go package documentation", 0.49},
+		{"PipeWire: switched output to speakers", "Audio output change", 0.34},
+		{"File watcher: bin/mnemonic rebuilt", "Binary rebuild event", 0.43},
+		{"Terminal: ran 'systemctl --user status mnemonic'", "Service status check", 0.46},
+		{"Clipboard: copied error message 'database is locked'", "Error message clipboard event", 0.51},
+		{"Chrome: browsed SQLite WAL documentation", "Browser: SQLite docs", 0.52},
+		{"File watcher: config.yaml modified", "Config file change", 0.48},
+		{"Terminal: ran 'git diff HEAD~1' to review changes", "Git diff command", 0.40},
+		{"GNOME: workspace switched from 1 to 2", "Desktop workspace change", 0.33},
+		{"File watcher: internal/agent/consolidation/agent_test.go saved", "Test file save", 0.45},
+		{"Terminal: ran 'make build' successfully", "Build command execution", 0.47},
+		{"Chrome: opened mnemonic GitHub issues page", "Browser: project management", 0.44},
+		{"Clipboard: copied function signature from agent.go", "Code snippet clipboard event", 0.42},
+		{"Terminal: ran 'go test -v ./internal/store/...' — 18 tests passed", "Test execution", 0.50},
+		{"File watcher: memory.db-wal grew to 2MB", "WAL file size change", 0.39},
+	}
+	for i, nc := range noiseContents {
+		noise[i] = labeledMemory{
+			Label: "noise",
+			Memory: store.Memory{
+				ID:        fmt.Sprintf("noise-needle-%d", i+1),
+				Summary:   nc.summary,
+				Content:   nc.content,
+				Concepts:  []string{"system", "activity"},
+				Embedding: syntheticEmbedding(96+i, dims, 0.08), // Needle noise region.
+				Salience:  nc.salience,
+				State:     "active",
+				Timestamp: now.Add(-time.Duration(i*7) * time.Minute),
+				CreatedAt: now.Add(-time.Duration(i*7) * time.Minute),
+				UpdatedAt: now.Add(-time.Duration(i*7) * time.Minute),
+			},
+		}
+	}
+
+	allMems := append(signal, noise...)
+
+	// Minimal associations — signal memories are loosely related.
+	assocs := []store.Association{
+		{SourceID: "needle-1", TargetID: "needle-3", Strength: 0.5, RelationType: "similar", CreatedAt: now, LastActivated: now, ActivationCount: 1},
+		{SourceID: "needle-3", TargetID: "needle-4", Strength: 0.4, RelationType: "similar", CreatedAt: now, LastActivated: now, ActivationCount: 1},
+	}
+
+	queries := []benchmarkQuery{
+		{Query: "What decisions did we make about the database", ExpectedIDs: []string{"needle-1"}},
+		{Query: "What errors and bugs have we found", ExpectedIDs: []string{"needle-3", "needle-4"}},
+		{Query: "What did we learn about Go and logging", ExpectedIDs: []string{"needle-2", "needle-4"}},
+	}
+
+	return scenario{
+		Name:         "Needle in Haystack",
 		Memories:     allMems,
 		Associations: assocs,
 		Queries:      queries,

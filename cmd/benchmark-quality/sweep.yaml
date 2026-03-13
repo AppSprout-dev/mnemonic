@@ -1,0 +1,20 @@
+sweeps:
+  - param: retrieval.decay_factor
+    values: [0.5, 0.6, 0.7, 0.8, 0.9]
+  - param: retrieval.activation_threshold
+    values: [0.05, 0.1, 0.15, 0.2, 0.3]
+  - param: retrieval.max_hops
+    values: [2, 3, 4, 5]
+  - param: retrieval.merge_alpha
+    values: [0.3, 0.5, 0.6, 0.7, 0.8]
+  - param: retrieval.dual_hit_bonus
+    values: [0.0, 0.1, 0.15, 0.2, 0.3]
+  - param: consolidation.decay_rate
+    values: [0.85, 0.90, 0.95, 0.98]
+  - param: consolidation.fade_threshold
+    values: [0.2, 0.3, 0.4, 0.5]
+  - param: consolidation.archive_threshold
+    values: [0.05, 0.1, 0.15, 0.2]
+  - param: bench.decay_per_cycle
+    values: [0.85, 0.90, 0.92, 0.95]
+cycles: 5
