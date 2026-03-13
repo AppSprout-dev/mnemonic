@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/appsprout/mnemonic/internal/agent"
 	"github.com/appsprout/mnemonic/internal/events"
 	"github.com/appsprout/mnemonic/internal/llm"
 	"github.com/appsprout/mnemonic/internal/store"
@@ -434,13 +435,5 @@ func (pa *PerceptionAgent) mergeMetadata(
 	return merged
 }
 
-// Ensure PerceptionAgent implements agent.Agent interface
-var _ Agent = (*PerceptionAgent)(nil)
-
-// Agent defines the interface that perception agents must implement.
-type Agent interface {
-	Name() string
-	Start(ctx context.Context, bus events.Bus) error
-	Stop() error
-	Health(ctx context.Context) error
-}
+// Ensure PerceptionAgent implements agent.Agent interface.
+var _ agent.Agent = (*PerceptionAgent)(nil)
