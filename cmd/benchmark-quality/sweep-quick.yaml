@@ -1,0 +1,8 @@
+sweeps:
+  - param: retrieval.decay_factor
+    values: [0.5, 0.7, 0.9]
+  - param: consolidation.decay_rate
+    values: [0.90, 0.95, 0.98]
+  - param: bench.decay_per_cycle
+    values: [0.85, 0.92, 0.95]
+cycles: 3

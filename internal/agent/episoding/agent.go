@@ -130,6 +130,30 @@ func (ea *EpisodingAgent) Health(ctx context.Context) error {
 	return nil
 }
 
+// ProcessAllPending processes all raw memories into episodes synchronously.
+// This is intended for batch/benchmark usage where the polling loop is not running.
+// It processes episodes, then forces closure of any remaining open episode.
+func (ea *EpisodingAgent) ProcessAllPending(ctx context.Context) error {
+	// Reset cursor to epoch so we pick up all raw memories.
+	ea.lastProcessedTime = time.Time{}
+	ea.assignedMu.Lock()
+	ea.assignedRawIDs = make(map[string]bool)
+	ea.assignedMu.Unlock()
+
+	if err := ea.processEpisodes(ctx); err != nil {
+		return fmt.Errorf("processing episodes: %w", err)
+	}
+
+	// Force-close any remaining open episode.
+	openEp, err := ea.store.GetOpenEpisode(ctx)
+	if err == nil && openEp.ID != "" {
+		if err := ea.closeEpisode(ctx, &openEp); err != nil {
+			return fmt.Errorf("closing open episode: %w", err)
+		}
+	}
+	return nil
+}
+
 func (ea *EpisodingAgent) pollingLoop() {
 	defer ea.wg.Done()
 

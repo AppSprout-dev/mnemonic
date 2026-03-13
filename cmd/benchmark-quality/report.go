@@ -112,6 +112,31 @@ func printScenarioResult(r scenarioResult) {
 	fmt.Println()
 }
 
+func printPipelineResult(r pipelineResult) {
+	fmt.Printf("  PIPELINE: %s\n", r.Name)
+	fmt.Printf("    Encoded: %d  |  Episodes: %d  |  Avg Assocs: %.1f\n",
+		r.EncodedCount, r.EpisodeCount, r.AvgAssociations)
+	fmt.Printf("    Signal Surv.  %.2f  %s  %s\n", r.SignalSurvival, bar(r.SignalSurvival, 10), grade(r.SignalSurvival, threshPassSignal, threshWarnSignal))
+	fmt.Printf("    Noise Suppr.  %.2f  %s  %s\n", r.NoiseSuppression, bar(r.NoiseSuppression, 10), grade(r.NoiseSuppression, threshPassNoise, threshWarnNoise))
+
+	if len(r.QueryResults) > 0 {
+		var avgPrec, avgMRR, avgNDCG float64
+		for _, q := range r.QueryResults {
+			avgPrec += q.PrecisionAtK
+			avgMRR += q.MRR
+			avgNDCG += q.NDCG
+		}
+		n := float64(len(r.QueryResults))
+		avgPrec /= n
+		avgMRR /= n
+		avgNDCG /= n
+		fmt.Printf("    Precision@5   %.2f  %s  %s\n", avgPrec, bar(avgPrec, 10), grade(avgPrec, threshPassPrecision, threshWarnPrecision))
+		fmt.Printf("    MRR           %.2f  %s  %s\n", avgMRR, bar(avgMRR, 10), grade(avgMRR, threshPassMRR, threshWarnMRR))
+		fmt.Printf("    nDCG          %.2f  %s  %s\n", avgNDCG, bar(avgNDCG, 10), grade(avgNDCG, 0.60, 0.40))
+	}
+	fmt.Println()
+}
+
 func printAggregate(agg aggregateResult) {
 	fmt.Println("  AGGREGATE")
 	fmt.Printf("    Precision@5 %.2f  |  MRR %.2f  |  nDCG %.2f\n", agg.AvgPrecision, agg.AvgMRR, agg.AvgNDCG)
@@ -168,4 +193,67 @@ func writeMarkdownReport(results []scenarioResult, agg aggregateResult, cycles i
 	sb.WriteString(fmt.Sprintf("\n**Overall: %s**\n", agg.Overall))
 
 	return os.WriteFile("benchmark-results.md", []byte(sb.String()), 0644)
+}
+
+func writeSweepMarkdownReport(report SweepReport, cycles int) error {
+	var sb strings.Builder
+
+	sb.WriteString("# Mnemonic Config Sweep Report\n\n")
+	fmt.Fprintf(&sb, "**Version:** %s | **LLM:** semantic-stub | **Cycles:** %d\n\n", Version, cycles)
+
+	sb.WriteString("## Baseline (All Defaults)\n\n")
+	sb.WriteString("| Metric | Score | Grade |\n|---|---|---|\n")
+	fmt.Fprintf(&sb, "| Precision@5 | %.3f | %s |\n", report.Baseline.AvgPrecision, grade(report.Baseline.AvgPrecision, threshPassPrecision, threshWarnPrecision))
+	fmt.Fprintf(&sb, "| MRR | %.3f | %s |\n", report.Baseline.AvgMRR, grade(report.Baseline.AvgMRR, threshPassMRR, threshWarnMRR))
+	fmt.Fprintf(&sb, "| nDCG | %.3f | %s |\n", report.Baseline.AvgNDCG, grade(report.Baseline.AvgNDCG, 0.60, 0.40))
+	fmt.Fprintf(&sb, "| Noise Suppression | %.3f | %s |\n", report.Baseline.AvgNoiseSuppression, grade(report.Baseline.AvgNoiseSuppression, threshPassNoise, threshWarnNoise))
+	fmt.Fprintf(&sb, "| Signal Retention | %.3f | %s |\n", report.Baseline.AvgSignalRetention, grade(report.Baseline.AvgSignalRetention, threshPassSignal, threshWarnSignal))
+	fmt.Fprintf(&sb, "\n**Overall: %s**\n\n", report.Baseline.Overall)
+
+	sb.WriteString("## Parameter Sweeps\n\n")
+
+	for param, results := range report.ParamResults {
+		fmt.Fprintf(&sb, "### %s\n\n", param)
+		sb.WriteString("| Value | P@5 | MRR | nDCG | Noise | Signal | Composite | Note |\n")
+		sb.WriteString("|---|---|---|---|---|---|---|---|\n")
+
+		bestIdx := 0
+		bestComp := compositeScore(results[0].Delta)
+		for i, sr := range results {
+			comp := compositeScore(sr.Delta)
+			if comp > bestComp {
+				bestComp = comp
+				bestIdx = i
+			}
+		}
+
+		for i, sr := range results {
+			comp := compositeScore(sr.Delta)
+			note := ""
+			if sr.IsDefault {
+				note = "default"
+			}
+			if i == bestIdx {
+				if note != "" {
+					note += ", best"
+				} else {
+					note = "best"
+				}
+			}
+			fmt.Fprintf(&sb, "| %.4g | %+.3f | %+.3f | %+.3f | %+.3f | %+.3f | %+.4f | %s |\n",
+				sr.Value,
+				sr.Delta["precision"], sr.Delta["mrr"], sr.Delta["ndcg"],
+				sr.Delta["noise"], sr.Delta["signal"],
+				comp, note)
+		}
+
+		best := results[bestIdx]
+		if !best.IsDefault {
+			fmt.Fprintf(&sb, "\n**Recommended:** `%s = %.4g` (composite %+.4f vs default)\n\n", param, best.Value, bestComp)
+		} else {
+			fmt.Fprintf(&sb, "\n**Recommended:** keep default (`%.4g`)\n\n", best.Value)
+		}
+	}
+
+	return os.WriteFile("sweep-results.md", []byte(sb.String()), 0644)
 }
