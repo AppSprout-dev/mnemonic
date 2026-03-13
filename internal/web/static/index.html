@@ -858,6 +858,7 @@
         .llm-legend-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
         .llm-chart-tooltip { position: absolute; background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 6px 10px; font-size: 0.72rem; color: var(--text-primary); pointer-events: none; display: none; z-index: 20; white-space: nowrap; line-height: 1.7; }
         .llm-log-row-err td { background: rgba(239,68,68,0.04); }
+        .llm-error-detail { font-size: 0.75rem; color: var(--accent-red); padding: 4px 12px !important; word-break: break-word; opacity: 0.85; border-top: none !important; }
         .llm-header-sub { font-size: 0.72rem; color: var(--text-dim); margin-top: 2px; }
         .llm-completion-val { color: var(--accent-violet) !important; }
 
@@ -1109,8 +1110,18 @@
         .chat-code-block code { color: var(--accent-green); font-family: 'SF Mono', 'Fira Code', monospace; }
         .chat-inline-code { background: color-mix(in srgb, var(--accent-violet) 15%, transparent); color: var(--accent-violet); padding: 1px 5px; border-radius: 3px; font-size: 0.82rem; font-family: 'SF Mono', 'Fira Code', monospace; }
         .chat-status-pill { align-self: center; padding: 3px 10px; border-radius: 12px; font-size: 0.7rem; font-weight: 500; background: var(--bg-tertiary); color: var(--text-dim); border: 1px solid var(--border-subtle); }
-        .chat-tool-pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 10px; font-size: 0.7rem; background: color-mix(in srgb, var(--accent-violet) 8%, transparent); color: var(--accent-violet); border: 1px solid color-mix(in srgb, var(--accent-violet) 15%, transparent); font-family: 'SF Mono', 'Fira Code', monospace; white-space: nowrap; }
-        .chat-tool-pill .tool-icon { font-size: 0.6rem; opacity: 0.6; }
+        .chat-tool-pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 10px; font-size: 0.7rem; background: color-mix(in srgb, var(--accent-violet) 8%, transparent); color: var(--accent-violet); border: 1px solid color-mix(in srgb, var(--accent-violet) 15%, transparent); font-family: 'SF Mono', 'Fira Code', monospace; white-space: nowrap; cursor: pointer; transition: background 0.15s, border-color 0.15s; }
+        .chat-tool-pill:hover { background: color-mix(in srgb, var(--accent-violet) 16%, transparent); border-color: color-mix(in srgb, var(--accent-violet) 30%, transparent); }
+        .chat-tool-pill.expanded { background: color-mix(in srgb, var(--accent-violet) 14%, transparent); border-color: color-mix(in srgb, var(--accent-violet) 25%, transparent); }
+        .chat-tool-pill .tool-icon { font-size: 0.6rem; opacity: 0.6; transition: transform 0.15s; }
+        .chat-tool-pill.expanded .tool-icon { transform: rotate(90deg); }
+        .chat-tool-detail { display: none; flex-basis: 100%; margin-top: 4px; padding: 8px 10px; border-radius: 8px; font-size: 0.72rem; font-family: 'SF Mono', 'Fira Code', monospace; background: color-mix(in srgb, var(--accent-violet) 5%, var(--bg-primary)); border: 1px solid color-mix(in srgb, var(--accent-violet) 12%, transparent); color: var(--text-secondary); max-height: 300px; overflow-y: auto; }
+        .chat-tool-detail.visible { display: block; }
+        .chat-tool-detail pre { white-space: pre-wrap; word-break: break-word; margin: 0; }
+        .tool-detail-section { margin-bottom: 6px; }
+        .tool-detail-section:last-child { margin-bottom: 0; }
+        .tool-detail-label { font-size: 0.65rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent-violet); margin-bottom: 2px; }
+        .chat-tool-pill.tool-error { border-color: var(--accent-red, #e55); color: var(--accent-red, #e55); }
         .chat-tool-row { display: flex; flex-wrap: wrap; gap: 4px; align-self: flex-start; }
         .chat-streaming::after { content: '\25CB'; animation: blink 1s step-start infinite; margin-left: 2px; }
         @keyframes blink { 50% { opacity: 0; } }
@@ -1448,8 +1459,8 @@
                         <div class="llm-panel">
                             <div class="llm-panel-title">Usage by Agent</div>
                             <table class="llm-table" id="llmAgentTable">
-                                <thead><tr><th>Agent</th><th>Requests</th><th>Tokens</th><th>Cost</th><th>Avg Latency</th></tr></thead>
-                                <tbody id="llmAgentBody"><tr><td colspan="5" class="llm-empty">No data yet</td></tr></tbody>
+                                <thead><tr><th>Agent</th><th>Requests</th><th>Tokens</th><th>Errors</th><th>Cost</th><th>Avg Latency</th></tr></thead>
+                                <tbody id="llmAgentBody"><tr><td colspan="6" class="llm-empty">No data yet</td></tr></tbody>
                             </table>
                         </div>
                         <div class="llm-panel">
@@ -2595,10 +2606,11 @@
             var agentExtras = {};
             log.forEach(function(r) {
                 var a = r.caller || 'unknown';
-                if (!agentExtras[a]) agentExtras[a] = { latencySum: 0, count: 0, cost: 0 };
+                if (!agentExtras[a]) agentExtras[a] = { latencySum: 0, count: 0, cost: 0, errors: 0 };
                 agentExtras[a].latencySum += (r.latency_ms || 0);
                 agentExtras[a].count++;
                 agentExtras[a].cost += (r.estimated_cost_usd || 0);
+                if (!r.success) agentExtras[a].errors++;
             });
 
             // Agent table
@@ -2606,14 +2618,16 @@
             var agents = s.by_agent || {};
             var agentKeys = Object.keys(agents).sort(function(a, b) { return (agents[b].total_tokens || 0) - (agents[a].total_tokens || 0); });
             if (agentKeys.length === 0) {
-                agentBody.innerHTML = '<tr><td colspan="5" class="llm-empty">No agent data yet</td></tr>';
+                agentBody.innerHTML = '<tr><td colspan="6" class="llm-empty">No agent data yet</td></tr>';
             } else {
                 agentBody.innerHTML = agentKeys.map(function(k) {
                     var a = agents[k];
                     var ext = agentExtras[k] || {};
+                    var errors = ext.errors || 0;
+                    var errHtml = errors > 0 ? '<span style="color:var(--accent-red)">' + errors + '</span>' : '0';
                     var cost = ext.cost ? '$' + ext.cost.toFixed(4) : '-';
                     var avgLat = ext.count ? (ext.latencySum / ext.count).toFixed(0) + 'ms' : '-';
-                    return '<tr><td><strong>' + escapeHtml(k) + '</strong></td><td>' + (a.requests || 0) + '</td><td>' + (a.total_tokens || 0).toLocaleString() + '</td><td>' + cost + '</td><td>' + avgLat + '</td></tr>';
+                    return '<tr><td><strong>' + escapeHtml(k) + '</strong></td><td>' + (a.requests || 0) + '</td><td>' + (a.total_tokens || 0).toLocaleString() + '</td><td>' + errHtml + '</td><td>' + cost + '</td><td>' + avgLat + '</td></tr>';
                 }).join('');
             }
 
@@ -2652,7 +2666,11 @@
                     var rowCls = r.success ? '' : ' class="llm-log-row-err"';
                     var inOut = (r.prompt_tokens || 0).toLocaleString() + ' / ' + (r.completion_tokens || 0).toLocaleString();
                     var model = escapeHtml((r.model || '-').replace('local-model', 'local'));
-                    return '<tr' + rowCls + '><td>' + t + '</td><td>' + escapeHtml(r.caller || '-') + '</td><td>' + escapeHtml(r.operation || '-') + '</td><td>' + model + '</td><td>' + inOut + '</td><td>' + (r.latency_ms || 0) + 'ms</td><td class="' + statusCls + '">' + statusTxt + '</td></tr>';
+                    var row = '<tr' + rowCls + '><td>' + t + '</td><td>' + escapeHtml(r.caller || '-') + '</td><td>' + escapeHtml(r.operation || '-') + '</td><td>' + model + '</td><td>' + inOut + '</td><td>' + (r.latency_ms || 0) + 'ms</td><td class="' + statusCls + '">' + statusTxt + '</td></tr>';
+                    if (!r.success && r.error_message) {
+                        row += '<tr class="llm-log-row-err"><td colspan="7" class="llm-error-detail">' + escapeHtml(r.error_message) + '</td></tr>';
+                    }
+                    return row;
                 }).join('');
             }
 
@@ -2799,6 +2817,43 @@
 
     // ── Utilities ──
     function escapeHtml(str) { if (!str) return ''; var div = document.createElement('div'); div.textContent = str; return div.innerHTML; }
+    function toggleToolDetail(e) {
+        var pill = e.currentTarget;
+        var toolId = pill.getAttribute('data-tool-use-id');
+        var entry = toolId ? toolDataMap.get(toolId) : null;
+        var input = entry ? entry.input : null;
+        var result = entry ? entry.result : null;
+        if (!input && !result) return;
+        // The detail panel lives after the tool-row, not after the pill
+        var toolRow = pill.closest('.chat-tool-row') || pill.parentNode;
+        var existing = toolRow.nextElementSibling;
+        if (existing && existing.classList.contains('chat-tool-detail') && existing.getAttribute('data-for') === toolId) {
+            existing.classList.toggle('visible');
+            pill.classList.toggle('expanded');
+        } else {
+            // Collapse any other open detail in this row
+            if (existing && existing.classList.contains('chat-tool-detail')) {
+                existing.remove();
+                toolRow.querySelectorAll('.chat-tool-pill.expanded').forEach(function(p) { p.classList.remove('expanded'); });
+            }
+            var detail = document.createElement('div');
+            detail.className = 'chat-tool-detail visible';
+            if (toolId) {
+                detail.setAttribute('data-for', toolId);
+            }
+            var html = '';
+            if (input) {
+                html += '<div class="tool-detail-section"><div class="tool-detail-label">Input</div><pre>' + escapeHtml(input) + '</pre></div>';
+            }
+            if (result) {
+                html += '<div class="tool-detail-section"><div class="tool-detail-label">Result</div><pre>' + escapeHtml(result) + '</pre></div>';
+            }
+            detail.innerHTML = html;
+            toolRow.parentNode.insertBefore(detail, toolRow.nextSibling);
+            pill.classList.add('expanded');
+        }
+        scrollChatBottom();
+    }
     function timeAgo(dateStr) {
         if (!dateStr) return '';
         var d = new Date(dateStr);
@@ -3173,6 +3228,8 @@
 
     // ── Agent Chat ──
     var agentChat = { ws: null, connected: false, busy: false, wsUrl: null, currentBubble: null, reconnectTimer: null, currentConvId: null };
+    // Store tool input/result data in a Map keyed by tool_use_id to avoid DOM bloat from large data-attributes
+    var toolDataMap = new Map();
 
     function initAgentChat(webPort) {
         if (!webPort || webPort === 0) return;
@@ -3252,9 +3309,17 @@
             case 'tool_use':
                 // Show tool name as a compact pill (strip mcp__ prefixes)
                 var toolName = (msg.name || '').replace(/^mcp__mnemonic__/, '').replace(/^mcp__/, '');
+                var toolInput = msg.input || '';
                 var pill = document.createElement('div');
                 pill.className = 'chat-tool-pill';
                 pill.innerHTML = '<span class="tool-icon">\u25B6</span>' + escapeHtml(toolName);
+                if (msg.tool_use_id) {
+                    pill.setAttribute('data-tool-use-id', msg.tool_use_id);
+                    if (toolInput) {
+                        toolDataMap.set(msg.tool_use_id, { input: toolInput, result: null });
+                    }
+                    pill.addEventListener('click', toggleToolDetail);
+                }
                 // Group consecutive tool pills in a flex row
                 var lastChild = container.lastElementChild;
                 var row;
@@ -3267,6 +3332,21 @@
                 }
                 row.appendChild(pill);
                 scrollChatBottom();
+                break;
+            case 'tool_result':
+                // Store result in the Map; mark pill as error if needed
+                if (msg.tool_use_id) {
+                    var existing = toolDataMap.get(msg.tool_use_id);
+                    if (existing) {
+                        existing.result = msg.content || '';
+                    } else {
+                        toolDataMap.set(msg.tool_use_id, { input: null, result: msg.content || '' });
+                    }
+                    if (msg.is_error) {
+                        var targetPill = container.querySelector('.chat-tool-pill[data-tool-use-id="' + msg.tool_use_id + '"]');
+                        if (targetPill) targetPill.classList.add('tool-error');
+                    }
+                }
                 break;
             case 'status':
                 var labels = { recalling: 'Recalling context...', working: 'Working...', reflecting: 'Reflecting...', ready: 'Ready' };
@@ -3424,6 +3504,7 @@
     function displayLoadedConversation(conv) {
         var container = document.getElementById('chatMessages');
         container.innerHTML = '';
+        toolDataMap.clear();
         agentChat.currentConvId = conv.id;
         agentChat.currentBubble = null;
         document.getElementById('chatTitle').textContent = conv.title || 'Conversation';
@@ -3435,11 +3516,18 @@
                 appendChatBubble('assistant', m.content);
             } else if (m.role === 'tool_use') {
                 var toolName = (m.name || '').replace(/^mcp__mnemonic__/, '').replace(/^mcp__/, '');
+                var toolInput = m.input || '';
+                var toolId = m.tool_use_id || ('hist-' + Math.random().toString(36).slice(2, 10));
                 var row = document.createElement('div');
                 row.className = 'chat-tool-row';
                 var pill = document.createElement('div');
                 pill.className = 'chat-tool-pill';
                 pill.innerHTML = '<span class="tool-icon">\u25B6</span>' + escapeHtml(toolName);
+                pill.setAttribute('data-tool-use-id', toolId);
+                if (toolInput) {
+                    toolDataMap.set(toolId, { input: toolInput, result: null });
+                    pill.addEventListener('click', toggleToolDetail);
+                }
                 row.appendChild(pill);
                 container.appendChild(row);
             }
@@ -3466,6 +3554,7 @@
     function startNewConversation() {
         if (!agentChat.connected || agentChat.busy) return;
         document.getElementById('chatMessages').innerHTML = '';
+        toolDataMap.clear();
         document.getElementById('chatHistoryPanel').style.display = 'none';
         agentChat.currentBubble = null;
         agentChat.ws.send(JSON.stringify({ type: 'new_conversation' }));
