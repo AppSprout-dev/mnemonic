@@ -4,6 +4,14 @@ All notable changes to Mnemonic will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.10.0](https://github.com/CalebisGross/mnemonic/compare/v0.9.0...v0.10.0) (2026-03-13)
+
+
+### Features
+
+* add ISO 8601 timestamps to evolution files ([cf76e54](https://github.com/CalebisGross/mnemonic/commit/cf76e5499a38f6dc5d20fec4fd611ce5e039aaca))
+* add ISO 8601 timestamps to evolution files ([f1e42dc](https://github.com/CalebisGross/mnemonic/commit/f1e42dcfcb97d6b3d763fcd406f30a5dab2a618f))
+
 ## [0.9.0](https://github.com/CalebisGross/mnemonic/compare/v0.8.2...v0.9.0) (2026-03-13)
 
 
