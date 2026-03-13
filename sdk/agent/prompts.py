@@ -118,7 +118,7 @@ Only change things you have evidence for. Don't speculate.
 
 _PRINCIPLES_MIN_CONFIDENCE = 0.6
 _PRINCIPLES_MAX = 15
-_STRATEGIES_INCLUDE_TIPS = True
+_STRATEGIES_INCLUDE_TIPS = False
 _PATCHES_MAX = 20
 _PROMPT_BUDGET = 20_000
 
