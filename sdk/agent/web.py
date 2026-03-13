@@ -167,6 +167,7 @@ async def _handle_task(
         main_stream_fn=_ws_main_stream,
         side_stream_fn=_ws_side_stream,
         on_phase=_on_phase,
+        conv_id=conv_id,
     )
 
     # Update conversation cost and session ID
@@ -395,6 +396,14 @@ class WebSocketSession:
         """Returns True to trigger client reconnect."""
         new_model = msg.get("model", "").strip()
         if not new_model:
+            return False
+        # Only allow known model name patterns (alphanumeric, hyphens, dots, slashes)
+        import re
+        if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9._/-]{0,99}", new_model):
+            await _send(self._ws, {
+                "type": "error",
+                "message": "Invalid model name.",
+            })
             return False
         self._session_model = new_model
         self._store.set_preferred_model(new_model)
