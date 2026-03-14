@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -269,6 +272,7 @@ func (pa *PerceptionAgent) processEvent(ctx context.Context, event Event) {
 		HeuristicScore:  heuristicResult.Score,
 		InitialSalience: salience,
 		Processed:       false,
+		Project:         inferProjectFromPath(event.Path),
 	}
 
 	// 4. Write to store
@@ -433,6 +437,39 @@ func (pa *PerceptionAgent) mergeMetadata(
 	merged["heuristic_score"] = heuristicScore
 
 	return merged
+}
+
+// knownProjectParents are directory names that typically contain project directories.
+var knownProjectParents = map[string]bool{
+	"Projects":  true,
+	"projects":  true,
+	"src":       true,
+	"repos":     true,
+	"workspace": true,
+	"Workspace": true,
+}
+
+// inferProjectFromPath extracts a project name from a file path by looking for
+// known project parent directories (e.g., ~/Projects/felixlm/foo.go → "felixlm").
+func inferProjectFromPath(path string) string {
+	if path == "" {
+		return ""
+	}
+
+	// Expand ~ if present
+	if strings.HasPrefix(path, "~") {
+		if home, err := os.UserHomeDir(); err == nil {
+			path = filepath.Join(home, path[1:])
+		}
+	}
+
+	parts := strings.Split(filepath.Clean(path), string(os.PathSeparator))
+	for i, part := range parts {
+		if knownProjectParents[part] && i+1 < len(parts) {
+			return parts[i+1]
+		}
+	}
+	return ""
 }
 
 // Ensure PerceptionAgent implements agent.Agent interface.

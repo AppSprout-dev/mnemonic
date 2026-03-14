@@ -763,15 +763,19 @@
             padding: 1px 7px; border-radius: 8px;
             font-size: 0.67rem; font-weight: 500;
             background: rgba(139, 92, 246, 0.1); color: var(--accent-violet);
-            cursor: default; transition: background 0.15s;
+            cursor: pointer; transition: background 0.15s;
         }
         .tl-concept:hover { background: rgba(139, 92, 246, 0.2); }
         .tl-concept.concept-active { background: rgba(6,182,212,0.2); color: var(--accent-cyan); }
+        .tl-concept.concept-selected, .tl-source.concept-selected {
+            background: rgba(6,182,212,0.3); color: var(--accent-cyan);
+            box-shadow: 0 0 0 1px var(--accent-cyan);
+        }
         .tl-source {
             padding: 1px 7px; border-radius: 8px;
             font-size: 0.67rem; font-weight: 500;
             background: rgba(6, 182, 212, 0.1); color: var(--accent-teal);
-            cursor: default; transition: background 0.15s;
+            cursor: pointer; transition: background 0.15s;
         }
         .tl-source:hover { background: rgba(6, 182, 212, 0.2); }
         .tl-source.concept-active { background: rgba(6,182,212,0.25); color: var(--accent-cyan); }
@@ -2107,10 +2111,10 @@
         if (source || concepts.length > 0) {
             html += '<div class="tl-card-concepts">';
             if (source) {
-                html += '<span class="tl-source" onmouseenter="highlightTimelineConcept(this.textContent)" onmouseleave="clearTimelineHighlight()">' + escapeHtml(source) + '</span>';
+                html += '<span class="tl-source" onclick="toggleTimelineTag(event, this.textContent)" onmouseenter="hoverTimelineTag(this.textContent)" onmouseleave="unhoverTimelineTag()">' + escapeHtml(source) + '</span>';
             }
             concepts.slice(0, 8).forEach(function(c) {
-                html += '<span class="tl-concept" onmouseenter="highlightTimelineConcept(this.textContent)" onmouseleave="clearTimelineHighlight()">' + escapeHtml(c) + '</span>';
+                html += '<span class="tl-concept" onclick="toggleTimelineTag(event, this.textContent)" onmouseenter="hoverTimelineTag(this.textContent)" onmouseleave="unhoverTimelineTag()">' + escapeHtml(c) + '</span>';
             });
             html += '</div>';
         }
@@ -2158,11 +2162,53 @@
         if (detail) detail.classList.toggle('open');
     }
 
-    function highlightTimelineConcept(concept) {
+    var _selectedTimelineTags = new Set();
+
+    function toggleTimelineTag(event, concept) {
+        event.stopPropagation();
+        if (_selectedTimelineTags.has(concept)) {
+            _selectedTimelineTags.delete(concept);
+        } else {
+            _selectedTimelineTags.add(concept);
+        }
+        applyTimelineTagHighlight();
+    }
+
+    function hoverTimelineTag(concept) {
+        if (_selectedTimelineTags.size > 0) return; // don't hover-highlight when tags are pinned
+        highlightTimelineCards(new Set([concept]));
+    }
+
+    function unhoverTimelineTag() {
+        if (_selectedTimelineTags.size > 0) return; // keep pinned selection
+        clearAllTimelineHighlight();
+    }
+
+    function applyTimelineTagHighlight() {
+        if (_selectedTimelineTags.size === 0) {
+            clearAllTimelineHighlight();
+            return;
+        }
+        highlightTimelineCards(_selectedTimelineTags);
+        // Mark selected tag pills
+        document.querySelectorAll('.tl-concept, .tl-source').forEach(function(tag) {
+            if (_selectedTimelineTags.has(tag.textContent)) {
+                tag.classList.add('concept-selected');
+            } else {
+                tag.classList.remove('concept-selected');
+            }
+        });
+    }
+
+    function highlightTimelineCards(activeTags) {
         var cards = document.querySelectorAll('.tl-card');
         cards.forEach(function(card) {
             var cardConcepts = (card.getAttribute('data-concepts') || '').split(',');
-            if (cardConcepts.indexOf(concept) !== -1) {
+            var match = true;
+            activeTags.forEach(function(tag) {
+                if (cardConcepts.indexOf(tag) === -1) match = false;
+            });
+            if (match) {
                 card.classList.add('highlighted');
                 card.classList.remove('dimmed');
             } else {
@@ -2171,16 +2217,20 @@
             }
         });
         document.querySelectorAll('.tl-concept, .tl-source').forEach(function(tag) {
-            if (tag.textContent === concept) tag.classList.add('concept-active');
+            if (activeTags.has(tag.textContent)) {
+                tag.classList.add('concept-active');
+            } else {
+                tag.classList.remove('concept-active');
+            }
         });
     }
 
-    function clearTimelineHighlight() {
+    function clearAllTimelineHighlight() {
         document.querySelectorAll('.tl-card').forEach(function(card) {
             card.classList.remove('dimmed', 'highlighted');
         });
         document.querySelectorAll('.tl-concept, .tl-source').forEach(function(tag) {
-            tag.classList.remove('concept-active');
+            tag.classList.remove('concept-active', 'concept-selected');
         });
     }
 
