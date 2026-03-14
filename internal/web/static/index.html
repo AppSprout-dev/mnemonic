@@ -1000,6 +1000,17 @@
         @keyframes toastIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes toastOut { from { opacity: 1; } to { opacity: 0; transform: translateY(10px); } }
 
+        /* ── Update Badge ── */
+        .update-badge {
+            display: inline-block; margin-left: 8px; padding: 2px 8px;
+            font-size: 0.65rem; font-weight: 600; border-radius: 10px;
+            background: var(--accent-green); color: var(--bg-primary);
+            cursor: pointer; animation: badgePulse 2s ease-in-out infinite;
+        }
+        .update-badge:hover { opacity: 0.85; }
+        .update-badge.updating { background: var(--text-dim); cursor: wait; animation: none; }
+        @keyframes badgePulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+
         /* ── Loading ── */
         .skeleton {
             background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--bg-card) 50%, var(--bg-tertiary) 75%);
@@ -1209,7 +1220,7 @@
     <div id="app">
         <!-- Nav -->
         <nav class="nav">
-            <div class="nav-brand"><span>&#9670;</span> Mnemonic <span id="navVersion" style="font-size:0.7rem;color:var(--text-dim);font-weight:400"></span></div>
+            <div class="nav-brand"><span>&#9670;</span> Mnemonic <span id="navVersion" style="font-size:0.7rem;color:var(--text-dim);font-weight:400"></span><span id="navUpdateBadge" class="update-badge" style="display:none" onclick="triggerUpdate()" title="Click to update"></span></div>
             <div class="nav-tabs">
                 <button class="nav-tab active" data-view="recall" onclick="switchView('recall')">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -3733,14 +3744,63 @@
         agentChat.ws.send(JSON.stringify({ type: 'set_model', model: model }));
     }
 
+    // ── Self-Update ──
+    var _updateInfo = null;
+
+    async function checkForUpdate() {
+        try {
+            var data = await fetchJSON('/system/update-check');
+            var badge = document.getElementById('navUpdateBadge');
+            if (data.update_available) {
+                _updateInfo = data;
+                badge.textContent = 'v' + data.latest_version + ' available';
+                badge.style.display = 'inline-block';
+            } else {
+                _updateInfo = null;
+                badge.style.display = 'none';
+            }
+        } catch (e) {
+            // Silently ignore — update check is best-effort
+        }
+    }
+
+    async function triggerUpdate() {
+        if (!_updateInfo || !_updateInfo.update_available) return;
+        if (!confirm('Update mnemonic to v' + _updateInfo.latest_version + '?\n\nThe daemon will restart automatically.')) return;
+
+        var badge = document.getElementById('navUpdateBadge');
+        badge.textContent = 'Downloading...';
+        badge.className = 'update-badge updating';
+
+        try {
+            var data = await fetchJSON('/system/update', { method: 'POST' });
+            if (data.status === 'updated') {
+                badge.textContent = 'Restarting...';
+                showToast('Updated to v' + data.new_version + ' — restarting...', 'success');
+                // The daemon will restart; WebSocket reconnect will pick up the new version
+                // After reconnect, loadStats will update navVersion and checkForUpdate will hide the badge
+            } else if (data.status === 'up_to_date') {
+                badge.style.display = 'none';
+                showToast('Already up to date', 'success');
+            }
+        } catch (e) {
+            badge.textContent = 'Update failed';
+            badge.className = 'update-badge';
+            showToast('Update failed: ' + e.message, 'error');
+            setTimeout(function() { badge.textContent = 'v' + _updateInfo.latest_version + ' available'; }, 3000);
+        }
+    }
+
     // ── Init ──
     async function initializeApp() {
         loadStats();
         loadInsights();
         loadProjects();
         connectWebSocket();
+        checkForUpdate();
         setInterval(loadStats, CONFIG.STATS_POLL);
         setInterval(loadInsights, CONFIG.INSIGHTS_POLL);
+        setInterval(checkForUpdate, 3600000); // Check for updates every hour
         handleHash();
     }
 

@@ -37,6 +37,7 @@ type ServerDeps struct {
 	IngestExcludePatterns []string
 	IngestMaxContentBytes int
 	Version               string
+	ServiceRestarter      routes.ServiceRestarter // can be nil if not installed as service
 	Log                   *slog.Logger
 }
 
@@ -77,6 +78,10 @@ func (s *Server) registerRoutes() {
 	// Health and stats
 	s.mux.HandleFunc("GET /api/v1/health", routes.HandleHealth(s.deps.Store, s.deps.LLM, s.deps.Version, s.deps.Log))
 	s.mux.HandleFunc("GET /api/v1/stats", routes.HandleStats(s.deps.Store, s.deps.Log))
+
+	// Self-update
+	s.mux.HandleFunc("GET /api/v1/system/update-check", routes.HandleUpdateCheck(s.deps.Version, s.deps.Log))
+	s.mux.HandleFunc("POST /api/v1/system/update", routes.HandleUpdate(s.deps.Version, s.deps.ServiceRestarter, s.deps.Log))
 
 	// Memory CRUD
 	s.mux.HandleFunc("POST /api/v1/memories", routes.HandleCreateMemory(s.deps.Store, s.deps.Bus, s.deps.Log))
