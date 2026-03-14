@@ -4,6 +4,19 @@ All notable changes to Mnemonic will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.13.0](https://github.com/AppSprout-dev/mnemonic/compare/v0.12.0...v0.13.0) (2026-03-14)
+
+
+### Features
+
+* unified project identity system ([c9702c0](https://github.com/AppSprout-dev/mnemonic/commit/c9702c0e39d2d34368bcfb48d4434296cdce71b8))
+* unified project identity system with config-driven resolver ([7043984](https://github.com/AppSprout-dev/mnemonic/commit/70439844cbf807d39840137d62f587c4ab847376))
+
+
+### Bug Fixes
+
+* resolve all golangci-lint v2 issues and pin CI to v2 ([abba510](https://github.com/AppSprout-dev/mnemonic/commit/abba510760eb8ba043b7986422f33d5067012a17))
+
 ## [0.12.0](https://github.com/AppSprout-dev/mnemonic/compare/v0.11.1...v0.12.0) (2026-03-14)
 
 
