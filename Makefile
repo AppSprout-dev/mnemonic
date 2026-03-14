@@ -21,12 +21,17 @@ ifdef IS_WINDOWS
     # MSYS2 make remaps TEMP/HOME to POSIX paths that native Windows tools
     # (Go, GCC) cannot resolve. Convert them back to Windows-native paths.
     # All vars use ?= so they can be overridden from the environment.
-    WIN_TEMP   ?= $(shell cygpath -w "$${TEMP:-/tmp}")
+    # MSYS2/Git Bash make does not inherit Windows env vars (USERPROFILE, LOCALAPPDATA)
+    # and its HOME (/home/<user>) maps to the wrong Windows path via cygpath.
+    # Use cmd.exe to read the real Windows USERPROFILE.
+    WIN_HOME   := $(shell cat '/proc/registry/HKEY_CURRENT_USER/Volatile Environment/USERPROFILE' 2>/dev/null | tr -d '\0\r')
+    WIN_TEMP   := $(shell cygpath -w "$${TEMP:-/tmp}")
     export TEMP    := $(WIN_TEMP)
     export TMP     := $(WIN_TEMP)
-    export GOTMPDIR ?= $(WIN_TEMP)
-    export GOPATH  ?= $(shell cygpath -w "$${HOME}/go")
-    export GOCACHE ?= $(shell cygpath -w "$${LOCALAPPDATA:-$${HOME}/AppData/Local}/go-build")
+    export GOTMPDIR := $(WIN_TEMP)
+    export GOPATH  := $(WIN_HOME)\go
+    export GOCACHE := $(WIN_HOME)\AppData\Local\go-build
+    export GOMODCACHE := $(WIN_HOME)\go\pkg\mod
 else
     BINARY=mnemonic
 endif
