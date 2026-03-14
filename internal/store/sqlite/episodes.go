@@ -114,7 +114,7 @@ func (s *SQLiteStore) ListEpisodes(ctx context.Context, state string, limit, off
 	if err != nil {
 		return nil, fmt.Errorf("failed to list episodes: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var episodes []store.Episode
 	for rows.Next() {

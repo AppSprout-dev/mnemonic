@@ -328,9 +328,10 @@ func (ca *ConsolidationAgent) decaySalience(ctx context.Context) (decayed, proce
 		attrs, attrErr := ca.store.GetMemoryAttributes(ctx, mem.ID)
 		if attrErr == nil {
 			// Critical/important memories decay slower
-			if attrs.Significance == "critical" {
+			switch attrs.Significance {
+			case "critical":
 				newSalience = float32(float64(mem.Salience) * math.Pow(effectiveDecay, 0.8)) // 20% slower
-			} else if attrs.Significance == "important" {
+			case "important":
 				newSalience = float32(float64(mem.Salience) * math.Pow(effectiveDecay, 0.9)) // 10% slower
 			}
 			// Successful satisfying memories have learning value
@@ -1049,7 +1050,7 @@ func (ca *ConsolidationAgent) identifyPattern(ctx context.Context, cluster []sto
 	allConcepts := make(map[string]bool)
 	for i, mem := range cluster {
 		qualityInfo := fmt.Sprintf("salience:%.2f, accessed:%d", mem.Salience, mem.AccessCount)
-		summaries.WriteString(fmt.Sprintf("%d. [%s] %s (concepts: %s)\n", i+1, qualityInfo, mem.Summary, strings.Join(mem.Concepts, ", ")))
+		fmt.Fprintf(&summaries, "%d. [%s] %s (concepts: %s)\n", i+1, qualityInfo, mem.Summary, strings.Join(mem.Concepts, ", "))
 		for _, c := range mem.Concepts {
 			allConcepts[c] = true
 		}

@@ -986,30 +986,30 @@ func (srv *MCPServer) handleAuditEncodings(ctx context.Context, args map[string]
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Encoding Audit — last %dh, %d pair(s):\n\n", hoursBack, len(pairs)))
+	fmt.Fprintf(&sb, "Encoding Audit — last %dh, %d pair(s):\n\n", hoursBack, len(pairs))
 
 	for i, p := range pairs {
-		sb.WriteString(fmt.Sprintf("--- Pair %d ---\n", i+1))
-		sb.WriteString(fmt.Sprintf("RAW ID:      %s\n", p.raw.ID))
-		sb.WriteString(fmt.Sprintf("Source:      %s\n", p.raw.Source))
-		sb.WriteString(fmt.Sprintf("Type:        %s\n", p.raw.Type))
-		sb.WriteString(fmt.Sprintf("Timestamp:   %s\n", p.raw.Timestamp.Format("2006-01-02 15:04:05")))
+		fmt.Fprintf(&sb, "--- Pair %d ---\n", i+1)
+		fmt.Fprintf(&sb, "RAW ID:      %s\n", p.raw.ID)
+		fmt.Fprintf(&sb, "Source:      %s\n", p.raw.Source)
+		fmt.Fprintf(&sb, "Type:        %s\n", p.raw.Type)
+		fmt.Fprintf(&sb, "Timestamp:   %s\n", p.raw.Timestamp.Format("2006-01-02 15:04:05"))
 
 		rawContent := p.raw.Content
 		if len(rawContent) > 300 {
 			rawContent = rawContent[:300] + "..."
 		}
-		sb.WriteString(fmt.Sprintf("Raw Content: %s\n", rawContent))
+		fmt.Fprintf(&sb, "Raw Content: %s\n", rawContent)
 		sb.WriteString("\n")
 
 		if p.mem != nil {
-			sb.WriteString(fmt.Sprintf("ENCODED ID:  %s\n", p.mem.ID))
-			sb.WriteString(fmt.Sprintf("Summary:     %s\n", p.mem.Summary))
-			sb.WriteString(fmt.Sprintf("Concepts:    %v\n", p.mem.Concepts))
-			sb.WriteString(fmt.Sprintf("Salience:    %.2f\n", p.mem.Salience))
-			sb.WriteString(fmt.Sprintf("Content:     %s\n", p.mem.Content))
-			sb.WriteString(fmt.Sprintf("State:       %s\n", p.mem.State))
-			sb.WriteString(fmt.Sprintf("AccessCount: %d\n", p.mem.AccessCount))
+			fmt.Fprintf(&sb, "ENCODED ID:  %s\n", p.mem.ID)
+			fmt.Fprintf(&sb, "Summary:     %s\n", p.mem.Summary)
+			fmt.Fprintf(&sb, "Concepts:    %v\n", p.mem.Concepts)
+			fmt.Fprintf(&sb, "Salience:    %.2f\n", p.mem.Salience)
+			fmt.Fprintf(&sb, "Content:     %s\n", p.mem.Content)
+			fmt.Fprintf(&sb, "State:       %s\n", p.mem.State)
+			fmt.Fprintf(&sb, "AccessCount: %d\n", p.mem.AccessCount)
 		} else {
 			sb.WriteString("ENCODED:     (not yet encoded or encoding failed)\n")
 		}
@@ -1067,7 +1067,7 @@ func (srv *MCPServer) handleCoachLocalLLM(ctx context.Context, args map[string]i
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
 		// Cleanup temp file on rename failure
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return nil, fmt.Errorf("failed to finalize coaching file: %w", err)
 	}
 
