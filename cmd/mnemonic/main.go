@@ -1130,6 +1130,9 @@ func serveCommand(configPath string) {
 		fmt.Fprintf(os.Stderr, "Warning: %s\n", warn)
 	}
 
+	// Build project resolver from config
+	projectResolver := config.NewProjectResolver(cfg.Projects)
+
 	// Initialize logger
 	log, err := logger.New(logger.Config{
 		Level:  cfg.Logging.Level,
@@ -1391,6 +1394,7 @@ func serveCommand(configPath string) {
 					},
 					LLMGatingEnabled:      cfg.Perception.LLMGatingEnabled,
 					LearnedExclusionsPath: cfg.Perception.LearnedExclusionsPath,
+					ProjectResolver:       projectResolver,
 				},
 				log,
 			)
@@ -2461,7 +2465,8 @@ func mcpCommand(configPath string) {
 		DualHitBonus:        float32(cfg.Retrieval.DualHitBonus),
 	}, log)
 
-	server := mcp.NewMCPServer(db, retriever, bus, log, Version, cfg.Coaching.CoachingFile, cfg.Perception.Filesystem.ExcludePatterns, cfg.Perception.Filesystem.MaxContentBytes)
+	mcpResolver := config.NewProjectResolver(cfg.Projects)
+	server := mcp.NewMCPServer(db, retriever, bus, log, Version, cfg.Coaching.CoachingFile, cfg.Perception.Filesystem.ExcludePatterns, cfg.Perception.Filesystem.MaxContentBytes, mcpResolver)
 
 	// Handle signal for graceful shutdown
 	sigChan := make(chan os.Signal, 1)

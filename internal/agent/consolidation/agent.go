@@ -607,6 +607,9 @@ Respond with ONLY a JSON object:
 		}
 	}
 
+	// Inherit project from cluster — use the most common non-empty project
+	project := inferProjectFromCluster(cluster)
+
 	now := time.Now()
 	return store.Memory{
 		ID:           uuid.New().String(),
@@ -621,9 +624,29 @@ Respond with ONLY a JSON object:
 		LastAccessed: time.Time{},
 		State:        store.MemoryStateActive,
 		Source:       "consolidation",
+		Project:      project,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}, nil
+}
+
+// inferProjectFromCluster returns the most common non-empty project in a cluster.
+func inferProjectFromCluster(cluster []store.Memory) string {
+	counts := make(map[string]int)
+	for _, m := range cluster {
+		if m.Project != "" {
+			counts[m.Project]++
+		}
+	}
+	var best string
+	var bestCount int
+	for p, c := range counts {
+		if c > bestCount {
+			best = p
+			bestCount = c
+		}
+	}
+	return best
 }
 
 // ============================================================================
@@ -1193,7 +1216,6 @@ func (ca *ConsolidationAgent) logReport(report *CycleReport) {
 		"patterns_decayed", report.PatternsDecayed,
 	)
 }
-
 
 // isDuplicate returns true if two items are near-duplicates based on title Jaccard and embedding cosine.
 // For short titles (<=4 words in either), requires BOTH signals to exceed thresholds to avoid false positives.
