@@ -1209,7 +1209,7 @@
     <div id="app">
         <!-- Nav -->
         <nav class="nav">
-            <div class="nav-brand"><span>&#9670;</span> Mnemonic</div>
+            <div class="nav-brand"><span>&#9670;</span> Mnemonic <span id="navVersion" style="font-size:0.7rem;color:var(--text-dim);font-weight:400"></span></div>
             <div class="nav-tabs">
                 <button class="nav-tab active" data-view="recall" onclick="switchView('recall')">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -2633,6 +2633,7 @@
             var dot = document.getElementById('navHealth');
             dot.className = health.status === 'ok' ? 'nav-health' : 'nav-health degraded';
             dot.title = health.status === 'ok' ? 'System healthy' : 'System degraded';
+            if (health.version) document.getElementById('navVersion').textContent = 'v' + health.version;
             state.previousStats = stats;
         } catch (e) {
             document.getElementById('navHealth').className = 'nav-health down';

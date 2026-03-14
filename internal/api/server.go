@@ -36,6 +36,7 @@ type ServerDeps struct {
 	AgentWebPort          int                        // 0 = agent chat disabled
 	IngestExcludePatterns []string
 	IngestMaxContentBytes int
+	Version               string
 	Log                   *slog.Logger
 }
 
@@ -74,7 +75,7 @@ func NewServer(cfg ServerConfig, deps ServerDeps) *Server {
 // registerRoutes registers all API routes with the mux.
 func (s *Server) registerRoutes() {
 	// Health and stats
-	s.mux.HandleFunc("GET /api/v1/health", routes.HandleHealth(s.deps.Store, s.deps.LLM, s.deps.Log))
+	s.mux.HandleFunc("GET /api/v1/health", routes.HandleHealth(s.deps.Store, s.deps.LLM, s.deps.Version, s.deps.Log))
 	s.mux.HandleFunc("GET /api/v1/stats", routes.HandleStats(s.deps.Store, s.deps.Log))
 
 	// Memory CRUD

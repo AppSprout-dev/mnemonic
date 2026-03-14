@@ -13,6 +13,7 @@ import (
 // HealthResponse is the JSON response for the health check endpoint.
 type HealthResponse struct {
 	Status       string `json:"status"`
+	Version      string `json:"version,omitempty"`
 	LLMAvailable bool   `json:"llm_available"`
 	LLMModel     string `json:"llm_model,omitempty"`
 	StoreHealthy bool   `json:"store_healthy"`
@@ -23,7 +24,7 @@ type HealthResponse struct {
 // HandleHealth returns an HTTP handler that performs a health check.
 // Checks LLM availability with 2s timeout and store health.
 // Returns 200 with health status JSON.
-func HandleHealth(s store.Store, llmProv llm.Provider, log *slog.Logger) http.HandlerFunc {
+func HandleHealth(s store.Store, llmProv llm.Provider, version string, log *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		log.Debug("health check requested")
 
@@ -64,6 +65,7 @@ func HandleHealth(s store.Store, llmProv llm.Provider, log *slog.Logger) http.Ha
 
 		resp := HealthResponse{
 			Status:       status,
+			Version:      version,
 			LLMAvailable: llmAvailable,
 			LLMModel:     llmModel,
 			StoreHealthy: storeHealthy,
