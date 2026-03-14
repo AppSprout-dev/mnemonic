@@ -1552,6 +1552,7 @@ func serveCommand(configPath string) {
 			Retriever:             retriever,
 			IngestExcludePatterns: cfg.Perception.Filesystem.ExcludePatterns,
 			IngestMaxContentBytes: cfg.Perception.Filesystem.MaxContentBytes,
+			Version:               Version,
 			Log:                   log,
 		}
 		// Only set Consolidator if it's non-nil (avoids Go nil-interface trap)
