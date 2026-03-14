@@ -999,10 +999,13 @@ func uninstallCommand() {
 // ============================================================================
 
 // startAgentWebServer starts the Python WebSocket agent server as a child process.
-// Returns the started Cmd for later cleanup, or nil if disabled/failed.
-func startAgentWebServer(cfg *config.Config, log *slog.Logger) *exec.Cmd {
+// Returns the started Cmd and a channel that receives the Wait() result when the
+// process exits. The caller must use the channel instead of calling cmd.Wait()
+// directly, since the background monitor goroutine owns the single Wait() call.
+// Returns (nil, nil) if disabled or failed to start.
+func startAgentWebServer(cfg *config.Config, log *slog.Logger) (*exec.Cmd, <-chan error) {
 	if !cfg.AgentSDK.Enabled || cfg.AgentSDK.EvolutionDir == "" {
-		return nil
+		return nil, nil
 	}
 
 	port := cfg.AgentSDK.WebPort
@@ -1033,7 +1036,7 @@ func startAgentWebServer(cfg *config.Config, log *slog.Logger) *exec.Cmd {
 			pythonBin = py
 		} else {
 			log.Error("cannot find python3 or uv to start agent web server")
-			return nil
+			return nil, nil
 		}
 	}
 
@@ -1078,13 +1081,16 @@ func startAgentWebServer(cfg *config.Config, log *slog.Logger) *exec.Cmd {
 
 	if err := cmd.Start(); err != nil {
 		log.Error("failed to start agent web server", "error", err, "python_bin", pythonBin)
-		return nil
+		return nil, nil
 	}
 
 	log.Info("agent web server started", "pid", cmd.Process.Pid, "port", port, "sdk_dir", sdkDir)
 
 	// Monitor the process in background — if it exits quickly, log a clean warning
-	// instead of dumping a raw Python traceback.
+	// instead of dumping a raw Python traceback. This goroutine owns the single
+	// cmd.Wait() call; the done channel lets the shutdown path wait for exit
+	// without calling Wait() a second time (which would race).
+	done := make(chan error, 1)
 	go func() {
 		err := cmd.Wait()
 		if err != nil {
@@ -1096,9 +1102,10 @@ func startAgentWebServer(cfg *config.Config, log *slog.Logger) *exec.Cmd {
 				log.Warn("agent web server exited unexpectedly", "error", err, "stderr", stderr)
 			}
 		}
+		done <- err
 	}()
 
-	return cmd
+	return cmd, done
 }
 
 // serveCommand runs the mnemonic daemon.
@@ -1572,7 +1579,7 @@ func serveCommand(configPath string) {
 	}
 
 	// --- Start agent web server (Python WebSocket) ---
-	agentWebCmd := startAgentWebServer(cfg, log)
+	agentWebCmd, agentWebDone := startAgentWebServer(cfg, log)
 
 	// Set up signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
@@ -1585,17 +1592,22 @@ func serveCommand(configPath string) {
 	// Graceful shutdown: cancel root context to stop all agents
 	rootCancel()
 
-	// Stop agent web server if running
+	// Stop agent web server if running. Use agentWebDone (owned by the
+	// background goroutine) instead of calling cmd.Wait() a second time.
 	if agentWebCmd != nil && agentWebCmd.Process != nil {
 		log.Info("stopping agent web server", "pid", agentWebCmd.Process.Pid)
-		if err := agentWebCmd.Process.Signal(syscall.SIGTERM); err != nil {
-			log.Warn("failed to send SIGTERM to agent web server", "error", err)
+		// On Unix, send SIGTERM for graceful shutdown. On Windows, SIGTERM
+		// is not supported — go straight to Kill().
+		if runtime.GOOS != "windows" {
+			if err := agentWebCmd.Process.Signal(syscall.SIGTERM); err != nil {
+				log.Warn("failed to send SIGTERM to agent web server", "error", err)
+				_ = agentWebCmd.Process.Kill()
+			}
+		} else {
 			_ = agentWebCmd.Process.Kill()
 		}
-		done := make(chan error, 1)
-		go func() { done <- agentWebCmd.Wait() }()
 		select {
-		case <-done:
+		case <-agentWebDone:
 		case <-time.After(5 * time.Second):
 			log.Warn("agent web server did not exit in 5s, killing")
 			_ = agentWebCmd.Process.Kill()
