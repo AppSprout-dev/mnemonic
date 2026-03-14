@@ -1,0 +1,134 @@
+package routes
+
+import (
+	"context"
+	"log/slog"
+	"net/http"
+	"time"
+
+	"github.com/appsprout-dev/mnemonic/internal/updater"
+)
+
+// UpdateCheckResponse is the JSON response for the update check endpoint.
+type UpdateCheckResponse struct {
+	CurrentVersion  string `json:"current_version"`
+	LatestVersion   string `json:"latest_version"`
+	UpdateAvailable bool   `json:"update_available"`
+	ReleaseURL      string `json:"release_url"`
+}
+
+// UpdateResponse is the JSON response for the update endpoint.
+type UpdateResponse struct {
+	Status          string `json:"status"`
+	PreviousVersion string `json:"previous_version,omitempty"`
+	NewVersion      string `json:"new_version,omitempty"`
+	RestartPending  bool   `json:"restart_pending"`
+	Message         string `json:"message,omitempty"`
+}
+
+// ServiceRestarter can stop and start the daemon service.
+// If nil is passed to HandleUpdate, the handler will still perform the update
+// but cannot restart the daemon automatically.
+type ServiceRestarter interface {
+	IsInstalled() bool
+	Stop() error
+	Start() error
+}
+
+// HandleUpdateCheck returns an HTTP handler that checks for available updates
+// by querying the GitHub Releases API. No authentication required.
+func HandleUpdateCheck(version string, log *slog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log.Debug("update check requested")
+
+		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		defer cancel()
+
+		info, err := updater.CheckForUpdate(ctx, version)
+		if err != nil {
+			log.Error("update check failed", "error", err)
+			writeError(w, http.StatusBadGateway, "failed to check for updates: "+err.Error(), "UPDATE_CHECK_ERROR")
+			return
+		}
+
+		resp := UpdateCheckResponse{
+			CurrentVersion:  info.CurrentVersion,
+			LatestVersion:   info.LatestVersion,
+			UpdateAvailable: info.UpdateAvailable,
+			ReleaseURL:      info.ReleaseURL,
+		}
+
+		log.Info("update check completed", "current", info.CurrentVersion, "latest", info.LatestVersion, "available", info.UpdateAvailable)
+		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
+// HandleUpdate returns an HTTP handler that downloads and installs an available update.
+// If svc is non-nil and installed, the daemon will be restarted after the update.
+func HandleUpdate(version string, svc ServiceRestarter, log *slog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log.Info("update requested via API")
+
+		// Use a generous timeout for download (5 minutes)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+
+		info, err := updater.CheckForUpdate(ctx, version)
+		if err != nil {
+			log.Error("update check failed", "error", err)
+			writeError(w, http.StatusBadGateway, "failed to check for updates: "+err.Error(), "UPDATE_CHECK_ERROR")
+			return
+		}
+
+		if !info.UpdateAvailable {
+			resp := UpdateResponse{
+				Status:  "up_to_date",
+				Message: "already running the latest version",
+			}
+			writeJSON(w, http.StatusOK, resp)
+			return
+		}
+
+		result, err := updater.PerformUpdate(ctx, info)
+		if err != nil {
+			log.Error("update failed", "error", err)
+			writeError(w, http.StatusInternalServerError, "update failed: "+err.Error(), "UPDATE_ERROR")
+			return
+		}
+
+		log.Info("update installed", "previous", result.PreviousVersion, "new", result.NewVersion, "binary", result.BinaryPath)
+
+		// Determine if we can restart
+		canRestart := svc != nil && svc.IsInstalled()
+
+		resp := UpdateResponse{
+			Status:          "updated",
+			PreviousVersion: result.PreviousVersion,
+			NewVersion:      result.NewVersion,
+			RestartPending:  canRestart,
+		}
+
+		if !canRestart {
+			resp.Message = "update installed — restart the daemon manually to use the new version"
+		}
+
+		// Send response before restarting
+		writeJSON(w, http.StatusOK, resp)
+
+		// Restart the daemon in the background if possible
+		if canRestart {
+			go func() {
+				time.Sleep(500 * time.Millisecond)
+				log.Info("restarting daemon after update")
+				if err := svc.Stop(); err != nil {
+					log.Error("failed to stop daemon for restart", "error", err)
+					return
+				}
+				time.Sleep(1 * time.Second)
+				if err := svc.Start(); err != nil {
+					log.Error("failed to start daemon after update", "error", err)
+				}
+			}()
+		}
+	}
+}

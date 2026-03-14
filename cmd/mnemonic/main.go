@@ -41,6 +41,7 @@ import (
 	"github.com/appsprout-dev/mnemonic/internal/backup"
 	"github.com/appsprout-dev/mnemonic/internal/mcp"
 	"github.com/appsprout-dev/mnemonic/internal/store"
+	"github.com/appsprout-dev/mnemonic/internal/updater"
 
 	clipwatcher "github.com/appsprout-dev/mnemonic/internal/watcher/clipboard"
 	fswatcher "github.com/appsprout-dev/mnemonic/internal/watcher/filesystem"
@@ -176,6 +177,10 @@ func main() {
 		diagnoseCommand(*configPath)
 	case "generate-token":
 		generateTokenCommand()
+	case "check-update":
+		checkUpdateCommand()
+	case "update":
+		updateCommand()
 	case "version":
 		fmt.Printf("mnemonic v%s\n", Version)
 	default:
@@ -284,6 +289,75 @@ func startCommand(configPath string) {
 }
 
 // generateTokenCommand generates a random API token and prints it.
+// ============================================================================
+// Update Commands (check-update / update)
+// ============================================================================
+
+func checkUpdateCommand() {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	fmt.Printf("Checking for updates...\n")
+	info, err := updater.CheckForUpdate(ctx, Version)
+	if err != nil {
+		die(exitNetwork, "Update check failed", err.Error())
+	}
+
+	if info.UpdateAvailable {
+		fmt.Printf("\n  Current:  v%s\n", info.CurrentVersion)
+		fmt.Printf("  Latest:   %sv%s%s\n\n", colorGreen, info.LatestVersion, colorReset)
+		fmt.Printf("  Run %smnemonic update%s to install.\n", colorBold, colorReset)
+		fmt.Printf("  Release:  %s\n", info.ReleaseURL)
+	} else {
+		fmt.Printf("\n  %sYou're up to date!%s (v%s)\n", colorGreen, colorReset, info.CurrentVersion)
+	}
+}
+
+func updateCommand() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	fmt.Printf("Checking for updates...\n")
+	info, err := updater.CheckForUpdate(ctx, Version)
+	if err != nil {
+		die(exitNetwork, "Update check failed", err.Error())
+	}
+
+	if !info.UpdateAvailable {
+		fmt.Printf("%sAlready up to date%s (v%s)\n", colorGreen, colorReset, info.CurrentVersion)
+		return
+	}
+
+	fmt.Printf("Downloading v%s...\n", info.LatestVersion)
+	result, err := updater.PerformUpdate(ctx, info)
+	if err != nil {
+		die(exitGeneral, "Update failed", err.Error())
+	}
+
+	fmt.Printf("%sUpdated: v%s → v%s%s\n", colorGreen, result.PreviousVersion, result.NewVersion, colorReset)
+
+	// Restart daemon if it's running
+	svc := daemon.NewServiceManager()
+	if svc.IsInstalled() {
+		running, _ := svc.IsRunning()
+		if running {
+			fmt.Printf("Restarting daemon...\n")
+			if err := svc.Stop(); err != nil {
+				fmt.Fprintf(os.Stderr, "%sWarning:%s failed to stop daemon: %v\n", colorYellow, colorReset, err)
+				fmt.Printf("Restart manually: mnemonic restart\n")
+				return
+			}
+			time.Sleep(1 * time.Second)
+			if err := svc.Start(); err != nil {
+				fmt.Fprintf(os.Stderr, "%sWarning:%s failed to start daemon: %v\n", colorYellow, colorReset, err)
+				fmt.Printf("Start manually: mnemonic start\n")
+				return
+			}
+			fmt.Printf("%sDaemon restarted with v%s%s\n", colorGreen, result.NewVersion, colorReset)
+		}
+	}
+}
+
 func generateTokenCommand() {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
@@ -1553,6 +1627,7 @@ func serveCommand(configPath string) {
 			IngestExcludePatterns: cfg.Perception.Filesystem.ExcludePatterns,
 			IngestMaxContentBytes: cfg.Perception.Filesystem.MaxContentBytes,
 			Version:               Version,
+			ServiceRestarter:      daemon.NewServiceManager(),
 			Log:                   log,
 		}
 		// Only set Consolidator if it's non-nil (avoids Go nil-interface trap)
@@ -2528,6 +2603,10 @@ MONITORING COMMANDS:
   status          Show comprehensive system status
   diagnose        Run health checks (config, DB, LLM, disk)
   watch           Live stream of daemon events
+
+UPDATE COMMANDS:
+  check-update    Check if a newer version is available
+  update          Download and install the latest version
 
 SETUP COMMANDS:
   install         Install as system service (auto-start on login)
