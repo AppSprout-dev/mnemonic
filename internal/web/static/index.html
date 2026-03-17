@@ -2845,57 +2845,47 @@
                 }).join('');
             }
 
-            renderLLMChart(log, _llmRange);
+            renderLLMChart(data.chart_buckets || [], _llmRange);
         } catch (e) {
             document.getElementById('llmRequests').textContent = 'ERR';
         }
     }
 
-    function renderLLMChart(log, range) {
+    function renderLLMChart(chartBuckets, range) {
         var container = document.getElementById('llmChart');
         var tooltip = document.getElementById('llmChartTooltip');
         container.innerHTML = '';
-        if (!log || log.length === 0) { container.innerHTML = '<div class="llm-empty">No data for chart</div>'; return; }
+        if (!chartBuckets || chartBuckets.length === 0) { container.innerHTML = '<div class="llm-empty">No data for chart</div>'; return; }
 
-        // Determine bucket size and count from range
-        var now = new Date();
-        var bucketMs, bucketCount, labelFmt, labelEvery;
+        // Determine label format and frequency from range
+        var labelFmt, labelEvery;
         if (range === '1h') {
-            bucketMs = 5 * 60 * 1000; bucketCount = 12;
             labelFmt = function(d) { return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0'); };
             labelEvery = 3;
         } else if (range === '6h') {
-            bucketMs = 30 * 60 * 1000; bucketCount = 12;
             labelFmt = function(d) { return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0'); };
             labelEvery = 2;
         } else if (range === '168h') {
-            bucketMs = 24 * 60 * 60 * 1000; bucketCount = 7;
             var days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
             labelFmt = function(d) { return days[d.getDay()]; };
             labelEvery = 1;
         } else { // 24h default
-            bucketMs = 60 * 60 * 1000; bucketCount = 24;
             labelFmt = function(d) { return String(d.getHours()).padStart(2,'0') + ':00'; };
             labelEvery = 4;
         }
 
-        var rangeStart = new Date(now.getTime() - bucketCount * bucketMs);
-        var buckets = [];
-        for (var i = 0; i < bucketCount; i++) {
-            var bStart = new Date(rangeStart.getTime() + i * bucketMs);
-            buckets.push({ idx: i, start: bStart, label: labelFmt(bStart), prompt: 0, completion: 0, requests: 0, errors: 0 });
-        }
-        log.forEach(function(r) {
-            if (!r.timestamp) return;
-            var offset = new Date(r.timestamp).getTime() - rangeStart.getTime();
-            if (offset < 0) return;
-            var idx = Math.floor(offset / bucketMs);
-            if (idx >= 0 && idx < bucketCount) {
-                buckets[idx].prompt += (r.prompt_tokens || 0);
-                buckets[idx].completion += (r.completion_tokens || 0);
-                buckets[idx].requests++;
-                if (!r.success) buckets[idx].errors++;
-            }
+        // Map server-aggregated buckets to chart data
+        var buckets = chartBuckets.map(function(b, i) {
+            var ts = new Date(b.timestamp);
+            return {
+                idx: i,
+                start: ts,
+                label: labelFmt(ts),
+                prompt: b.prompt_tokens || 0,
+                completion: b.completion_tokens || 0,
+                requests: b.requests || 0,
+                errors: b.errors || 0
+            };
         });
 
         var w = container.clientWidth || 400;

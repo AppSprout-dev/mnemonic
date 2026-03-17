@@ -11,16 +11,25 @@ import (
 
 // LLMUsageResponse is the JSON response for the LLM usage endpoint.
 type LLMUsageResponse struct {
-	Summary          store.LLMUsageSummary `json:"summary"`
-	EstimatedCostUSD float64               `json:"estimated_cost_usd"`
-	Log              []LLMUsageLogEntry    `json:"log"`
-	Timestamp        string                `json:"timestamp"`
+	Summary          store.LLMUsageSummary  `json:"summary"`
+	EstimatedCostUSD float64                `json:"estimated_cost_usd"`
+	Log              []LLMUsageLogEntry     `json:"log"`
+	ChartBuckets     []store.LLMChartBucket `json:"chart_buckets"`
+	Timestamp        string                 `json:"timestamp"`
 }
 
 // LLMUsageLogEntry extends a usage record with estimated cost.
 type LLMUsageLogEntry struct {
 	llm.LLMUsageRecord
 	EstimatedCostUSD float64 `json:"estimated_cost_usd"`
+}
+
+// bucketSeconds maps range durations to chart bucket sizes.
+var bucketSeconds = map[string]int{
+	"1h":   5 * 60,        // 5-minute buckets
+	"6h":   30 * 60,       // 30-minute buckets
+	"24h":  60 * 60,       // 1-hour buckets
+	"168h": 24 * 60 * 60,  // 1-day buckets
 }
 
 // HandleLLMUsage returns an HTTP handler that returns LLM usage summary and log.
@@ -54,12 +63,24 @@ func HandleLLMUsage(s store.Store, log *slog.Logger) http.HandlerFunc {
 			return
 		}
 
-		// Get log
-		records, err := s.GetLLMUsageLog(r.Context(), limit)
+		// Get log (limited for the request table)
+		records, err := s.GetLLMUsageLog(r.Context(), since, limit)
 		if err != nil {
 			log.Error("failed to get llm usage log", "error", err)
 			writeError(w, http.StatusInternalServerError, "failed to retrieve usage log", "STORE_ERROR")
 			return
+		}
+
+		// Get pre-aggregated chart data
+		bSecs := bucketSeconds[sinceStr]
+		if bSecs == 0 {
+			bSecs = 3600 // default 1-hour buckets
+		}
+		chartBuckets, err := s.GetLLMUsageChart(r.Context(), since, bSecs)
+		if err != nil {
+			log.Error("failed to get llm chart data", "error", err)
+			// Non-fatal: chart data is optional, continue with empty buckets
+			chartBuckets = nil
 		}
 
 		// Compute per-record cost and total cost
@@ -78,6 +99,7 @@ func HandleLLMUsage(s store.Store, log *slog.Logger) http.HandlerFunc {
 			Summary:          summary,
 			EstimatedCostUSD: totalCost,
 			Log:              logEntries,
+			ChartBuckets:     chartBuckets,
 			Timestamp:        time.Now().UTC().Format(time.RFC3339),
 		}
 

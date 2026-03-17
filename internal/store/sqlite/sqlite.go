@@ -1979,15 +1979,16 @@ func (s *SQLiteStore) GetLLMUsageSummary(ctx context.Context, since time.Time) (
 	return summary, nil
 }
 
-// GetLLMUsageLog returns the most recent LLM usage records.
-func (s *SQLiteStore) GetLLMUsageLog(ctx context.Context, limit int) ([]llm.LLMUsageRecord, error) {
+// GetLLMUsageLog returns the most recent LLM usage records within the given time range.
+func (s *SQLiteStore) GetLLMUsageLog(ctx context.Context, since time.Time, limit int) ([]llm.LLMUsageRecord, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT timestamp, operation, caller, model, prompt_tokens, completion_tokens,
 		        total_tokens, latency_ms, success, error_message
-		 FROM llm_usage ORDER BY timestamp DESC LIMIT ?`, limit)
+		 FROM llm_usage WHERE timestamp >= ? ORDER BY timestamp DESC LIMIT ?`,
+		since.UTC().Format(time.RFC3339), limit)
 	if err != nil {
 		return nil, fmt.Errorf("querying LLM usage log: %w", err)
 	}
@@ -2006,6 +2007,38 @@ func (s *SQLiteStore) GetLLMUsageLog(ctx context.Context, limit int) ([]llm.LLMU
 		records = append(records, r)
 	}
 	return records, rows.Err()
+}
+
+// GetLLMUsageChart returns pre-aggregated token counts bucketed by the given interval.
+func (s *SQLiteStore) GetLLMUsageChart(ctx context.Context, since time.Time, bucketSecs int) ([]store.LLMChartBucket, error) {
+	if bucketSecs <= 0 {
+		bucketSecs = 3600
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT datetime(CAST(strftime('%s', timestamp) / ? AS INTEGER) * ?, 'unixepoch') AS bucket_ts,
+		        SUM(prompt_tokens), SUM(completion_tokens), COUNT(*),
+		        SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END)
+		 FROM llm_usage
+		 WHERE timestamp >= ?
+		 GROUP BY bucket_ts
+		 ORDER BY bucket_ts`,
+		bucketSecs, bucketSecs, since.UTC().Format(time.RFC3339))
+	if err != nil {
+		return nil, fmt.Errorf("querying LLM usage chart: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var buckets []store.LLMChartBucket
+	for rows.Next() {
+		var b store.LLMChartBucket
+		var ts string
+		if err := rows.Scan(&ts, &b.PromptTokens, &b.CompletionTokens, &b.Requests, &b.Errors); err != nil {
+			return nil, fmt.Errorf("scanning LLM chart bucket: %w", err)
+		}
+		b.Timestamp, _ = time.Parse("2006-01-02 15:04:05", ts)
+		buckets = append(buckets, b)
+	}
+	return buckets, rows.Err()
 }
 
 // Close closes the database connection.
