@@ -270,13 +270,17 @@ func (ra *RetrievalAgent) mergeEntryPoints(ftsResults []store.Memory, embeddingR
 	ftsScores := make(map[string]float32)
 	embScores := make(map[string]float32)
 
-	// FTS results: normalize salience into a bounded relevance signal
-	for _, mem := range ftsResults {
+	// FTS results: use reciprocal rank to preserve BM25 ordering from SQLite,
+	// blended with salience as a secondary importance signal.
+	// Before this fix, all FTS results got ~0.49 after consolidation decay,
+	// discarding the BM25 rank-order information entirely.
+	for i, mem := range ftsResults {
+		rankScore := float32(1.0) / float32(i+1) // reciprocal rank: 1.0, 0.5, 0.33, ...
 		salience := mem.Salience
 		if salience <= 0 {
 			salience = 0.5
 		}
-		ftsScores[mem.ID] = 0.3 + 0.4*salience // maps [0,1] → [0.3, 0.7]
+		ftsScores[mem.ID] = 0.7*rankScore + 0.3*salience
 	}
 
 	// Embedding results: use cosine similarity directly
