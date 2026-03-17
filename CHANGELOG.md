@@ -4,6 +4,14 @@ All notable changes to Mnemonic will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.15.1](https://github.com/AppSprout-dev/mnemonic/compare/v0.15.0...v0.15.1) (2026-03-17)
+
+
+### Bug Fixes
+
+* use macos-13 runner for darwin/amd64 release builds ([d7c70d4](https://github.com/AppSprout-dev/mnemonic/commit/d7c70d44ce2516458b953a44b093ee22a94d0b21))
+* use macos-13 runner for darwin/amd64 release builds ([5936e95](https://github.com/AppSprout-dev/mnemonic/commit/5936e957bd1844025fbb69a4473a39f945e4f9e0))
+
 ## [0.15.0](https://github.com/AppSprout-dev/mnemonic/compare/v0.14.2...v0.15.0) (2026-03-17)
 
 
