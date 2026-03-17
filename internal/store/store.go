@@ -107,6 +107,15 @@ type AgentUsage struct {
 	TotalTokens int `json:"total_tokens"`
 }
 
+// LLMChartBucket holds pre-aggregated token counts for a single time bucket.
+type LLMChartBucket struct {
+	Timestamp        time.Time `json:"timestamp"`
+	PromptTokens     int       `json:"prompt_tokens"`
+	CompletionTokens int       `json:"completion_tokens"`
+	Requests         int       `json:"requests"`
+	Errors           int       `json:"errors"`
+}
+
 // StoreStatistics aggregates memory health metrics.
 type StoreStatistics struct {
 	TotalMemories         int       `json:"total_memories"`
@@ -410,7 +419,8 @@ type Store interface {
 	// --- LLM usage tracking ---
 	RecordLLMUsage(ctx context.Context, record llm.LLMUsageRecord) error
 	GetLLMUsageSummary(ctx context.Context, since time.Time) (LLMUsageSummary, error)
-	GetLLMUsageLog(ctx context.Context, limit int) ([]llm.LLMUsageRecord, error)
+	GetLLMUsageLog(ctx context.Context, since time.Time, limit int) ([]llm.LLMUsageRecord, error)
+	GetLLMUsageChart(ctx context.Context, since time.Time, bucketSecs int) ([]LLMChartBucket, error)
 
 	// --- Lifecycle ---
 	Close() error

@@ -256,7 +256,10 @@ func (MockStore) RecordLLMUsage(context.Context, llm.LLMUsageRecord) error { ret
 func (MockStore) GetLLMUsageSummary(context.Context, time.Time) (store.LLMUsageSummary, error) {
 	return store.LLMUsageSummary{}, nil
 }
-func (MockStore) GetLLMUsageLog(context.Context, int) ([]llm.LLMUsageRecord, error) {
+func (MockStore) GetLLMUsageLog(context.Context, time.Time, int) ([]llm.LLMUsageRecord, error) {
+	return nil, nil
+}
+func (MockStore) GetLLMUsageChart(context.Context, time.Time, int) ([]store.LLMChartBucket, error) {
 	return nil, nil
 }
 
