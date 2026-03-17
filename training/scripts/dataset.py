@@ -24,7 +24,11 @@ from utils import DTYPE
 
 
 class ShardReader:
-    """Memory-mapped reader for a single source's .bin shard files."""
+    """Streaming memory-mapped reader for a single source's .bin shard files.
+
+    Reads one shard at a time via mmap (no concatenation), keeping memory
+    usage proportional to one shard (~200MB) instead of all shards (~GB).
+    """
 
     def __init__(self, source_dir: Path, seed: int = 42):
         self.source_dir = source_dir
@@ -39,47 +43,52 @@ class ShardReader:
                 self.manifest = json.load(f)
             self.total_tokens = self.manifest["total_tokens"]
         else:
-            # Compute from file sizes
             self.total_tokens = sum(f.stat().st_size // 2 for f in self.shard_files)
             self.manifest = {"total_tokens": self.total_tokens, "shard_count": len(self.shard_files)}
 
         self.rng = np.random.RandomState(seed)
-        self._mmaps = []
-        self._load_shards()
-        # Concatenated view into all shards
-        self._all_tokens = np.concatenate(self._mmaps)
-        self._pos = 0
+        self._shard_order = list(range(len(self.shard_files)))
+        self._shard_idx = 0
+        self._current_mmap = None
+        self._pos_in_shard = 0
+        self._load_current_shard()
 
-    def _load_shards(self):
-        """Memory-map all shard files."""
-        for sf in self.shard_files:
-            mmap = np.memmap(sf, dtype=DTYPE, mode="r")
-            self._mmaps.append(mmap)
+    def _load_current_shard(self):
+        """Memory-map the current shard."""
+        if self._shard_idx < len(self._shard_order):
+            sf = self.shard_files[self._shard_order[self._shard_idx]]
+            self._current_mmap = np.memmap(sf, dtype=DTYPE, mode="r")
+            self._pos_in_shard = 0
+        else:
+            self._current_mmap = None
 
     def get_sequence(self, seq_len: int) -> np.ndarray | None:
         """Get the next seq_len+1 tokens (for input/target split).
 
-        Returns None if exhausted (call reset() to start a new epoch).
+        Returns None if all shards exhausted (call reset() for new epoch).
         """
-        need = seq_len + 1  # +1 for target offset
-        if self._pos + need > len(self._all_tokens):
-            return None
-        seq = self._all_tokens[self._pos:self._pos + need].copy()
-        self._pos += seq_len  # Advance by seq_len (overlapping by 1 for target)
-        return seq
+        need = seq_len + 1
+
+        while self._current_mmap is not None:
+            remaining = len(self._current_mmap) - self._pos_in_shard
+            if remaining >= need:
+                seq = self._current_mmap[self._pos_in_shard:self._pos_in_shard + need].copy()
+                self._pos_in_shard += seq_len
+                return seq
+
+            # Not enough tokens in this shard, move to next
+            self._shard_idx += 1
+            self._load_current_shard()
+
+        return None
 
     def reset(self, shuffle: bool = True):
         """Reset to beginning. Optionally shuffle shard order."""
         if shuffle:
-            # Shuffle at epoch boundary by permuting shard order
-            self.rng.shuffle(self._mmaps)
-            self._all_tokens = np.concatenate(self._mmaps)
-        self._pos = 0
-
-    @property
-    def sequences_remaining(self) -> int:
-        """Approximate sequences left before exhaustion."""
-        return max(0, (len(self._all_tokens) - self._pos) // 2048)
+            self.rng.shuffle(self._shard_order)
+        self._shard_idx = 0
+        self._pos_in_shard = 0
+        self._load_current_shard()
 
 
 class MixedPretrainDataset:
