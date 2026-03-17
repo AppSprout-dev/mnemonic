@@ -23,17 +23,24 @@ from utils import ShardWriter, read_jsonl
 
 
 def get_tokenizer(tokenizer_path: str | None = None):
-    """Load the tokenizer. Custom BPE if available, GPT-2 fallback."""
-    if tokenizer_path and Path(tokenizer_path).exists():
-        from tokenizers import Tokenizer
-        tok = Tokenizer.from_file(str(Path(tokenizer_path) / "tokenizer.json"))
-        print(f"Using custom tokenizer from {tokenizer_path} (vocab={tok.get_vocab_size()})")
-        return tok, tok.get_vocab_size() - 1  # EOS = last token
-    else:
-        from transformers import AutoTokenizer
-        tok = AutoTokenizer.from_pretrained("gpt2")
-        print(f"Using GPT-2 tokenizer (vocab={tok.vocab_size})")
-        return tok, tok.eos_token_id
+    """Load the custom BPE tokenizer."""
+    from tokenizers import Tokenizer
+
+    if not tokenizer_path:
+        # Default: look relative to project root (training/tokenizer/)
+        script_dir = Path(__file__).resolve().parent
+        tokenizer_path = str(script_dir.parent / "tokenizer")
+
+    tok_file = Path(tokenizer_path) / "tokenizer.json"
+    if not tok_file.exists():
+        print(f"Error: Tokenizer not found at {tok_file}")
+        print("  Train one first: python scripts/train_tokenizer.py")
+        sys.exit(1)
+
+    tok = Tokenizer.from_file(str(tok_file))
+    eos_id = tok.token_to_id("<|endoftext|>")
+    print(f"Using custom tokenizer from {tokenizer_path} (vocab={tok.get_vocab_size()}, eos={eos_id})")
+    return tok, eos_id
 
 
 def tokenize_text(tokenizer, text: str) -> list[int]:
