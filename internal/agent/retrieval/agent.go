@@ -370,6 +370,14 @@ func (ra *RetrievalAgent) spreadActivation(ctx context.Context, entryPoints map[
 
 			// Propagate activation along associations
 			for _, assoc := range assocs {
+				// Determine the neighbor: the "other end" of the association.
+				// GetAssociations returns edges where memID is source OR target,
+				// so we must follow the edge to the opposite node.
+				neighborID := assoc.TargetID
+				if assoc.TargetID == memID {
+					neighborID = assoc.SourceID
+				}
+
 				// Calculate propagated activation with decay and type-based weight
 				decayFactor := float32(math.Pow(float64(ra.config.DecayFactor), float64(hop+1)))
 				typeWeight := getAssociationTypeWeight(assoc.RelationType)
@@ -378,29 +386,29 @@ func (ra *RetrievalAgent) spreadActivation(ctx context.Context, entryPoints map[
 				// Only propagate if above threshold
 				if propagated > ra.config.ActivationThreshold {
 					// Record that this association was traversed (Hebbian activation)
-					if err := ra.store.ActivateAssociation(ctx, memID, assoc.TargetID); err != nil {
-						ra.log.Warn("failed to activate association", "src", memID, "tgt", assoc.TargetID, "error", err)
+					if err := ra.store.ActivateAssociation(ctx, memID, neighborID); err != nil {
+						ra.log.Warn("failed to activate association", "src", memID, "tgt", neighborID, "error", err)
 					}
 
 					// Track traversal for feedback loop
 					traversed = append(traversed, store.TraversedAssoc{
 						SourceID: memID,
-						TargetID: assoc.TargetID,
+						TargetID: neighborID,
 					})
 
 					// Keep maximum activation if memory was seen before
 					existing := activationState{}
-					if state, ok := activated[assoc.TargetID]; ok {
+					if state, ok := activated[neighborID]; ok {
 						existing = state
 					}
 
 					if propagated > existing.activation {
-						activated[assoc.TargetID] = activationState{
+						activated[neighborID] = activationState{
 							activation:      propagated,
 							hopsReached:     hop + 1,
 							activationCount: assoc.ActivationCount,
 						}
-						nextFrontier[assoc.TargetID] = propagated
+						nextFrontier[neighborID] = propagated
 					}
 				}
 			}
