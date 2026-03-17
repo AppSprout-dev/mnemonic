@@ -26,10 +26,10 @@ type LLMUsageLogEntry struct {
 
 // bucketSeconds maps range durations to chart bucket sizes.
 var bucketSeconds = map[string]int{
-	"1h":   5 * 60,        // 5-minute buckets
-	"6h":   30 * 60,       // 30-minute buckets
-	"24h":  60 * 60,       // 1-hour buckets
-	"168h": 24 * 60 * 60,  // 1-day buckets
+	"1h":   5 * 60,       // 5-minute buckets
+	"6h":   30 * 60,      // 30-minute buckets
+	"24h":  60 * 60,      // 1-hour buckets
+	"168h": 24 * 60 * 60, // 1-day buckets
 }
 
 // HandleLLMUsage returns an HTTP handler that returns LLM usage summary and log.

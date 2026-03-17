@@ -1119,12 +1119,15 @@ func (srv *MCPServer) handleIngestProject(ctx context.Context, args map[string]i
 		"Ingested %s (project: %s)\n\n"+
 			"  Files found: %d\n"+
 			"  Files written: %d\n"+
+			"  Documents extracted: %d\n"+
+			"  Document chunks created: %d\n"+
 			"  Duplicates skipped: %d\n"+
 			"  Files skipped (binary/empty): %d\n"+
 			"  Files failed: %d\n"+
 			"  Elapsed: %s",
 		directory, result.Project,
 		result.FilesFound, result.FilesWritten,
+		result.FilesExtracted, result.ChunksCreated,
 		result.DuplicatesSkipped, result.FilesSkipped,
 		result.FilesFailed, result.Elapsed.Round(time.Millisecond),
 	)
@@ -1137,7 +1140,9 @@ func (srv *MCPServer) handleIngestProject(ctx context.Context, args map[string]i
 	srv.log.Info("ingest completed via MCP",
 		"directory", directory,
 		"project", result.Project,
-		"files_written", result.FilesWritten)
+		"files_written", result.FilesWritten,
+		"files_extracted", result.FilesExtracted,
+		"chunks_created", result.ChunksCreated)
 
 	return toolResult(text), nil
 }

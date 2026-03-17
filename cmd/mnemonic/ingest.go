@@ -96,6 +96,9 @@ func ingestCommand(configPath string, args []string) {
 	}
 
 	fmt.Printf("\n  Done: %d files ingested in %s\n", result.FilesWritten, result.Elapsed.Round(1))
+	if result.FilesExtracted > 0 {
+		fmt.Printf("  Documents extracted: %d (%d chunks)\n", result.FilesExtracted, result.ChunksCreated)
+	}
 	if result.DuplicatesSkipped > 0 {
 		fmt.Printf("  Duplicates skipped: %d\n", result.DuplicatesSkipped)
 	}

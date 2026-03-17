@@ -44,12 +44,12 @@ type comparisonScenarioResult struct {
 
 // comparisonReport holds the full comparison results.
 type comparisonReport struct {
-	Version      string
-	Cycles       int
-	QueryCount   int
+	Version       string
+	Cycles        int
+	QueryCount    int
 	ScenarioCount int
-	Scenarios    []comparisonScenarioResult
-	Aggregate    []approachResult // aggregated across all scenarios
+	Scenarios     []comparisonScenarioResult
+	Aggregate     []approachResult // aggregated across all scenarios
 }
 
 // --- Comparison runner ---

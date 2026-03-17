@@ -6,11 +6,13 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/appsprout-dev/mnemonic/internal/events"
+	"github.com/appsprout-dev/mnemonic/internal/ingest/extract"
 	"github.com/appsprout-dev/mnemonic/internal/store"
 	"github.com/appsprout-dev/mnemonic/internal/watcher/filesystem"
 )
@@ -40,10 +42,15 @@ type Result struct {
 	FilesWritten      int
 	FilesSkipped      int
 	FilesFailed       int
+	FilesExtracted    int
+	ChunksCreated     int
 	DuplicatesSkipped int
 	Project           string
 	Elapsed           time.Duration
 }
+
+// minChunkWords is the minimum word count for a document chunk to be ingested.
+const minChunkWords = 50
 
 // Run executes directory ingestion. It walks the directory, applies filters,
 // deduplicates against existing raw memories, and writes new raw memories
@@ -72,6 +79,9 @@ func Run(ctx context.Context, cfg Config, s store.Store, bus events.Bus, log *sl
 		project = filepath.Base(absDir)
 	}
 
+	// Build extractor registry
+	registry := buildExtractorRegistry(log)
+
 	// Phase 1: Discover files
 	var files []string
 	excluded := 0
@@ -90,7 +100,9 @@ func Run(ctx context.Context, cfg Config, s store.Store, bus events.Bus, log *sl
 			excluded++
 			return nil
 		}
-		if filesystem.IsBinaryFile(path) {
+		// Allow extractable binary files through; skip the rest
+		ext := strings.ToLower(filepath.Ext(path))
+		if filesystem.IsBinaryFile(path) && !registry.HasExtractor(ext) {
 			excluded++
 			return nil
 		}
@@ -144,43 +156,63 @@ func Run(ctx context.Context, cfg Config, s store.Store, bus events.Bus, log *sl
 			continue
 		}
 
-		// Read content
-		content := filesystem.ReadFileContent(path, cfg.MaxContentBytes, log)
-		if content == "" {
-			result.FilesSkipped++
-			continue
-		}
-		if filesystem.IsBinaryContent(content) {
-			result.FilesSkipped++
-			continue
-		}
-
 		fileInfo, _ := os.Stat(path)
 		var fileSize int64
 		if fileInfo != nil {
 			fileSize = fileInfo.Size()
 		}
 
-		raw := store.RawMemory{
-			ID:        uuid.New().String(),
-			Timestamp: time.Now(),
-			Source:    "ingest",
-			Type:      "file",
-			Content:   fmt.Sprintf("File %s:\n%s", relPath, content),
-			Metadata: map[string]interface{}{
-				"path":     path,
-				"rel_path": relPath,
-				"ext":      filepath.Ext(path),
-				"size":     fileSize,
-			},
-			HeuristicScore:  0.5,
-			InitialSalience: 0.5,
-			Processed:       false,
-			CreatedAt:       time.Now(),
-			Project:         project,
+		baseMeta := map[string]any{
+			"path":     path,
+			"rel_path": relPath,
+			"ext":      filepath.Ext(path),
+			"size":     fileSize,
 		}
 
-		batch = append(batch, raw)
+		// Check if we have an extractor for this file type
+		ext := strings.ToLower(filepath.Ext(path))
+		if extractor := registry.Get(ext); extractor != nil {
+			newRaws := extractDocument(extractor, path, relPath, cfg.MaxContentBytes, baseMeta, project, log)
+			if len(newRaws) == 0 {
+				result.FilesSkipped++
+			} else {
+				result.FilesExtracted++
+				result.ChunksCreated += len(newRaws)
+				batch = append(batch, newRaws...)
+			}
+		} else {
+			// Plain text path (unchanged)
+			content := filesystem.ReadFileContent(path, cfg.MaxContentBytes, log)
+			if content == "" {
+				result.FilesSkipped++
+				if cfg.OnProgress != nil {
+					cfg.OnProgress(i+1, len(files), relPath)
+				}
+				continue
+			}
+			if filesystem.IsBinaryContent(content) {
+				result.FilesSkipped++
+				if cfg.OnProgress != nil {
+					cfg.OnProgress(i+1, len(files), relPath)
+				}
+				continue
+			}
+
+			raw := store.RawMemory{
+				ID:              uuid.New().String(),
+				Timestamp:       time.Now(),
+				Source:          "ingest",
+				Type:            "file",
+				Content:         fmt.Sprintf("File %s:\n%s", relPath, content),
+				Metadata:        baseMeta,
+				HeuristicScore:  0.5,
+				InitialSalience: 0.5,
+				Processed:       false,
+				CreatedAt:       time.Now(),
+				Project:         project,
+			}
+			batch = append(batch, raw)
+		}
 
 		if cfg.OnProgress != nil {
 			cfg.OnProgress(i+1, len(files), relPath)
@@ -210,6 +242,113 @@ func Run(ctx context.Context, cfg Config, s store.Store, bus events.Bus, log *sl
 
 	result.Elapsed = time.Since(start)
 	return result, nil
+}
+
+// buildExtractorRegistry creates the extractor registry, registering
+// available extractors and logging their status.
+func buildExtractorRegistry(log *slog.Logger) *extract.Registry {
+	registry := extract.NewRegistry()
+
+	pdfExt := &extract.PDFExtractor{}
+	if pdfExt.Available() {
+		registry.Register(".pdf", pdfExt)
+		log.Info("PDF extraction enabled (pdftotext found)")
+	} else {
+		log.Warn("PDF extraction disabled: pdftotext not found in PATH")
+	}
+
+	docxExt := &extract.DOCXExtractor{}
+	registry.Register(".docx", docxExt)
+	log.Info("DOCX extraction enabled")
+
+	return registry
+}
+
+// extractDocument runs the extractor on a file and produces RawMemory entries:
+// one summary memory for the full document, plus per-chunk memories for
+// individual pages or sections. Chunks below minChunkWords are skipped.
+func extractDocument(
+	extractor extract.Extractor,
+	path, relPath string,
+	maxBytes int,
+	baseMeta map[string]any,
+	project string,
+	log *slog.Logger,
+) []store.RawMemory {
+	result, err := extractor.Extract(path, maxBytes, log)
+	if err != nil {
+		log.Warn("extraction failed, skipping", "path", path, "error", err)
+		return nil
+	}
+	if result.FullText == "" {
+		return nil
+	}
+
+	documentID := uuid.New().String()
+	totalChunks := len(result.Chunks) + 1 // +1 for summary
+	var raws []store.RawMemory
+
+	// Summary memory (chunk 0) — full document
+	if extract.WordCount(result.FullText) >= minChunkWords {
+		meta := mergeMeta(baseMeta, result.Metadata, map[string]any{
+			"document_id":  documentID,
+			"chunk_index":  0,
+			"total_chunks": totalChunks,
+		})
+		raws = append(raws, store.RawMemory{
+			ID:              uuid.New().String(),
+			Timestamp:       time.Now(),
+			Source:          "ingest",
+			Type:            "document",
+			Content:         fmt.Sprintf("Document %s:\n%s", relPath, result.FullText),
+			Metadata:        meta,
+			HeuristicScore:  0.5,
+			InitialSalience: 0.5,
+			Processed:       false,
+			CreatedAt:       time.Now(),
+			Project:         project,
+		})
+	}
+
+	// Page/section memories (chunks 1..N)
+	for i, chunk := range result.Chunks {
+		if extract.WordCount(chunk.Text) < minChunkWords {
+			continue
+		}
+		meta := mergeMeta(baseMeta, result.Metadata, map[string]any{
+			"document_id":  documentID,
+			"chunk_index":  i + 1,
+			"total_chunks": totalChunks,
+			"source_page":  chunk.PageNumber,
+		})
+		label := fmt.Sprintf("Document %s (section %d)", relPath, chunk.PageNumber)
+		raws = append(raws, store.RawMemory{
+			ID:              uuid.New().String(),
+			Timestamp:       time.Now(),
+			Source:          "ingest",
+			Type:            "document",
+			Content:         fmt.Sprintf("%s:\n%s", label, chunk.Text),
+			Metadata:        meta,
+			HeuristicScore:  0.5,
+			InitialSalience: 0.5,
+			Processed:       false,
+			CreatedAt:       time.Now(),
+			Project:         project,
+		})
+	}
+
+	return raws
+}
+
+// mergeMeta combines multiple metadata maps into one. Later maps override earlier ones.
+func mergeMeta(maps ...map[string]any) map[string]any {
+	merged := make(map[string]any)
+	for _, m := range maps {
+		for k, v := range m {
+			merged[k] = v
+		}
+	}
+	return merged
 }
 
 // flushBatch writes a batch of raw memories and optionally publishes events.
