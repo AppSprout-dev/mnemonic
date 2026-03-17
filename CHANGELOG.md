@@ -4,6 +4,23 @@ All notable changes to Mnemonic will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.16.0](https://github.com/AppSprout-dev/mnemonic/compare/v0.15.1...v0.16.0) (2026-03-17)
+
+
+### Features
+
+* add audit_mix.py for pretraining data validation ([61c99de](https://github.com/AppSprout-dev/mnemonic/commit/61c99deb8c0566fbd483d1b0b163248277b797a3))
+* add Felix-LM v3 training bridge with streaming shard reader ([93f26ee](https://github.com/AppSprout-dev/mnemonic/commit/93f26ee34cd24064abf29de446ea63a5fed8641d))
+* add MixedPretrainDataset for multi-source token shard reading ([0908908](https://github.com/AppSprout-dev/mnemonic/commit/090890891c38ff86d79aa4ce5ebcc02255755b03)), closes [#156](https://github.com/AppSprout-dev/mnemonic/issues/156)
+* pretraining data pipeline and training bridge for mnemonic-LM ([5d3635a](https://github.com/AppSprout-dev/mnemonic/commit/5d3635ad916a69529f8e0db1e9e028b7a15c26ff))
+
+
+### Bug Fixes
+
+* drop darwin/amd64 release build ([3230dc0](https://github.com/AppSprout-dev/mnemonic/commit/3230dc07f0a0c8824674d1a78bcd09caab0222ee))
+* drop darwin/amd64 release build ([d979854](https://github.com/AppSprout-dev/mnemonic/commit/d979854d70bf3ed12047b4a8857c5748ecc66e24))
+* resolve tokenizer path and remove GPT-2 fallback ([2614f96](https://github.com/AppSprout-dev/mnemonic/commit/2614f9609d9179fb5d854d61dee09499032d5308))
+
 ## [0.15.1](https://github.com/AppSprout-dev/mnemonic/compare/v0.15.0...v0.15.1) (2026-03-17)
 
 
