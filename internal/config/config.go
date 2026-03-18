@@ -39,16 +39,29 @@ type Config struct {
 
 // LLMConfig holds LLM provider settings.
 type LLMConfig struct {
-	Endpoint             string  `yaml:"endpoint"`
-	ChatModel            string  `yaml:"chat_model"`
-	EmbeddingModel       string  `yaml:"embedding_model"`
-	APIKey               string  `yaml:"-"`                       // from LLM_API_KEY env var only (never serialized to config)
-	InputPricePerMToken  float64 `yaml:"input_price_per_mtoken"`  // custom input price (USD per 1M tokens), 0 = use built-in
-	OutputPricePerMToken float64 `yaml:"output_price_per_mtoken"` // custom output price (USD per 1M tokens), 0 = use built-in
-	MaxTokens            int     `yaml:"max_tokens"`
-	Temperature          float64 `yaml:"temperature"`
-	TimeoutSec           int     `yaml:"timeout_sec"`
-	MaxConcurrent        int     `yaml:"max_concurrent"` // max simultaneous LLM requests (0 = default 2)
+	Provider             string            `yaml:"provider"` // "api" (default) or "embedded" for in-process llama.cpp
+	Endpoint             string            `yaml:"endpoint"`
+	ChatModel            string            `yaml:"chat_model"`
+	EmbeddingModel       string            `yaml:"embedding_model"`
+	APIKey               string            `yaml:"-"`                       // from LLM_API_KEY env var only (never serialized to config)
+	InputPricePerMToken  float64           `yaml:"input_price_per_mtoken"`  // custom input price (USD per 1M tokens), 0 = use built-in
+	OutputPricePerMToken float64           `yaml:"output_price_per_mtoken"` // custom output price (USD per 1M tokens), 0 = use built-in
+	MaxTokens            int               `yaml:"max_tokens"`
+	Temperature          float64           `yaml:"temperature"`
+	TimeoutSec           int               `yaml:"timeout_sec"`
+	MaxConcurrent        int               `yaml:"max_concurrent"` // max simultaneous LLM requests (0 = default 2)
+	Embedded             EmbeddedLLMConfig `yaml:"embedded"`       // config for in-process llama.cpp provider
+}
+
+// EmbeddedLLMConfig holds settings for the in-process llama.cpp provider.
+type EmbeddedLLMConfig struct {
+	ModelsDir      string `yaml:"models_dir"`       // directory for GGUF model files (default: ~/.mnemonic/models)
+	ChatModelFile  string `yaml:"chat_model_file"`  // filename of the chat GGUF model within ModelsDir
+	EmbedModelFile string `yaml:"embed_model_file"` // filename of the embedding GGUF model within ModelsDir
+	ContextSize    int    `yaml:"context_size"`     // context window size in tokens (default: 2048)
+	GPULayers      int    `yaml:"gpu_layers"`       // number of layers to offload to GPU (-1 = all, 0 = none)
+	Threads        int    `yaml:"threads"`          // number of CPU threads for inference (0 = auto)
+	BatchSize      int    `yaml:"batch_size"`       // prompt processing batch size (default: 512)
 }
 
 // StoreConfig holds storage settings.
@@ -293,6 +306,7 @@ func Load(path string) (*Config, error) {
 func Default() *Config {
 	return &Config{
 		LLM: LLMConfig{
+			Provider:       "api",
 			Endpoint:       "http://localhost:1234/v1",
 			ChatModel:      "neural-chat",
 			EmbeddingModel: "text-embedding-embeddinggemma-300m-qat",
@@ -300,6 +314,12 @@ func Default() *Config {
 			Temperature:    0.3,
 			TimeoutSec:     120,
 			MaxConcurrent:  2,
+			Embedded: EmbeddedLLMConfig{
+				ModelsDir:   "~/.mnemonic/models",
+				ContextSize: 2048,
+				GPULayers:   -1,
+				BatchSize:   512,
+			},
 		},
 		Store: StoreConfig{
 			DBPath:        "~/.mnemonic/memory.db",
@@ -523,6 +543,14 @@ func (c *Config) process(configDir string) error {
 		return fmt.Errorf("expanding logging.file: %w", err)
 	}
 
+	// Expand Embedded LLM models dir
+	if c.LLM.Embedded.ModelsDir != "" {
+		c.LLM.Embedded.ModelsDir, err = resolvePath(c.LLM.Embedded.ModelsDir, configDir)
+		if err != nil {
+			return fmt.Errorf("expanding llm.embedded.models_dir: %w", err)
+		}
+	}
+
 	// Expand Project registry paths
 	for i := range c.Projects {
 		for j, p := range c.Projects[i].Paths {
@@ -607,14 +635,26 @@ func (c *Config) process(configDir string) error {
 
 // Validate checks that required fields are set.
 func (c *Config) Validate() error {
-	if c.LLM.Endpoint == "" {
-		return errors.New("llm.endpoint is required")
-	}
-	if c.LLM.ChatModel == "" {
-		return errors.New("llm.chat_model is required")
-	}
-	if c.LLM.EmbeddingModel == "" {
-		return errors.New("llm.embedding_model is required")
+	switch c.LLM.Provider {
+	case "", "api":
+		if c.LLM.Endpoint == "" {
+			return errors.New("llm.endpoint is required for api provider")
+		}
+		if c.LLM.ChatModel == "" {
+			return errors.New("llm.chat_model is required for api provider")
+		}
+		if c.LLM.EmbeddingModel == "" {
+			return errors.New("llm.embedding_model is required for api provider")
+		}
+	case "embedded":
+		if c.LLM.Embedded.ModelsDir == "" {
+			return errors.New("llm.embedded.models_dir is required for embedded provider")
+		}
+		if c.LLM.Embedded.ChatModelFile == "" {
+			return errors.New("llm.embedded.chat_model_file is required for embedded provider")
+		}
+	default:
+		return fmt.Errorf("llm.provider must be \"api\" or \"embedded\", got %q", c.LLM.Provider)
 	}
 	if c.Store.DBPath == "" {
 		return errors.New("store.db_path is required")
