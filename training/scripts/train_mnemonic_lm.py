@@ -125,6 +125,11 @@ def train(config, args):
 
     device = torch.device(args.device)
 
+    # Cap VRAM to 90% — OOM becomes a catchable PyTorch exception
+    # instead of triggering the Linux OOM killer and crashing the system
+    if device.type == "cuda":
+        torch.cuda.set_per_process_memory_fraction(0.9)
+
     model = FelixLMv3(config).to(device)
     if args.compile:
         print("Compiling model with torch.compile...")
