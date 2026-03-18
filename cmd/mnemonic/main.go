@@ -933,18 +933,7 @@ func diagnoseCommand(configPath string) {
 	}
 
 	// 4. LLM provider
-	timeout := time.Duration(cfg.LLM.TimeoutSec) * time.Second
-	if timeout == 0 {
-		timeout = 30 * time.Second
-	}
-	llmProvider := llm.NewLMStudioProvider(
-		cfg.LLM.Endpoint,
-		cfg.LLM.ChatModel,
-		cfg.LLM.EmbeddingModel,
-		cfg.LLM.APIKey,
-		timeout,
-		cfg.LLM.MaxConcurrent,
-	)
+	llmProvider := newLLMProvider(cfg)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -1271,17 +1260,13 @@ func serveCommand(configPath string) {
 	}
 
 	// Create LLM provider
-	llmProvider := llm.NewLMStudioProvider(
-		cfg.LLM.Endpoint,
-		cfg.LLM.ChatModel,
-		cfg.LLM.EmbeddingModel,
-		cfg.LLM.APIKey,
-		time.Duration(cfg.LLM.TimeoutSec)*time.Second,
-		cfg.LLM.MaxConcurrent,
-	)
+	llmProvider := newLLMProvider(cfg)
 
 	// Check for embedding model drift
-	embModel := llmProvider.EmbeddingModelName()
+	embModel := cfg.LLM.EmbeddingModel
+	if cfg.LLM.Provider == "embedded" && cfg.LLM.Embedded.EmbedModelFile != "" {
+		embModel = cfg.LLM.Embedded.EmbedModelFile
+	}
 	if embModel != "" {
 		metaCtx, metaCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		prevModel, _ := memStore.GetMeta(metaCtx, "embedding_model")
@@ -1764,14 +1749,7 @@ func initRuntime(configPath string) (*config.Config, *sqlite.SQLiteStore, llm.Pr
 		die(exitDatabase, fmt.Sprintf("opening database: %v", err), "mnemonic diagnose")
 	}
 
-	var provider llm.Provider = llm.NewLMStudioProvider(
-		cfg.LLM.Endpoint,
-		cfg.LLM.ChatModel,
-		cfg.LLM.EmbeddingModel,
-		cfg.LLM.APIKey,
-		time.Duration(cfg.LLM.TimeoutSec)*time.Second,
-		cfg.LLM.MaxConcurrent,
-	)
+	provider := newLLMProvider(cfg)
 
 	// Wrap with training data capture if enabled
 	if cfg.Training.CaptureEnabled && cfg.Training.CaptureDir != "" {
@@ -2752,4 +2730,42 @@ func autopilotCommand(configPath string) {
 	}
 
 	fmt.Println()
+}
+
+// newLLMProvider creates the appropriate LLM provider based on config.
+// For "api" (default), it creates an LMStudioProvider for OpenAI-compatible APIs.
+// For "embedded", it creates an EmbeddedProvider for in-process llama.cpp inference.
+func newLLMProvider(cfg *config.Config) llm.Provider {
+	switch cfg.LLM.Provider {
+	case "embedded":
+		ep := llm.NewEmbeddedProvider(llm.EmbeddedProviderConfig{
+			ModelsDir:      cfg.LLM.Embedded.ModelsDir,
+			ChatModelFile:  cfg.LLM.Embedded.ChatModelFile,
+			EmbedModelFile: cfg.LLM.Embedded.EmbedModelFile,
+			ContextSize:    cfg.LLM.Embedded.ContextSize,
+			GPULayers:      cfg.LLM.Embedded.GPULayers,
+			Threads:        cfg.LLM.Embedded.Threads,
+			BatchSize:      cfg.LLM.Embedded.BatchSize,
+			MaxTokens:      cfg.LLM.MaxTokens,
+			Temperature:    float32(cfg.LLM.Temperature),
+			MaxConcurrent:  cfg.LLM.MaxConcurrent,
+		})
+		// Note: LoadModels must be called with a backend factory before use.
+		// Until llama.cpp bindings are integrated, the provider will return
+		// ErrProviderUnavailable on all inference calls.
+		return ep
+	default: // "api" or ""
+		timeout := time.Duration(cfg.LLM.TimeoutSec) * time.Second
+		if timeout == 0 {
+			timeout = 30 * time.Second
+		}
+		return llm.NewLMStudioProvider(
+			cfg.LLM.Endpoint,
+			cfg.LLM.ChatModel,
+			cfg.LLM.EmbeddingModel,
+			cfg.LLM.APIKey,
+			timeout,
+			cfg.LLM.MaxConcurrent,
+		)
+	}
 }
