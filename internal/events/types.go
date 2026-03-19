@@ -194,3 +194,15 @@ func (e AssociationsPendingClassification) EventType() string {
 	return TypeAssociationsPendingClassification
 }
 func (e AssociationsPendingClassification) EventTimestamp() time.Time { return e.Ts }
+
+// SessionEnded is emitted when an MCP session disconnects (stdin EOF).
+type SessionEnded struct {
+	SessionID string    `json:"session_id"`
+	Project   string    `json:"project"`
+	Ts        time.Time `json:"timestamp"`
+}
+
+const TypeSessionEnded = "session_ended"
+
+func (e SessionEnded) EventType() string         { return TypeSessionEnded }
+func (e SessionEnded) EventTimestamp() time.Time { return e.Ts }
