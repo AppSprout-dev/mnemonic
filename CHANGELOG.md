@@ -4,6 +4,26 @@ All notable changes to Mnemonic will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.21.0](https://github.com/AppSprout-dev/mnemonic/compare/v0.20.0...v0.21.0) (2026-03-19)
+
+
+### Features
+
+* add encoding salience floor, lockfile rejection, and dedup tuning ([e8acc7b](https://github.com/AppSprout-dev/mnemonic/commit/e8acc7bbde538735fe400781bb741d174a3b1719))
+* add logarithmic pattern scaling and reset-patterns CLI ([28632f9](https://github.com/AppSprout-dev/mnemonic/commit/28632f9573d73693ff2391c4998e6910cb306dfb))
+* add MCP tool usage analytics ([862ff50](https://github.com/AppSprout-dev/mnemonic/commit/862ff503d120d60119839e8d9b3f26f2def87b04))
+* add MCP tool usage analytics ([4a3b387](https://github.com/AppSprout-dev/mnemonic/commit/4a3b387f5de908b3e95158f9463e82b4bfd89d97))
+* detect version changes at startup and create memory ([b9565f5](https://github.com/AppSprout-dev/mnemonic/commit/b9565f58557412ec8036b57359f9854286f299b7))
+* ground abstraction prompts and wire retrieval feedback into metacognition ([947c700](https://github.com/AppSprout-dev/mnemonic/commit/947c70061ce2d39e6988fc038a0c159c3af18b07))
+* memory quality improvements from v0.20.0 audit ([6eab1e2](https://github.com/AppSprout-dev/mnemonic/commit/6eab1e2fb859a19f011f5003fea803cc0d73de7c))
+
+
+### Bug Fixes
+
+* add dedup check and processed guard to event-driven encoding path ([7f100fb](https://github.com/AppSprout-dev/mnemonic/commit/7f100fbadf24dcc30967b312b7633b3793eb89df))
+* add dedup check to event-driven encoding path ([71738f0](https://github.com/AppSprout-dev/mnemonic/commit/71738f078b4c43253c59ba2fa44c2d0d3a08031e))
+* handle rows.Close error to satisfy errcheck lint ([035650e](https://github.com/AppSprout-dev/mnemonic/commit/035650e2f98f544154a1c1c7d6a98677664c7b0b))
+
 ## [0.20.0](https://github.com/AppSprout-dev/mnemonic/compare/v0.19.0...v0.20.0) (2026-03-19)
 
 
