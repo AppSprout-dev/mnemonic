@@ -174,6 +174,31 @@ type RetrievalConfig struct {
 	SynthesisMaxTokens  int     `yaml:"synthesis_max_tokens"`
 	MergeAlpha          float64 `yaml:"merge_alpha"`
 	DualHitBonus        float64 `yaml:"dual_hit_bonus"`
+
+	// Search candidate limits
+	FTSCandidateLimit       int `yaml:"fts_candidate_limit"`
+	EmbeddingCandidateLimit int `yaml:"embedding_candidate_limit"`
+	PatternSearchLimit      int `yaml:"pattern_search_limit"`
+	AbstractionSearchLimit  int `yaml:"abstraction_search_limit"`
+
+	// FTS scoring weights
+	FTSRankWeight     float64 `yaml:"fts_rank_weight"`
+	FTSSalienceWeight float64 `yaml:"fts_salience_weight"`
+	DefaultSalience   float64 `yaml:"default_salience"`
+
+	// Temporal injection scoring
+	TimeRangeBaseScore  float64 `yaml:"time_range_base_score"`
+	TimeRangeSalienceWt float64 `yaml:"time_range_salience_weight"`
+
+	// Ranking parameters
+	RecencyBoostWeight  float64 `yaml:"recency_boost_weight"`
+	RecencyHalfLifeDays float64 `yaml:"recency_half_life_days"`
+	ActivityBonusMax    float64 `yaml:"activity_bonus_max"`
+	ActivityBonusScale  float64 `yaml:"activity_bonus_scale"`
+
+	// Significance multipliers
+	CriticalBoost  float64 `yaml:"critical_boost"`
+	ImportantBoost float64 `yaml:"important_boost"`
 }
 
 // MetacognitionConfig holds metacognition settings.
@@ -442,6 +467,26 @@ func Default() *Config {
 			SynthesisMaxTokens:  1024,
 			MergeAlpha:          0.6,
 			DualHitBonus:        0.15,
+
+			FTSCandidateLimit:       10,
+			EmbeddingCandidateLimit: 10,
+			PatternSearchLimit:      5,
+			AbstractionSearchLimit:  5,
+
+			FTSRankWeight:     0.7,
+			FTSSalienceWeight: 0.3,
+			DefaultSalience:   0.5,
+
+			TimeRangeBaseScore:  0.3,
+			TimeRangeSalienceWt: 0.2,
+
+			RecencyBoostWeight:  0.2,
+			RecencyHalfLifeDays: 30,
+			ActivityBonusMax:    0.2,
+			ActivityBonusScale:  0.02,
+
+			CriticalBoost:  1.2,
+			ImportantBoost: 1.1,
 		},
 		Metacognition: MetacognitionConfig{
 			Enabled:     true,

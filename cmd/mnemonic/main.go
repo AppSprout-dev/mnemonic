@@ -1471,16 +1471,7 @@ func serveCommand(configPath string) {
 	}
 
 	// --- Create retrieval agent for API queries ---
-	retriever := retrieval.NewRetrievalAgent(memStore, wrap("retrieval"), retrieval.RetrievalConfig{
-		MaxHops:             cfg.Retrieval.MaxHops,
-		ActivationThreshold: float32(cfg.Retrieval.ActivationThreshold),
-		DecayFactor:         float32(cfg.Retrieval.DecayFactor),
-		MaxResults:          cfg.Retrieval.MaxResults,
-		MaxToolCalls:        cfg.Retrieval.MaxToolCalls,
-		SynthesisMaxTokens:  cfg.Retrieval.SynthesisMaxTokens,
-		MergeAlpha:          float32(cfg.Retrieval.MergeAlpha),
-		DualHitBonus:        float32(cfg.Retrieval.DualHitBonus),
-	}, log)
+	retriever := retrieval.NewRetrievalAgent(memStore, wrap("retrieval"), buildRetrievalConfig(cfg), log)
 
 	// --- Start consolidation agent ---
 	var consolidator *consolidation.ConsolidationAgent
@@ -1729,6 +1720,40 @@ func serveCommand(configPath string) {
 // CLI Commands (remember / recall / consolidate)
 // ============================================================================
 
+// buildRetrievalConfig maps the central config to the retrieval agent's config struct.
+func buildRetrievalConfig(cfg *config.Config) retrieval.RetrievalConfig {
+	return retrieval.RetrievalConfig{
+		MaxHops:             cfg.Retrieval.MaxHops,
+		ActivationThreshold: float32(cfg.Retrieval.ActivationThreshold),
+		DecayFactor:         float32(cfg.Retrieval.DecayFactor),
+		MaxResults:          cfg.Retrieval.MaxResults,
+		MaxToolCalls:        cfg.Retrieval.MaxToolCalls,
+		SynthesisMaxTokens:  cfg.Retrieval.SynthesisMaxTokens,
+		MergeAlpha:          float32(cfg.Retrieval.MergeAlpha),
+		DualHitBonus:        float32(cfg.Retrieval.DualHitBonus),
+
+		FTSCandidateLimit:       cfg.Retrieval.FTSCandidateLimit,
+		EmbeddingCandidateLimit: cfg.Retrieval.EmbeddingCandidateLimit,
+		PatternSearchLimit:      cfg.Retrieval.PatternSearchLimit,
+		AbstractionSearchLimit:  cfg.Retrieval.AbstractionSearchLimit,
+
+		FTSRankWeight:     float32(cfg.Retrieval.FTSRankWeight),
+		FTSSalienceWeight: float32(cfg.Retrieval.FTSSalienceWeight),
+		DefaultSalience:   float32(cfg.Retrieval.DefaultSalience),
+
+		TimeRangeBaseScore:  float32(cfg.Retrieval.TimeRangeBaseScore),
+		TimeRangeSalienceWt: float32(cfg.Retrieval.TimeRangeSalienceWt),
+
+		RecencyBoostWeight:  float32(cfg.Retrieval.RecencyBoostWeight),
+		RecencyHalfLifeDays: float32(cfg.Retrieval.RecencyHalfLifeDays),
+		ActivityBonusMax:    float32(cfg.Retrieval.ActivityBonusMax),
+		ActivityBonusScale:  float32(cfg.Retrieval.ActivityBonusScale),
+
+		CriticalBoost:  float32(cfg.Retrieval.CriticalBoost),
+		ImportantBoost: float32(cfg.Retrieval.ImportantBoost),
+	}
+}
+
 // initRuntime loads config, opens store and LLM for CLI commands.
 // The returned Provider includes training data capture if enabled in config.
 func initRuntime(configPath string) (*config.Config, *sqlite.SQLiteStore, llm.Provider, *slog.Logger) {
@@ -1866,16 +1891,7 @@ func recallCommand(configPath, query string) {
 
 	ctx := context.Background()
 
-	retriever := retrieval.NewRetrievalAgent(db, llmProvider, retrieval.RetrievalConfig{
-		MaxHops:             cfg.Retrieval.MaxHops,
-		ActivationThreshold: float32(cfg.Retrieval.ActivationThreshold),
-		DecayFactor:         float32(cfg.Retrieval.DecayFactor),
-		MaxResults:          cfg.Retrieval.MaxResults,
-		MaxToolCalls:        cfg.Retrieval.MaxToolCalls,
-		SynthesisMaxTokens:  cfg.Retrieval.SynthesisMaxTokens,
-		MergeAlpha:          float32(cfg.Retrieval.MergeAlpha),
-		DualHitBonus:        float32(cfg.Retrieval.DualHitBonus),
-	}, log)
+	retriever := retrieval.NewRetrievalAgent(db, llmProvider, buildRetrievalConfig(cfg), log)
 
 	resp, err := retriever.Query(ctx, retrieval.QueryRequest{
 		Query:      query,
@@ -2521,16 +2537,7 @@ func mcpCommand(configPath string) {
 	defer func() { _ = encoder.Stop() }()
 
 	// Create retrieval agent for recall
-	retriever := retrieval.NewRetrievalAgent(db, llmProvider, retrieval.RetrievalConfig{
-		MaxHops:             cfg.Retrieval.MaxHops,
-		ActivationThreshold: float32(cfg.Retrieval.ActivationThreshold),
-		DecayFactor:         float32(cfg.Retrieval.DecayFactor),
-		MaxResults:          cfg.Retrieval.MaxResults,
-		MaxToolCalls:        cfg.Retrieval.MaxToolCalls,
-		SynthesisMaxTokens:  cfg.Retrieval.SynthesisMaxTokens,
-		MergeAlpha:          float32(cfg.Retrieval.MergeAlpha),
-		DualHitBonus:        float32(cfg.Retrieval.DualHitBonus),
-	}, log)
+	retriever := retrieval.NewRetrievalAgent(db, llmProvider, buildRetrievalConfig(cfg), log)
 
 	mcpResolver := config.NewProjectResolver(cfg.Projects)
 	server := mcp.NewMCPServer(db, retriever, bus, log, Version, cfg.Coaching.CoachingFile, cfg.Perception.Filesystem.ExcludePatterns, cfg.Perception.Filesystem.MaxContentBytes, mcpResolver)
