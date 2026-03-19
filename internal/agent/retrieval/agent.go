@@ -26,6 +26,31 @@ type RetrievalConfig struct {
 	SynthesisMaxTokens  int     // max tokens per synthesis LLM call
 	MergeAlpha          float32 // weight of embedding vs FTS in score merge (0-1)
 	DualHitBonus        float32 // bonus for memories found by both FTS and embedding
+
+	// Search candidate limits
+	FTSCandidateLimit       int // max candidates from full-text search (default: 10)
+	EmbeddingCandidateLimit int // max candidates from embedding search (default: 10)
+	PatternSearchLimit      int // max patterns returned from embedding search (default: 5)
+	AbstractionSearchLimit  int // max abstractions returned from embedding search (default: 5)
+
+	// FTS scoring weights
+	FTSRankWeight     float32 // weight of reciprocal rank in FTS scoring (default: 0.7)
+	FTSSalienceWeight float32 // weight of salience in FTS scoring (default: 0.3)
+	DefaultSalience   float32 // fallback salience for memories with zero salience (default: 0.5)
+
+	// Temporal injection scoring
+	TimeRangeBaseScore  float32 // base score for time-range injected memories (default: 0.3)
+	TimeRangeSalienceWt float32 // salience weight for time-range injected memories (default: 0.2)
+
+	// Ranking parameters
+	RecencyBoostWeight  float32 // max recency bonus applied to score (default: 0.2)
+	RecencyHalfLifeDays float32 // days until recency bonus decays to ~37% (default: 30)
+	ActivityBonusMax    float32 // cap on Hebbian activity bonus (default: 0.2)
+	ActivityBonusScale  float32 // scale factor for activity bonus log curve (default: 0.02)
+
+	// Significance multipliers
+	CriticalBoost  float32 // multiplier for "critical" significance memories (default: 1.2)
+	ImportantBoost float32 // multiplier for "important" significance memories (default: 1.1)
 }
 
 // DefaultConfig returns sensible defaults for retrieval configuration.
@@ -39,7 +64,42 @@ func DefaultConfig() RetrievalConfig {
 		SynthesisMaxTokens:  1024,
 		MergeAlpha:          0.6,
 		DualHitBonus:        0.15,
+
+		FTSCandidateLimit:       10,
+		EmbeddingCandidateLimit: 10,
+		PatternSearchLimit:      5,
+		AbstractionSearchLimit:  5,
+
+		FTSRankWeight:     0.7,
+		FTSSalienceWeight: 0.3,
+		DefaultSalience:   0.5,
+
+		TimeRangeBaseScore:  0.3,
+		TimeRangeSalienceWt: 0.2,
+
+		RecencyBoostWeight:  0.2,
+		RecencyHalfLifeDays: 30,
+		ActivityBonusMax:    0.2,
+		ActivityBonusScale:  0.02,
+
+		CriticalBoost:  1.2,
+		ImportantBoost: 1.1,
 	}
+}
+
+// helpers for zero-value fallback
+func intOr(v, fallback int) int {
+	if v == 0 {
+		return fallback
+	}
+	return v
+}
+
+func f32Or(v, fallback float32) float32 {
+	if v == 0 {
+		return fallback
+	}
+	return v
 }
 
 // QueryRequest is the input for a retrieval query.
@@ -126,7 +186,7 @@ func (ra *RetrievalAgent) Query(ctx context.Context, req QueryRequest) (QueryRes
 	ra.log.Debug("query concepts extracted", "query_id", queryID, "concepts_count", len(concepts))
 
 	// Step 2: Find entry points via full-text search
-	ftsResults, err := ra.store.SearchByFullText(ctx, req.Query, 10)
+	ftsResults, err := ra.store.SearchByFullText(ctx, req.Query, intOr(ra.config.FTSCandidateLimit, 10))
 	if err != nil {
 		ra.log.Warn("full-text search failed", "query_id", queryID, "error", err)
 		ftsResults = []store.Memory{}
@@ -139,7 +199,7 @@ func (ra *RetrievalAgent) Query(ctx context.Context, req QueryRequest) (QueryRes
 	if err != nil {
 		ra.log.Warn("embedding generation failed", "query_id", queryID, "error", err)
 	} else {
-		embeddingResults, err = ra.store.SearchByEmbedding(ctx, embedding, 10)
+		embeddingResults, err = ra.store.SearchByEmbedding(ctx, embedding, intOr(ra.config.EmbeddingCandidateLimit, 10))
 		if err != nil {
 			ra.log.Warn("embedding search failed", "query_id", queryID, "error", err)
 			embeddingResults = []store.RetrievalResult{}
@@ -163,9 +223,11 @@ func (ra *RetrievalAgent) Query(ctx context.Context, req QueryRequest) (QueryRes
 	entryPoints := ra.mergeEntryPoints(ftsResults, embeddingResults)
 
 	// Inject time-range results as additional entry points with a moderate base score
+	timeBase := f32Or(ra.config.TimeRangeBaseScore, 0.3)
+	timeSalWt := f32Or(ra.config.TimeRangeSalienceWt, 0.2)
 	for _, mem := range timeRangeResults {
 		if _, exists := entryPoints[mem.ID]; !exists {
-			entryPoints[mem.ID] = 0.3 + 0.2*mem.Salience
+			entryPoints[mem.ID] = timeBase + timeSalWt*mem.Salience
 		}
 	}
 	ra.log.Debug("entry points merged and deduplicated", "query_id", queryID, "entry_points_count", len(entryPoints))
@@ -200,7 +262,7 @@ func (ra *RetrievalAgent) Query(ctx context.Context, req QueryRequest) (QueryRes
 
 	if embedding != nil {
 		if req.IncludePatterns {
-			patterns, err := ra.store.SearchPatternsByEmbedding(ctx, embedding, 5)
+			patterns, err := ra.store.SearchPatternsByEmbedding(ctx, embedding, intOr(ra.config.PatternSearchLimit, 5))
 			if err != nil {
 				ra.log.Warn("pattern search failed", "query_id", queryID, "error", err)
 			} else {
@@ -214,7 +276,7 @@ func (ra *RetrievalAgent) Query(ctx context.Context, req QueryRequest) (QueryRes
 		}
 
 		if req.IncludeAbstractions {
-			abs, err := ra.store.SearchAbstractionsByEmbedding(ctx, embedding, 5)
+			abs, err := ra.store.SearchAbstractionsByEmbedding(ctx, embedding, intOr(ra.config.AbstractionSearchLimit, 5))
 			if err != nil {
 				ra.log.Warn("abstraction search failed", "query_id", queryID, "error", err)
 			} else {
@@ -274,13 +336,16 @@ func (ra *RetrievalAgent) mergeEntryPoints(ftsResults []store.Memory, embeddingR
 	// blended with salience as a secondary importance signal.
 	// Before this fix, all FTS results got ~0.49 after consolidation decay,
 	// discarding the BM25 rank-order information entirely.
+	ftsRankWt := f32Or(ra.config.FTSRankWeight, 0.7)
+	ftsSalWt := f32Or(ra.config.FTSSalienceWeight, 0.3)
+	defaultSal := f32Or(ra.config.DefaultSalience, 0.5)
 	for i, mem := range ftsResults {
 		rankScore := float32(1.0) / float32(i+1) // reciprocal rank: 1.0, 0.5, 0.33, ...
 		salience := mem.Salience
 		if salience <= 0 {
-			salience = 0.5
+			salience = defaultSal
 		}
-		ftsScores[mem.ID] = 0.7*rankScore + 0.3*salience
+		ftsScores[mem.ID] = ftsRankWt*rankScore + ftsSalWt*salience
 	}
 
 	// Embedding results: use cosine similarity directly
@@ -450,10 +515,14 @@ func (ra *RetrievalAgent) rankResults(ctx context.Context, activated map[string]
 		} else {
 			daysSinceAccess = float32(time.Since(mem.LastAccessed).Hours() / 24)
 		}
-		recencyBonus := 0.2 * float32(math.Exp(float64(-daysSinceAccess/30)))
+		recencyWt := f32Or(ra.config.RecencyBoostWeight, 0.2)
+		recencyHL := f32Or(ra.config.RecencyHalfLifeDays, 30)
+		recencyBonus := recencyWt * float32(math.Exp(float64(-daysSinceAccess/recencyHL)))
 
 		// Hebbian activity bonus — frequently traversed associations indicate relevance
-		activityBonus := float32(math.Min(0.2, 0.02*math.Log1p(float64(state.activationCount))))
+		actMax := float64(f32Or(ra.config.ActivityBonusMax, 0.2))
+		actScale := float64(f32Or(ra.config.ActivityBonusScale, 0.02))
+		activityBonus := float32(math.Min(actMax, actScale*math.Log1p(float64(state.activationCount))))
 
 		// Combined score
 		finalScore := state.activation * (1.0 + recencyBonus + activityBonus)
@@ -463,9 +532,9 @@ func (ra *RetrievalAgent) rankResults(ctx context.Context, activated map[string]
 		if attrErr == nil {
 			switch attrs.Significance {
 			case "critical":
-				finalScore *= 1.2
+				finalScore *= f32Or(ra.config.CriticalBoost, 1.2)
 			case "important":
-				finalScore *= 1.1
+				finalScore *= f32Or(ra.config.ImportantBoost, 1.1)
 			}
 		}
 
