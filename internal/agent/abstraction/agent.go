@@ -183,7 +183,7 @@ func (aa *AbstractionAgent) synthesizePrinciples(ctx context.Context, report *Cy
 	}
 
 	// Cluster patterns by embedding similarity
-	clusters := clusterPatterns(strong, 0.7)
+	clusters := clusterPatterns(strong, 0.8)
 
 	llmBudget := aa.config.MaxLLMCalls / 2 // reserve half for axioms
 	if llmBudget < 1 {
@@ -276,7 +276,7 @@ func (aa *AbstractionAgent) synthesizeAxioms(ctx context.Context, report *CycleR
 		return nil
 	}
 
-	clusters := clusterAbstractions(active, 0.75)
+	clusters := clusterAbstractions(active, 0.85)
 
 	llmBudget := aa.config.MaxLLMCalls / 2
 	if llmBudget < 1 {
@@ -443,9 +443,9 @@ func (aa *AbstractionAgent) synthesizePrinciple(ctx context.Context, patterns []
 		allConcepts = append(allConcepts, p.Concepts...)
 	}
 
-	prompt := fmt.Sprintf(`These patterns have been quietly emerging from someone's work — recurring themes discovered over time. Step back and look at the bigger picture. Is there a principle that ties them together?
+	prompt := fmt.Sprintf(`These patterns keep recurring in this project. Is there a practical engineering principle that explains them?
 
-Think of it like this: if these patterns are the "what," what's the "why"? What general rule or guiding truth would explain why these patterns keep showing up?
+Focus on actionable guidance — something a developer could apply when making decisions. Be specific to THIS project's domain, not generic software wisdom. Write like a senior engineer documenting a team practice, not a philosopher.
 
 Patterns:
 %s
@@ -453,17 +453,20 @@ Patterns:
 Respond with ONLY a JSON object:
 {
   "has_principle": true/false,
-  "title": "a memorable name for this principle",
-  "principle": "the unifying principle in 1-2 clear sentences — something genuinely actionable",
+  "title": "short name for this practice",
+  "principle": "1-2 sentences of concrete, project-specific engineering guidance",
   "concepts": ["key", "concepts"],
   "confidence": 0.0-1.0
 }
 
-Only share a principle if it genuinely unifies these patterns in an insightful way. A good principle should make someone nod and say "yes, that's exactly right." If the patterns are just loosely related, set has_principle to false.`, descriptions.String())
+Set has_principle to false if:
+- The patterns are only loosely related
+- The principle would apply to any software project (too generic)
+- You cannot state it as actionable guidance ("when X, do Y")`, descriptions.String())
 
 	req := llm.CompletionRequest{
 		Messages: []llm.Message{
-			{Role: "system", Content: "You are a principle synthesizer. Extract general principles from patterns. Output JSON only."},
+			{Role: "system", Content: "You are a senior software engineer identifying recurring practices in a codebase. Extract concrete engineering principles from patterns. Output JSON only."},
 			{Role: "user", Content: prompt},
 		},
 		MaxTokens:   200,
@@ -547,9 +550,9 @@ func (aa *AbstractionAgent) synthesizeAxiom(ctx context.Context, principles []st
 		allConcepts = append(allConcepts, p.Concepts...)
 	}
 
-	prompt := fmt.Sprintf(`These principles have emerged from layers of experience — each one discovered through patterns, and each pattern built from real memories. Now zoom out one more level.
+	prompt := fmt.Sprintf(`These engineering principles emerged from real project patterns. Is there a higher-level rule that connects them?
 
-Is there a fundamental truth here — something almost axiomatic? The kind of insight that, once you see it, changes how you approach everything?
+State it as a concrete guideline that shapes how this team builds software. Think "team engineering standard" not "universal truth." It should be specific enough that someone could disagree with it.
 
 Principles:
 %s
@@ -557,17 +560,20 @@ Principles:
 Respond with ONLY a JSON object:
 {
   "has_axiom": true/false,
-  "title": "a concise name for this truth",
-  "axiom": "the fundamental insight in 1-2 sentences — something that feels deeply true",
+  "title": "concise name for this rule",
+  "axiom": "1-2 sentences of concrete engineering guidance that connects these principles",
   "concepts": ["key", "concepts"],
   "confidence": 0.0-1.0
 }
 
-This is the highest level of abstraction — only share an axiom if it's genuinely profound. If these principles are related but don't converge on a deeper truth, set has_axiom to false.`, descriptions.String())
+Set has_axiom to false if:
+- The principles don't converge on a shared rule
+- The rule would be generic advice (applies to any team)
+- You cannot express it as actionable guidance`, descriptions.String())
 
 	req := llm.CompletionRequest{
 		Messages: []llm.Message{
-			{Role: "system", Content: "You are an axiom synthesizer. Extract deep truths from principles. Output JSON only."},
+			{Role: "system", Content: "You are a senior software engineer synthesizing team engineering standards from observed principles. Output JSON only."},
 			{Role: "user", Content: prompt},
 		},
 		MaxTokens:   200,

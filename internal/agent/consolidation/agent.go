@@ -862,8 +862,8 @@ func (ca *ConsolidationAgent) processPatternClusters(ctx context.Context, cluste
 				}
 			}
 			if newEvidence > 0 {
-				// Scale strength increment by amount of new evidence
-				increment := cfgFloat32(ca.config.PatternStrengthIncrement, 0.03) * float32(newEvidence)
+				// Scale strength increment logarithmically to prevent saturation with large evidence counts
+				increment := cfgFloat32(ca.config.PatternStrengthIncrement, 0.03) * float32(math.Log2(1+float64(newEvidence)))
 				if len(cluster) >= cfgInt(ca.config.LargeClusterMinSize, 5) {
 					increment *= cfgFloat32(ca.config.LargeClusterBonus, 1.3)
 				}

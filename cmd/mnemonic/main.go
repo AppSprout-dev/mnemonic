@@ -184,6 +184,14 @@ func main() {
 			}
 		}
 		dedupCommand(*configPath, dryRun)
+	case "reset-patterns":
+		dryRun := true
+		for _, a := range args[1:] {
+			if a == "--apply" {
+				dryRun = false
+			}
+		}
+		resetPatternsCommand(*configPath, dryRun)
 	case "generate-token":
 		generateTokenCommand()
 	case "check-update":
@@ -1291,6 +1299,37 @@ func serveCommand(configPath string) {
 		metaCtx2, metaCancel2 := context.WithTimeout(context.Background(), 5*time.Second)
 		_ = memStore.SetMeta(metaCtx2, "embedding_model", embModel)
 		metaCancel2()
+	}
+
+	// Detect version changes and create a memory for release awareness
+	if Version != "" {
+		verCtx, verCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		prevVersion, _ := memStore.GetMeta(verCtx, "daemon_version")
+		verCancel()
+
+		if prevVersion != "" && prevVersion != Version {
+			log.Info("version changed", "previous", prevVersion, "current", Version)
+			raw := store.RawMemory{
+				ID:              uuid.New().String(),
+				Source:          "system",
+				Type:            "version_change",
+				Content:         fmt.Sprintf("Mnemonic updated from %s to %s", prevVersion, Version),
+				Timestamp:       time.Now(),
+				Project:         "mnemonic",
+				InitialSalience: 0.7,
+			}
+			writeCtx, writeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if err := memStore.WriteRaw(writeCtx, raw); err != nil {
+				log.Warn("failed to record version change", "error", err)
+			} else {
+				log.Info("recorded version change memory", "from", prevVersion, "to", Version)
+			}
+			writeCancel()
+		}
+
+		setCtx, setCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = memStore.SetMeta(setCtx, "daemon_version", Version)
+		setCancel()
 	}
 
 	// Create event bus
@@ -2777,6 +2816,7 @@ func buildEncodingConfig(cfg *config.Config) encoding.EncodingConfig {
 		BatchSizeEvent:          cfg.Encoding.BatchSizeEvent,
 		BatchSizePoll:           cfg.Encoding.BatchSizePoll,
 		DeduplicationThreshold:  float32(cfg.Encoding.DeduplicationThreshold),
+		SalienceFloor:           cfg.Encoding.SalienceFloor,
 	}
 }
 
@@ -2998,6 +3038,179 @@ func dedupCommand(configPath string, dryRun bool) {
 		} else {
 			fmt.Printf("  Orphaned assocs pruned: %d\n", pruned)
 		}
+	}
+}
+
+// resetPatternsCommand recalculates pattern strengths using logarithmic scaling
+// and merges near-duplicate patterns. Dry-run by default; use --apply to execute.
+func resetPatternsCommand(configPath string, dryRun bool) {
+	_, db, _, log := initRuntime(configPath)
+	defer func() { _ = db.Close() }()
+
+	ctx := context.Background()
+
+	// Load all patterns (no project filter, high limit)
+	patterns, err := db.ListPatterns(ctx, "", 1000)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load patterns: %v\n", err)
+		os.Exit(1)
+	}
+
+	if dryRun {
+		fmt.Printf("Pattern reset dry-run. Use --apply to execute.\n\n")
+	} else {
+		fmt.Printf("Pattern reset. Recalculating strengths and merging duplicates...\n\n")
+	}
+
+	fmt.Printf("Total patterns: %d\n\n", len(patterns))
+
+	// Phase 1: Recalculate strengths using logarithmic formula
+	strengthCeiling := float32(0.95)
+	strongCeiling := float32(1.0)
+	strongMinCount := 50
+
+	fmt.Printf("=== Strength Recalculation ===\n")
+	fmt.Printf("Formula: 0.5 + 0.03 * log2(1 + evidenceCount)\n")
+	fmt.Printf("Ceiling: %.2f (%.2f with %d+ evidence)\n\n", strengthCeiling, strongCeiling, strongMinCount)
+
+	recalculated := 0
+	for i := range patterns {
+		p := &patterns[i]
+		if p.State != "active" {
+			continue
+		}
+		evidenceCount := len(p.EvidenceIDs)
+		newStrength := float32(0.5) + 0.03*float32(math.Log2(1+float64(evidenceCount)))
+		ceiling := strengthCeiling
+		if evidenceCount > strongMinCount {
+			ceiling = strongCeiling
+		}
+		if newStrength > ceiling {
+			newStrength = ceiling
+		}
+		if newStrength != p.Strength {
+			fmt.Printf("  %-50s  evidence=%3d  %.2f -> %.2f\n",
+				truncate(p.Title, 50), evidenceCount, p.Strength, newStrength)
+			if !dryRun {
+				p.Strength = newStrength
+				p.UpdatedAt = time.Now()
+				if err := db.UpdatePattern(ctx, *p); err != nil {
+					log.Warn("failed to update pattern strength", "pattern_id", p.ID, "error", err)
+				}
+			}
+			recalculated++
+		}
+	}
+	fmt.Printf("\nRecalculated: %d patterns\n\n", recalculated)
+
+	// Phase 2: Merge near-duplicate patterns (>0.80 cosine similarity)
+	const mergeThreshold = float32(0.80)
+	fmt.Printf("=== Duplicate Pattern Merge (threshold: %.2f) ===\n\n", mergeThreshold)
+
+	// Filter to active patterns with embeddings
+	var active []int
+	for i, p := range patterns {
+		if p.State == "active" && len(p.Embedding) > 0 {
+			active = append(active, i)
+		}
+	}
+
+	// Union-find for pattern clustering
+	parent := make(map[int]int)
+	for _, i := range active {
+		parent[i] = i
+	}
+	var findRoot func(int) int
+	findRoot = func(i int) int {
+		if parent[i] != i {
+			parent[i] = findRoot(parent[i])
+		}
+		return parent[i]
+	}
+
+	for ai := 0; ai < len(active); ai++ {
+		for bi := ai + 1; bi < len(active); bi++ {
+			i, j := active[ai], active[bi]
+			sim := cosineSim(patterns[i].Embedding, patterns[j].Embedding)
+			if sim >= mergeThreshold {
+				ri, rj := findRoot(i), findRoot(j)
+				if ri != rj {
+					parent[ri] = rj
+				}
+			}
+		}
+	}
+
+	// Build clusters
+	clusters := make(map[int][]int)
+	for _, i := range active {
+		root := findRoot(i)
+		clusters[root] = append(clusters[root], i)
+	}
+
+	merged := 0
+	for _, members := range clusters {
+		if len(members) <= 1 {
+			continue
+		}
+
+		// Pick survivor: most evidence, then highest strength
+		survivorIdx := members[0]
+		for _, idx := range members[1:] {
+			if len(patterns[idx].EvidenceIDs) > len(patterns[survivorIdx].EvidenceIDs) {
+				survivorIdx = idx
+			} else if len(patterns[idx].EvidenceIDs) == len(patterns[survivorIdx].EvidenceIDs) &&
+				patterns[idx].Strength > patterns[survivorIdx].Strength {
+				survivorIdx = idx
+			}
+		}
+
+		survivor := &patterns[survivorIdx]
+		fmt.Printf("Cluster (%d patterns):\n", len(members))
+		fmt.Printf("  Survivor: %s (evidence=%d)\n", truncate(survivor.Title, 60), len(survivor.EvidenceIDs))
+
+		for _, idx := range members {
+			if idx == survivorIdx {
+				continue
+			}
+			dup := &patterns[idx]
+			fmt.Printf("  Archive:  %s (evidence=%d)\n", truncate(dup.Title, 60), len(dup.EvidenceIDs))
+
+			if !dryRun {
+				// Merge evidence IDs into survivor
+				existingEvidence := make(map[string]bool)
+				for _, eid := range survivor.EvidenceIDs {
+					existingEvidence[eid] = true
+				}
+				for _, eid := range dup.EvidenceIDs {
+					if !existingEvidence[eid] {
+						survivor.EvidenceIDs = append(survivor.EvidenceIDs, eid)
+					}
+				}
+				survivor.UpdatedAt = time.Now()
+				if err := db.UpdatePattern(ctx, *survivor); err != nil {
+					log.Warn("failed to update survivor pattern", "id", survivor.ID, "error", err)
+				}
+
+				// Archive the duplicate
+				dup.State = "archived"
+				dup.UpdatedAt = time.Now()
+				if err := db.UpdatePattern(ctx, *dup); err != nil {
+					log.Warn("failed to archive duplicate pattern", "id", dup.ID, "error", err)
+				}
+			}
+			merged++
+		}
+		fmt.Println()
+	}
+
+	fmt.Printf("Summary:\n")
+	fmt.Printf("  Strengths recalculated: %d\n", recalculated)
+	if dryRun {
+		fmt.Printf("  Would merge: %d duplicate patterns\n", merged)
+		fmt.Printf("\nRun with --apply to execute.\n")
+	} else {
+		fmt.Printf("  Patterns merged: %d\n", merged)
 	}
 }
 
