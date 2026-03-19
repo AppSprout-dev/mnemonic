@@ -1857,7 +1857,7 @@ func (s *SQLiteStore) ListRecentRetrievalFeedback(ctx context.Context, since tim
 	if err != nil {
 		return nil, fmt.Errorf("list recent retrieval feedback: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var results []store.RetrievalFeedback
 	for rows.Next() {
