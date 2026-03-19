@@ -968,3 +968,69 @@ func TestSanitizeFTSQuery(t *testing.T) {
 		})
 	}
 }
+
+func TestRetrievalFeedbackAccessSnapshot(t *testing.T) {
+	s := createTestStore(t)
+	defer func() { _ = s.Close() }()
+
+	ctx := context.Background()
+
+	t.Run("round-trip with access snapshot", func(t *testing.T) {
+		fb := store.RetrievalFeedback{
+			QueryID:      "q-1",
+			QueryText:    "test query",
+			RetrievedIDs: []string{"mem-1", "mem-2"},
+			TraversedAssocs: []store.TraversedAssoc{
+				{SourceID: "mem-1", TargetID: "mem-2"},
+			},
+			AccessSnapshot: map[string]int{
+				"mem-1": 5,
+				"mem-2": 12,
+			},
+			CreatedAt: time.Now(),
+		}
+
+		if err := s.WriteRetrievalFeedback(ctx, fb); err != nil {
+			t.Fatalf("WriteRetrievalFeedback: %v", err)
+		}
+
+		got, err := s.GetRetrievalFeedback(ctx, "q-1")
+		if err != nil {
+			t.Fatalf("GetRetrievalFeedback: %v", err)
+		}
+
+		if len(got.AccessSnapshot) != 2 {
+			t.Fatalf("expected 2 snapshot entries, got %d", len(got.AccessSnapshot))
+		}
+		if got.AccessSnapshot["mem-1"] != 5 {
+			t.Errorf("expected mem-1 access count 5, got %d", got.AccessSnapshot["mem-1"])
+		}
+		if got.AccessSnapshot["mem-2"] != 12 {
+			t.Errorf("expected mem-2 access count 12, got %d", got.AccessSnapshot["mem-2"])
+		}
+	})
+
+	t.Run("backward compat with nil snapshot", func(t *testing.T) {
+		// Write a record without a snapshot (simulates old data)
+		fb := store.RetrievalFeedback{
+			QueryID:      "q-old",
+			QueryText:    "old query",
+			RetrievedIDs: []string{"mem-3"},
+			CreatedAt:    time.Now(),
+		}
+
+		if err := s.WriteRetrievalFeedback(ctx, fb); err != nil {
+			t.Fatalf("WriteRetrievalFeedback: %v", err)
+		}
+
+		got, err := s.GetRetrievalFeedback(ctx, "q-old")
+		if err != nil {
+			t.Fatalf("GetRetrievalFeedback: %v", err)
+		}
+
+		// nil snapshot should deserialize as empty/nil map without error
+		if got.AccessSnapshot != nil && len(got.AccessSnapshot) != 0 {
+			t.Errorf("expected nil or empty snapshot for old record, got %v", got.AccessSnapshot)
+		}
+	})
+}

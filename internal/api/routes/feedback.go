@@ -158,15 +158,27 @@ func HandleFeedback(s store.Store, log *slog.Logger) http.HandlerFunc {
 }
 
 // SaveRetrievalFeedback saves traversal data for a query so feedback can adjust strengths later.
+// It also snapshots the access count of each retrieved memory so implicit feedback can detect re-access.
 func SaveRetrievalFeedback(ctx context.Context, s store.Store, log *slog.Logger, queryID string, queryText string, retrievedIDs []string, traversedAssocs []store.TraversedAssoc) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
+
+	// Snapshot access counts at query time for implicit feedback detection
+	snapshot := make(map[string]int, len(retrievedIDs))
+	for _, memID := range retrievedIDs {
+		mem, err := s.GetMemory(ctx, memID)
+		if err != nil {
+			continue
+		}
+		snapshot[memID] = mem.AccessCount
+	}
 
 	fb := store.RetrievalFeedback{
 		QueryID:         queryID,
 		QueryText:       queryText,
 		RetrievedIDs:    retrievedIDs,
 		TraversedAssocs: traversedAssocs,
+		AccessSnapshot:  snapshot,
 		CreatedAt:       time.Now(),
 	}
 	if err := s.WriteRetrievalFeedback(ctx, fb); err != nil {

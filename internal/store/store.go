@@ -291,6 +291,7 @@ type RetrievalFeedback struct {
 	QueryText       string           `json:"query_text"`
 	RetrievedIDs    []string         `json:"retrieved_ids"`
 	TraversedAssocs []TraversedAssoc `json:"traversed_assocs"`
+	AccessSnapshot  map[string]int   `json:"access_snapshot,omitempty"` // memory_id -> access_count at query time
 	Feedback        string           `json:"feedback"`
 	CreatedAt       time.Time        `json:"created_at"`
 }
