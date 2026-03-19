@@ -120,6 +120,9 @@ type QueryRequest struct {
 	Project             string    // if set, filter to this project
 	TimeFrom            time.Time // if set, filter memories created after this time
 	TimeTo              time.Time // if set, filter memories created before this time
+	Source              string    // if set, filter by memory source (mcp, filesystem, terminal, clipboard)
+	State               string    // if set, filter by memory state (active, fading, archived)
+	MinSalience         float32   // if > 0, filter out memories below this salience
 }
 
 // QueryResponse is the output of a retrieval query.
@@ -246,8 +249,8 @@ func (ra *RetrievalAgent) Query(ctx context.Context, req QueryRequest) (QueryRes
 	// Step 6: Rank results by combined score
 	ranked := ra.rankResults(ctx, activated, req.IncludeReasoning)
 
-	// Step 7: Apply project and time filters (before truncation so matching results aren't discarded)
-	if req.Project != "" || !req.TimeFrom.IsZero() || !req.TimeTo.IsZero() {
+	// Step 7: Apply filters (project, time, source, state, salience)
+	if req.Project != "" || !req.TimeFrom.IsZero() || !req.TimeTo.IsZero() || req.Source != "" || req.State != "" || req.MinSalience > 0 {
 		ranked = ra.applyFilters(ranked, req)
 	}
 
@@ -966,7 +969,7 @@ func (ra *RetrievalAgent) ResetStats() {
 	}
 }
 
-// applyFilters filters results by project and/or time range.
+// applyFilters filters results by project, time range, source, state, and salience.
 func (ra *RetrievalAgent) applyFilters(results []store.RetrievalResult, req QueryRequest) []store.RetrievalResult {
 	var filtered []store.RetrievalResult
 	for _, r := range results {
@@ -977,6 +980,15 @@ func (ra *RetrievalAgent) applyFilters(results []store.RetrievalResult, req Quer
 			continue
 		}
 		if !req.TimeTo.IsZero() && r.Memory.Timestamp.After(req.TimeTo) {
+			continue
+		}
+		if req.Source != "" && r.Memory.Source != req.Source {
+			continue
+		}
+		if req.State != "" && r.Memory.State != req.State {
+			continue
+		}
+		if req.MinSalience > 0 && r.Memory.Salience < req.MinSalience {
 			continue
 		}
 		filtered = append(filtered, r)

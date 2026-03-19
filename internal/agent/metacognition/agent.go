@@ -560,19 +560,63 @@ func (ma *MetacognitionAgent) actOnPoorRetrieval(ctx context.Context, obs store.
 	}
 
 	irrelevantRatio, _ := obs.Details["irrelevant_ratio"].(float64)
+	actions := 0
 
-	ma.log.Warn("poor retrieval quality detected",
-		"irrelevant_ratio", irrelevantRatio,
-		"suggestion", "consider adjusting spread activation depth or similarity threshold")
+	ma.log.Warn("poor retrieval quality detected", "irrelevant_ratio", irrelevantRatio)
 
+	// Corrective action: demote consistently irrelevant memories.
+	// Collect memory IDs from recent "irrelevant" feedback and lower their salience.
+	feedbacks, err := ma.store.ListMetaObservations(ctx, "retrieval_feedback", 50)
+	if err == nil {
+		demoteCounts := make(map[string]int) // memory ID → times rated irrelevant
+		for _, fb := range feedbacks {
+			q, _ := fb.Details["quality"].(string)
+			if q != "irrelevant" {
+				continue
+			}
+			if ids, ok := fb.Details["memory_ids"].([]interface{}); ok {
+				for _, id := range ids {
+					if s, ok := id.(string); ok {
+						demoteCounts[s]++
+					}
+				}
+			}
+		}
+
+		// Demote memories that have been rated irrelevant 3+ times
+		for memID, count := range demoteCounts {
+			if count < 3 {
+				continue
+			}
+			mem, err := ma.store.GetMemory(ctx, memID)
+			if err != nil {
+				continue
+			}
+			newSalience := mem.Salience - 0.05
+			if newSalience < 0.05 {
+				newSalience = 0.05
+			}
+			if newSalience < mem.Salience {
+				if err := ma.store.UpdateSalience(ctx, memID, newSalience); err != nil {
+					ma.log.Warn("failed to demote irrelevant memory", "memory_id", memID, "error", err)
+				} else {
+					ma.log.Info("demoted frequently irrelevant memory",
+						"memory_id", memID, "old_salience", mem.Salience, "new_salience", newSalience, "irrelevant_count", count)
+					actions++
+				}
+			}
+		}
+	}
+
+	// Record the corrective action
 	action := store.MetaObservation{
 		ID:              uuid.New().String(),
 		ObservationType: "autonomous_action",
-		Severity:        "warning",
+		Severity:        obs.Severity,
 		Details: map[string]interface{}{
-			"action":           "retrieval_quality_alert",
+			"action":           "retrieval_quality_correction",
 			"irrelevant_ratio": irrelevantRatio,
-			"suggestion":       "adjust spread activation params or similarity threshold",
+			"memories_demoted": actions,
 		},
 		CreatedAt: time.Now(),
 	}
@@ -580,7 +624,7 @@ func (ma *MetacognitionAgent) actOnPoorRetrieval(ctx context.Context, obs store.
 		ma.log.Warn("failed to write meta observation", "error", err)
 	}
 
-	return 1
+	return actions + 1
 }
 
 // processFeedback reads recent unprocessed retrieval feedback and adjusts associations/salience.

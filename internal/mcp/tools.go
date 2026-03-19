@@ -57,6 +57,19 @@ func recallToolDef() ToolDefinition {
 					"items":       map[string]interface{}{"type": "string"},
 					"description": "Filter by specific concepts",
 				},
+				"source": map[string]interface{}{
+					"type":        "string",
+					"description": "Filter by memory source: mcp, filesystem, terminal, clipboard",
+				},
+				"min_salience": map[string]interface{}{
+					"type":        "number",
+					"description": "Minimum salience threshold (0.0-1.0). Filters out low-quality memories.",
+				},
+				"state": map[string]interface{}{
+					"type":        "string",
+					"description": "Filter by memory state: active, fading, archived",
+					"enum":        []string{"active", "fading", "archived"},
+				},
 			},
 			"required": []string{"query"},
 		},
@@ -111,6 +124,19 @@ func recallProjectToolDef() ToolDefinition {
 					"type":        "integer",
 					"description": "Maximum number of memories to return (default: 10)",
 				},
+				"source": map[string]interface{}{
+					"type":        "string",
+					"description": "Filter by memory source: mcp, filesystem, terminal, clipboard",
+				},
+				"min_salience": map[string]interface{}{
+					"type":        "number",
+					"description": "Minimum salience threshold (0.0-1.0). Filters out low-quality memories.",
+				},
+				"state": map[string]interface{}{
+					"type":        "string",
+					"description": "Filter by memory state: active, fading, archived",
+					"enum":        []string{"active", "fading", "archived"},
+				},
 			},
 			"required": []string{},
 		},
@@ -131,6 +157,19 @@ func recallTimelineToolDef() ToolDefinition {
 				"limit": map[string]interface{}{
 					"type":        "integer",
 					"description": "Maximum number of memories to return (default: 20)",
+				},
+				"source": map[string]interface{}{
+					"type":        "string",
+					"description": "Filter by memory source: mcp, filesystem, terminal, clipboard",
+				},
+				"min_salience": map[string]interface{}{
+					"type":        "number",
+					"description": "Minimum salience threshold (0.0-1.0). Filters out low-quality memories.",
+				},
+				"state": map[string]interface{}{
+					"type":        "string",
+					"description": "Filter by memory state: active, fading, archived",
+					"enum":        []string{"active", "fading", "archived"},
 				},
 			},
 			"required": []string{},

@@ -58,6 +58,16 @@ func (s *SQLiteStore) ListMemoriesByTimeRange(ctx context.Context, from, to time
 	return scanMemoryRows(rows)
 }
 
+// ListMemoriesBySession returns all memories created during a given session.
+func (s *SQLiteStore) ListMemoriesBySession(ctx context.Context, sessionID string) ([]store.Memory, error) {
+	query := `SELECT ` + memoryColumns + ` FROM memories WHERE session_id = ? ORDER BY created_at DESC`
+	rows, err := s.db.QueryContext(ctx, query, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list memories by session: %w", err)
+	}
+	return scanMemoryRows(rows)
+}
+
 // GetProjectSummary returns aggregate stats for a specific project.
 func (s *SQLiteStore) GetProjectSummary(ctx context.Context, project string) (map[string]interface{}, error) {
 	summary := make(map[string]interface{})

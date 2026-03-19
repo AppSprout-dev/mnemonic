@@ -148,6 +148,9 @@ func (srv *MCPServer) Run(ctx context.Context) error {
 		}
 	}
 
+	// Session ended (stdin closed or context cancelled)
+	srv.onSessionEnd(ctx)
+
 	return scanner.Err()
 }
 
@@ -325,6 +328,8 @@ func (srv *MCPServer) handleRemember(ctx context.Context, args map[string]interf
 }
 
 // handleRecall retrieves memories using semantic search and spread activation.
+// All recall paths (project-scoped, concept-filtered, default) go through the
+// retrieval agent for spread activation and synthesis.
 func (srv *MCPServer) handleRecall(ctx context.Context, args map[string]interface{}) (interface{}, error) {
 	query, ok := args["query"].(string)
 	if !ok || query == "" {
@@ -336,13 +341,27 @@ func (srv *MCPServer) handleRecall(ctx context.Context, args map[string]interfac
 		limit = int(l)
 	}
 
-	// Check for project-scoped recall
+	// Parse optional filters
 	project := ""
 	if p, ok := args["project"].(string); ok {
 		project = p
 	}
 
-	// Check for concept-filtered recall
+	source := ""
+	if s, ok := args["source"].(string); ok {
+		source = s
+	}
+
+	state := ""
+	if s, ok := args["state"].(string); ok {
+		state = s
+	}
+
+	var minSalience float32
+	if ms, ok := args["min_salience"].(float64); ok {
+		minSalience = float32(ms)
+	}
+
 	var concepts []string
 	if c, ok := args["concepts"].([]interface{}); ok {
 		for _, v := range c {
@@ -352,37 +371,23 @@ func (srv *MCPServer) handleRecall(ctx context.Context, args map[string]interfac
 		}
 	}
 
-	// If project is specified, use project-scoped search
-	if project != "" {
-		memories, err := srv.store.SearchByProject(ctx, project, query, limit)
-		if err != nil {
-			srv.log.Error("project recall failed", "query", query, "project", project, "error", err)
-			return nil, fmt.Errorf("project recall failed: %w", err)
-		}
-		text := fmt.Sprintf("Found %d memories in project '%s':\n\n", len(memories), project)
-		for i, mem := range memories {
-			text += fmt.Sprintf("%d. %s\n   Summary: %s\n   Concepts: %v\n   Project: %s\n\n",
-				i+1, mem.ID, mem.Summary, mem.Concepts, mem.Project)
-		}
-		return toolResult(text), nil
-	}
-
-	// If concepts are specified, use concept-based search
+	// If concepts are specified, use concept-based search (no spread activation available)
 	if len(concepts) > 0 {
 		memories, err := srv.store.SearchByConcepts(ctx, concepts, limit)
 		if err != nil {
 			srv.log.Error("concept recall failed", "concepts", concepts, "error", err)
 			return nil, fmt.Errorf("concept recall failed: %w", err)
 		}
-		text := fmt.Sprintf("Found %d memories matching concepts %v:\n\n", len(memories), concepts)
-		for i, mem := range memories {
+		filtered := filterMemories(memories, source, state, minSalience)
+		text := fmt.Sprintf("Found %d memories matching concepts %v:\n\n", len(filtered), concepts)
+		for i, mem := range filtered {
 			text += fmt.Sprintf("%d. %s\n   Summary: %s\n   Concepts: %v\n\n",
 				i+1, mem.ID, mem.Summary, mem.Concepts)
 		}
 		return toolResult(text), nil
 	}
 
-	// Default: full semantic search with spread activation
+	// All other queries go through the retrieval agent (including project-scoped)
 	queryReq := retrieval.QueryRequest{
 		Query:               query,
 		MaxResults:          limit,
@@ -390,6 +395,10 @@ func (srv *MCPServer) handleRecall(ctx context.Context, args map[string]interfac
 		Synthesize:          true,
 		IncludePatterns:     true,
 		IncludeAbstractions: true,
+		Project:             project,
+		Source:              source,
+		State:               state,
+		MinSalience:         minSalience,
 	}
 
 	result, err := srv.retriever.Query(ctx, queryReq)
@@ -517,6 +526,35 @@ func (srv *MCPServer) handleStatus(ctx context.Context, args map[string]interfac
 		}
 	}
 
+	// Retrieval quality summary from recent feedback
+	feedbacks, err := srv.store.ListMetaObservations(ctx, "retrieval_feedback", 50)
+	if err == nil && len(feedbacks) > 0 {
+		helpful, partial, irrelevant := 0, 0, 0
+		for _, fb := range feedbacks {
+			if q, ok := fb.Details["quality"].(string); ok {
+				switch q {
+				case "helpful":
+					helpful++
+				case "partial":
+					partial++
+				case "irrelevant":
+					irrelevant++
+				}
+			}
+		}
+		total := helpful + partial + irrelevant
+		if total > 0 {
+			text += fmt.Sprintf("\nRetrieval quality (last %d feedbacks):\n", total)
+			text += fmt.Sprintf("  Helpful: %d (%.0f%%), Partial: %d (%.0f%%), Irrelevant: %d (%.0f%%)\n",
+				helpful, float64(helpful)/float64(total)*100,
+				partial, float64(partial)/float64(total)*100,
+				irrelevant, float64(irrelevant)/float64(total)*100)
+			if float64(irrelevant)/float64(total) > 0.3 {
+				text += "  ⚠ High irrelevant rate — feedback is driving association adjustments\n"
+			}
+		}
+	}
+
 	if len(observations) > 0 {
 		text += fmt.Sprintf("\nRecent observations (%d):\n", len(observations))
 		for _, obs := range observations {
@@ -530,6 +568,7 @@ func (srv *MCPServer) handleStatus(ctx context.Context, args map[string]interfac
 }
 
 // handleRecallProject retrieves project-scoped memories with an activity summary.
+// Routes through the retrieval agent for spread activation and synthesis.
 func (srv *MCPServer) handleRecallProject(ctx context.Context, args map[string]interface{}) (interface{}, error) {
 	project := srv.project
 	if p, ok := args["project"].(string); ok && p != "" {
@@ -549,17 +588,13 @@ func (srv *MCPServer) handleRecallProject(ctx context.Context, args map[string]i
 		limit = int(l)
 	}
 
+	// Parse optional filters
+	source, state, minSalience := parseRecallFilters(args)
+
 	// Get project summary
 	summary, err := srv.store.GetProjectSummary(ctx, project)
 	if err != nil {
 		srv.log.Warn("failed to get project summary", "project", project, "error", err)
-	}
-
-	// Get project memories
-	memories, err := srv.store.SearchByProject(ctx, project, query, limit)
-	if err != nil {
-		srv.log.Error("project recall failed", "project", project, "error", err)
-		return nil, fmt.Errorf("project recall failed: %w", err)
 	}
 
 	// Get patterns for this project
@@ -586,13 +621,53 @@ func (srv *MCPServer) handleRecallProject(ctx context.Context, args map[string]i
 		}
 	}
 
-	text += fmt.Sprintf("\nMemories (%d):\n\n", len(memories))
-	for i, mem := range memories {
-		text += fmt.Sprintf("%d. %s\n   Summary: %s\n   Concepts: %v\n   State: %s\n\n",
-			i+1, mem.ID, mem.Summary, mem.Concepts, mem.State)
+	// Route through retrieval agent if we have a query
+	if query != "" {
+		queryReq := retrieval.QueryRequest{
+			Query:               query,
+			MaxResults:          limit,
+			IncludeReasoning:    true,
+			Synthesize:          true,
+			IncludePatterns:     false, // already fetched above
+			IncludeAbstractions: true,
+			Project:             project,
+			Source:              source,
+			State:               state,
+			MinSalience:         minSalience,
+		}
+
+		result, err := srv.retriever.Query(ctx, queryReq)
+		if err != nil {
+			srv.log.Error("project recall failed", "project", project, "error", err)
+			return nil, fmt.Errorf("project recall failed: %w", err)
+		}
+
+		text += fmt.Sprintf("\nMemories (%d):\n\n", len(result.Memories))
+		for i, mem := range result.Memories {
+			text += fmt.Sprintf("%d. %s\n   Summary: %s\n   Concepts: %v\n   State: %s\n\n",
+				i+1, mem.Memory.ID, mem.Memory.Summary, mem.Memory.Concepts, mem.Memory.State)
+		}
+
+		if result.Synthesis != "" {
+			text += fmt.Sprintf("\nSynthesis:\n%s\n", result.Synthesis)
+		}
+	} else {
+		// No query: fall back to recent project memories
+		memories, err := srv.store.SearchByProject(ctx, project, "", limit)
+		if err != nil {
+			srv.log.Error("project recall failed", "project", project, "error", err)
+			return nil, fmt.Errorf("project recall failed: %w", err)
+		}
+		filtered := filterMemories(memories, source, state, minSalience)
+
+		text += fmt.Sprintf("\nMemories (%d):\n\n", len(filtered))
+		for i, mem := range filtered {
+			text += fmt.Sprintf("%d. %s\n   Summary: %s\n   Concepts: %v\n   State: %s\n\n",
+				i+1, mem.ID, mem.Summary, mem.Concepts, mem.State)
+		}
 	}
 
-	srv.log.Info("project recall completed", "project", project, "memories", len(memories))
+	srv.log.Info("project recall completed", "project", project)
 
 	return toolResult(text), nil
 }
@@ -609,6 +684,8 @@ func (srv *MCPServer) handleRecallTimeline(ctx context.Context, args map[string]
 		limit = int(l)
 	}
 
+	source, state, minSalience := parseRecallFilters(args)
+
 	from := time.Now().Add(-time.Duration(hoursBack) * time.Hour)
 	to := time.Now()
 
@@ -618,8 +695,10 @@ func (srv *MCPServer) handleRecallTimeline(ctx context.Context, args map[string]
 		return nil, fmt.Errorf("timeline recall failed: %w", err)
 	}
 
-	text := fmt.Sprintf("Timeline (last %dh, %d memories):\n\n", hoursBack, len(memories))
-	for i, mem := range memories {
+	filtered := filterMemories(memories, source, state, minSalience)
+
+	text := fmt.Sprintf("Timeline (last %dh, %d memories):\n\n", hoursBack, len(filtered))
+	for i, mem := range filtered {
 		projectInfo := ""
 		if mem.Project != "" {
 			projectInfo = fmt.Sprintf(" [%s]", mem.Project)
@@ -629,7 +708,7 @@ func (srv *MCPServer) handleRecallTimeline(ctx context.Context, args map[string]
 			mem.Summary, mem.Concepts)
 	}
 
-	srv.log.Info("timeline recall completed", "hours_back", hoursBack, "memories", len(memories))
+	srv.log.Info("timeline recall completed", "hours_back", hoursBack, "memories", len(filtered))
 
 	return toolResult(text), nil
 }
@@ -1200,4 +1279,80 @@ func toolError(text string) map[string]interface{} {
 		},
 		"isError": true,
 	}
+}
+
+// parseRecallFilters extracts optional source/state/min_salience from MCP args.
+func parseRecallFilters(args map[string]interface{}) (source, state string, minSalience float32) {
+	if s, ok := args["source"].(string); ok {
+		source = s
+	}
+	if s, ok := args["state"].(string); ok {
+		state = s
+	}
+	if ms, ok := args["min_salience"].(float64); ok {
+		minSalience = float32(ms)
+	}
+	return
+}
+
+// filterMemories filters a slice of memories by source, state, and minimum salience.
+func filterMemories(memories []store.Memory, source, state string, minSalience float32) []store.Memory {
+	if source == "" && state == "" && minSalience <= 0 {
+		return memories
+	}
+	var filtered []store.Memory
+	for _, m := range memories {
+		if source != "" && m.Source != source {
+			continue
+		}
+		if state != "" && m.State != state {
+			continue
+		}
+		if minSalience > 0 && m.Salience < minSalience {
+			continue
+		}
+		filtered = append(filtered, m)
+	}
+	return filtered
+}
+
+// onSessionEnd is called when stdin closes (Claude Code disconnected) or context is cancelled.
+// It records session metadata so future sessions can see what happened.
+func (srv *MCPServer) onSessionEnd(ctx context.Context) {
+	srv.log.Info("MCP session ending", "session_id", srv.sessionID, "project", srv.project)
+
+	// Count memories created during this session
+	memories, err := srv.store.ListMemoriesBySession(ctx, srv.sessionID)
+	memCount := 0
+	if err == nil {
+		memCount = len(memories)
+	}
+
+	// Record session end as a meta observation
+	obs := store.MetaObservation{
+		ID:              fmt.Sprintf("session-end-%s", srv.sessionID),
+		ObservationType: "session_end",
+		Severity:        "info",
+		Details: map[string]interface{}{
+			"session_id":       srv.sessionID,
+			"project":          srv.project,
+			"memories_created": memCount,
+			"ended_at":         time.Now().Format(time.RFC3339),
+		},
+		CreatedAt: time.Now(),
+	}
+	if err := srv.store.WriteMetaObservation(ctx, obs); err != nil {
+		srv.log.Warn("failed to write session end observation", "error", err)
+	}
+
+	// Publish session end event for other agents to react to
+	if srv.bus != nil {
+		_ = srv.bus.Publish(ctx, events.SessionEnded{
+			SessionID: srv.sessionID,
+			Project:   srv.project,
+			Ts:        time.Now(),
+		})
+	}
+
+	srv.log.Info("MCP session ended", "session_id", srv.sessionID, "memories_created", memCount)
 }
