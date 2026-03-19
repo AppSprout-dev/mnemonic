@@ -363,28 +363,22 @@ func (ma *MetacognitionAgent) checkConsolidationHealth(ctx context.Context) *sto
 	}
 }
 
-// analyzeRetrievalFeedback reads recent retrieval_feedback observations and computes quality metrics.
+// analyzeRetrievalFeedback reads actual retrieval feedback records and computes quality metrics.
 func (ma *MetacognitionAgent) analyzeRetrievalFeedback(ctx context.Context) *store.MetaObservation {
-	feedbacks, err := ma.store.ListMetaObservations(ctx, "retrieval_feedback", 50)
+	since := time.Now().Add(-7 * 24 * time.Hour)
+	feedbacks, err := ma.store.ListRecentRetrievalFeedback(ctx, since, 50)
 	if err != nil {
-		ma.log.Warn("failed to list retrieval feedback", "error", err)
+		ma.log.Warn("failed to list recent retrieval feedback", "error", err)
 		return nil
 	}
 
-	if len(feedbacks) < 5 {
+	if len(feedbacks) < 3 {
 		return nil // not enough data
 	}
 
 	var helpful, partial, irrelevant int
 	for _, fb := range feedbacks {
-		// MCP feedback stores quality in "quality" field
-		quality := ""
-		if q, ok := fb.Details["quality"].(string); ok {
-			quality = q
-		} else if q, ok := fb.Details["rating"].(string); ok {
-			quality = q
-		}
-		switch quality {
+		switch fb.Feedback {
 		case "helpful":
 			helpful++
 		case "partial":

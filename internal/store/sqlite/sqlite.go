@@ -1848,6 +1848,33 @@ func (s *SQLiteStore) GetRetrievalFeedback(ctx context.Context, queryID string) 
 	return fb, nil
 }
 
+// ListRecentRetrievalFeedback returns feedback records created after the given time.
+func (s *SQLiteStore) ListRecentRetrievalFeedback(ctx context.Context, since time.Time, limit int) ([]store.RetrievalFeedback, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT query_id, query_text, retrieved_memory_ids, COALESCE(traversed_assocs, '[]'), COALESCE(access_snapshot, '[]'), COALESCE(feedback, ''), created_at
+		 FROM retrieval_feedback WHERE created_at > ? ORDER BY created_at DESC LIMIT ?`,
+		since.Format(time.RFC3339), limit)
+	if err != nil {
+		return nil, fmt.Errorf("list recent retrieval feedback: %w", err)
+	}
+	defer rows.Close()
+
+	var results []store.RetrievalFeedback
+	for rows.Next() {
+		var fb store.RetrievalFeedback
+		var retrievedJSON, traversedJSON, snapshotJSON, createdAtStr string
+		if err := rows.Scan(&fb.QueryID, &fb.QueryText, &retrievedJSON, &traversedJSON, &snapshotJSON, &fb.Feedback, &createdAtStr); err != nil {
+			return nil, fmt.Errorf("scan retrieval feedback: %w", err)
+		}
+		_ = json.Unmarshal([]byte(retrievedJSON), &fb.RetrievedIDs)
+		_ = json.Unmarshal([]byte(traversedJSON), &fb.TraversedAssocs)
+		_ = json.Unmarshal([]byte(snapshotJSON), &fb.AccessSnapshot)
+		fb.CreatedAt, _ = time.Parse(time.RFC3339, createdAtStr)
+		results = append(results, fb)
+	}
+	return results, rows.Err()
+}
+
 // ListMetaObservations retrieves observations, optionally filtered by type.
 func (s *SQLiteStore) ListMetaObservations(ctx context.Context, observationType string, limit int) ([]store.MetaObservation, error) {
 	var rows *sql.Rows
