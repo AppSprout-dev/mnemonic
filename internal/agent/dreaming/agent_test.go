@@ -1,10 +1,12 @@
 package dreaming
 
 import (
+	"context"
 	"log/slog"
 	"testing"
 	"time"
 
+	"github.com/appsprout-dev/mnemonic/internal/store"
 	"github.com/appsprout-dev/mnemonic/internal/store/storetest"
 )
 
@@ -211,7 +213,180 @@ func TestDreamingAgentName(t *testing.T) {
 	}
 }
 
+// TestCrossProjectLinkRequiresConceptOverlap verifies that crossProjectLink
+// does not create an association when two memories have high embedding similarity
+// but zero shared concepts.
+func TestCrossProjectLinkRequiresConceptOverlap(t *testing.T) {
+	ms := &crossProjectMockStore{}
+	logger := slog.New(slog.NewTextHandler(nil, nil))
+	config := DreamingConfig{
+		Interval:               3 * time.Hour,
+		BatchSize:              20,
+		SalienceThreshold:      0.3,
+		AssociationBoostFactor: 1.15,
+		NoisePruneThreshold:    0.15,
+	}
+	agent := NewDreamingAgent(ms, nil, config, logger)
+
+	// Memory from project A with concepts ["golang", "testing"]
+	memA := store.Memory{
+		ID:        "mem-a",
+		Project:   "project-alpha",
+		Concepts:  []string{"golang", "testing"},
+		Embedding: []float32{0.9, 0.1, 0.0},
+	}
+
+	// Memory from project B with completely different concepts but high embedding similarity
+	memB := store.Memory{
+		ID:        "mem-b",
+		Project:   "project-beta",
+		Concepts:  []string{"python", "deployment"},
+		Embedding: []float32{0.89, 0.11, 0.01},
+	}
+
+	// Configure mock: SearchByEmbedding returns memB with score > 0.75
+	ms.embeddingResults = []store.RetrievalResult{
+		{Memory: memB, Score: 0.85},
+	}
+
+	report := &DreamReport{}
+	err := agent.crossProjectLink(context.Background(), []store.Memory{memA}, report)
+	if err != nil {
+		t.Fatalf("crossProjectLink failed: %v", err)
+	}
+
+	// No association should have been created — zero concept overlap
+	if report.CrossProjectLinks != 0 {
+		t.Fatalf("expected 0 cross-project links (no concept overlap), got %d", report.CrossProjectLinks)
+	}
+	if ms.associationsCreated != 0 {
+		t.Fatalf("expected 0 associations created, got %d", ms.associationsCreated)
+	}
+}
+
+// TestCrossProjectLinkCreatesWithConceptOverlap verifies that crossProjectLink
+// creates an association when memories share at least 1 concept.
+func TestCrossProjectLinkCreatesWithConceptOverlap(t *testing.T) {
+	ms := &crossProjectMockStore{}
+	logger := slog.New(slog.NewTextHandler(nil, nil))
+	config := DreamingConfig{
+		Interval:               3 * time.Hour,
+		BatchSize:              20,
+		SalienceThreshold:      0.3,
+		AssociationBoostFactor: 1.15,
+		NoisePruneThreshold:    0.15,
+	}
+	agent := NewDreamingAgent(ms, nil, config, logger)
+
+	memA := store.Memory{
+		ID:        "mem-a",
+		Project:   "project-alpha",
+		Concepts:  []string{"golang", "testing", "sqlite"},
+		Embedding: []float32{0.9, 0.1, 0.0},
+	}
+
+	memB := store.Memory{
+		ID:        "mem-b",
+		Project:   "project-beta",
+		Concepts:  []string{"sqlite", "deployment"},
+		Embedding: []float32{0.89, 0.11, 0.01},
+	}
+
+	ms.embeddingResults = []store.RetrievalResult{
+		{Memory: memB, Score: 0.85},
+	}
+
+	report := &DreamReport{}
+	err := agent.crossProjectLink(context.Background(), []store.Memory{memA}, report)
+	if err != nil {
+		t.Fatalf("crossProjectLink failed: %v", err)
+	}
+
+	if report.CrossProjectLinks != 1 {
+		t.Fatalf("expected 1 cross-project link (shared concept 'sqlite'), got %d", report.CrossProjectLinks)
+	}
+	if ms.associationsCreated != 1 {
+		t.Fatalf("expected 1 association created, got %d", ms.associationsCreated)
+	}
+}
+
+// TestLinkToPatternsRequiresConceptOverlap verifies that linkToPatterns
+// does not boost a pattern when the memory shares no concepts with it.
+func TestLinkToPatternsRequiresConceptOverlap(t *testing.T) {
+	ms := &patternLinkMockStore{}
+	logger := slog.New(slog.NewTextHandler(nil, nil))
+	config := DreamingConfig{
+		Interval:               3 * time.Hour,
+		BatchSize:              20,
+		SalienceThreshold:      0.3,
+		AssociationBoostFactor: 1.15,
+		NoisePruneThreshold:    0.15,
+	}
+	agent := NewDreamingAgent(ms, nil, config, logger)
+
+	mem := store.Memory{
+		ID:        "mem-1",
+		Concepts:  []string{"golang", "testing"},
+		Embedding: []float32{0.9, 0.1, 0.0},
+	}
+
+	// Pattern with completely different concepts
+	ms.patternResults = []store.Pattern{
+		{
+			ID:          "pat-1",
+			Concepts:    []string{"python", "deployment"},
+			EvidenceIDs: []string{},
+			Strength:    0.5,
+		},
+	}
+
+	report := &DreamReport{}
+	err := agent.linkToPatterns(context.Background(), []store.Memory{mem}, report)
+	if err != nil {
+		t.Fatalf("linkToPatterns failed: %v", err)
+	}
+
+	if report.PatternLinks != 0 {
+		t.Fatalf("expected 0 pattern links (no concept overlap), got %d", report.PatternLinks)
+	}
+	if ms.patternsUpdated != 0 {
+		t.Fatalf("expected 0 patterns updated, got %d", ms.patternsUpdated)
+	}
+}
+
 // mockStore embeds the shared base mock and has no overrides.
 type mockStore struct {
 	storetest.MockStore
+}
+
+// crossProjectMockStore tracks associations created and returns configured embedding results.
+type crossProjectMockStore struct {
+	storetest.MockStore
+	embeddingResults    []store.RetrievalResult
+	associationsCreated int
+}
+
+func (m *crossProjectMockStore) SearchByEmbedding(_ context.Context, _ []float32, _ int) ([]store.RetrievalResult, error) {
+	return m.embeddingResults, nil
+}
+
+func (m *crossProjectMockStore) CreateAssociation(_ context.Context, _ store.Association) error {
+	m.associationsCreated++
+	return nil
+}
+
+// patternLinkMockStore tracks pattern updates and returns configured pattern results.
+type patternLinkMockStore struct {
+	storetest.MockStore
+	patternResults  []store.Pattern
+	patternsUpdated int
+}
+
+func (m *patternLinkMockStore) SearchPatternsByEmbedding(_ context.Context, _ []float32, _ int) ([]store.Pattern, error) {
+	return m.patternResults, nil
+}
+
+func (m *patternLinkMockStore) UpdatePattern(_ context.Context, _ store.Pattern) error {
+	m.patternsUpdated++
+	return nil
 }

@@ -393,6 +393,11 @@ func (da *DreamingAgent) crossProjectLink(ctx context.Context, replayed []store.
 				continue
 			}
 
+			// Require at least 1 shared concept to avoid spurious embedding-only links
+			if countSharedConcepts(mem.Concepts, result.Memory.Concepts) < 1 {
+				continue
+			}
+
 			newAssoc := store.Association{
 				SourceID:      mem.ID,
 				TargetID:      result.Memory.ID,
@@ -437,6 +442,11 @@ func (da *DreamingAgent) linkToPatterns(ctx context.Context, replayed []store.Me
 				}
 			}
 			if alreadyEvidence {
+				continue
+			}
+
+			// Require at least 1 shared concept to validate pattern relevance
+			if countSharedConcepts(mem.Concepts, pattern.Concepts) < 1 {
 				continue
 			}
 

@@ -8,6 +8,22 @@ import (
 	"time"
 )
 
+// waitWithTimeout converts a WaitGroup into a channel-based wait with timeout.
+// Returns true if the WaitGroup completed, false if it timed out.
+func waitWithTimeout(wg *sync.WaitGroup, timeout time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
 // TestSubscribePublish tests the basic subscribe and publish flow.
 func TestSubscribePublish(t *testing.T) {
 	bus := NewInMemoryBus(10)
@@ -15,11 +31,14 @@ func TestSubscribePublish(t *testing.T) {
 
 	received := make([]Event, 0)
 	var mu sync.Mutex
+	var wg sync.WaitGroup
+	wg.Add(1)
 
 	subID := bus.Subscribe(TypeRawMemoryCreated, func(ctx context.Context, event Event) error {
 		mu.Lock()
 		received = append(received, event)
 		mu.Unlock()
+		wg.Done()
 		return nil
 	})
 
@@ -35,12 +54,13 @@ func TestSubscribePublish(t *testing.T) {
 		Ts:             time.Now(),
 	}
 
-	// Give the async dispatch a moment to process
 	if err := bus.Publish(context.Background(), event); err != nil {
 		t.Fatalf("publish failed: %v", err)
 	}
 
-	time.Sleep(100 * time.Millisecond)
+	if !waitWithTimeout(&wg, 2*time.Second) {
+		t.Fatal("timed out waiting for event handler")
+	}
 
 	mu.Lock()
 	if len(received) != 1 {
@@ -58,11 +78,15 @@ func TestMultipleSubscribers(t *testing.T) {
 	count2 := 0
 	count3 := 0
 	var mu sync.Mutex
+	var wg sync.WaitGroup
+	// 3 subscribers x 3 publishes = 9 handler calls
+	wg.Add(9)
 
 	bus.Subscribe(TypeMemoryEncoded, func(ctx context.Context, event Event) error {
 		mu.Lock()
 		count1++
 		mu.Unlock()
+		wg.Done()
 		return nil
 	})
 
@@ -70,6 +94,7 @@ func TestMultipleSubscribers(t *testing.T) {
 		mu.Lock()
 		count2++
 		mu.Unlock()
+		wg.Done()
 		return nil
 	})
 
@@ -77,6 +102,7 @@ func TestMultipleSubscribers(t *testing.T) {
 		mu.Lock()
 		count3++
 		mu.Unlock()
+		wg.Done()
 		return nil
 	})
 
@@ -94,7 +120,9 @@ func TestMultipleSubscribers(t *testing.T) {
 		}
 	}
 
-	time.Sleep(200 * time.Millisecond)
+	if !waitWithTimeout(&wg, 2*time.Second) {
+		t.Fatal("timed out waiting for event handlers")
+	}
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -118,18 +146,34 @@ func TestUnsubscribe(t *testing.T) {
 	count1 := 0
 	count2 := 0
 	var mu sync.Mutex
+	var wg1 sync.WaitGroup
+	var wg2 sync.WaitGroup
+
+	// First publish: both handlers fire (wg1 tracks both)
+	wg1.Add(2)
+	// Second publish: only handler 2 fires (wg2 tracks it)
+	wg2.Add(1)
+
+	firstPublishDone := false
 
 	subID1 := bus.Subscribe(TypeQueryExecuted, func(ctx context.Context, event Event) error {
 		mu.Lock()
 		count1++
 		mu.Unlock()
+		wg1.Done()
 		return nil
 	})
 
 	subID2 := bus.Subscribe(TypeQueryExecuted, func(ctx context.Context, event Event) error {
 		mu.Lock()
 		count2++
+		isFirst := !firstPublishDone
 		mu.Unlock()
+		if isFirst {
+			wg1.Done()
+		} else {
+			wg2.Done()
+		}
 		return nil
 	})
 
@@ -146,7 +190,13 @@ func TestUnsubscribe(t *testing.T) {
 		t.Fatalf("publish failed: %v", err)
 	}
 
-	time.Sleep(100 * time.Millisecond)
+	if !waitWithTimeout(&wg1, 2*time.Second) {
+		t.Fatal("timed out waiting for first publish handlers")
+	}
+
+	mu.Lock()
+	firstPublishDone = true
+	mu.Unlock()
 
 	// Unsubscribe the first subscriber
 	bus.Unsubscribe(subID1)
@@ -156,7 +206,9 @@ func TestUnsubscribe(t *testing.T) {
 		t.Fatalf("publish failed: %v", err)
 	}
 
-	time.Sleep(100 * time.Millisecond)
+	if !waitWithTimeout(&wg2, 2*time.Second) {
+		t.Fatal("timed out waiting for second publish handler")
+	}
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -200,7 +252,9 @@ func TestPublishWithContextCancellation(t *testing.T) {
 		t.Fatalf("publish with cancelled context failed: %v", err)
 	}
 
-	time.Sleep(100 * time.Millisecond)
+	// Give async dispatch a brief moment — no deterministic wait possible
+	// since the handler may or may not run with a cancelled context
+	time.Sleep(50 * time.Millisecond)
 
 	mu.Lock()
 	// The event may or may not be processed depending on timing
@@ -248,11 +302,14 @@ func TestCloseStopsProcessing(t *testing.T) {
 
 	count := 0
 	var mu sync.Mutex
+	var wg sync.WaitGroup
+	wg.Add(3)
 
 	bus.Subscribe(TypeWatcherEvent, func(ctx context.Context, event Event) error {
 		mu.Lock()
 		count++
 		mu.Unlock()
+		wg.Done()
 		return nil
 	})
 
@@ -271,8 +328,9 @@ func TestCloseStopsProcessing(t *testing.T) {
 		}
 	}
 
-	// Give them time to be processed
-	time.Sleep(200 * time.Millisecond)
+	if !waitWithTimeout(&wg, 2*time.Second) {
+		t.Fatal("timed out waiting for event handlers")
+	}
 
 	mu.Lock()
 	countBeforeClose := count
@@ -302,12 +360,15 @@ func TestHandlerError(t *testing.T) {
 	count2 := 0
 	count3 := 0
 	var mu sync.Mutex
+	var wg sync.WaitGroup
+	wg.Add(3)
 
 	// First handler returns an error
 	bus.Subscribe(TypeDreamCycleCompleted, func(ctx context.Context, event Event) error {
 		mu.Lock()
 		count1++
 		mu.Unlock()
+		wg.Done()
 		return errors.New("test error")
 	})
 
@@ -316,6 +377,7 @@ func TestHandlerError(t *testing.T) {
 		mu.Lock()
 		count2++
 		mu.Unlock()
+		wg.Done()
 		return nil
 	})
 
@@ -324,6 +386,7 @@ func TestHandlerError(t *testing.T) {
 		mu.Lock()
 		count3++
 		mu.Unlock()
+		wg.Done()
 		return nil
 	})
 
@@ -340,7 +403,9 @@ func TestHandlerError(t *testing.T) {
 		t.Fatalf("publish failed: %v", err)
 	}
 
-	time.Sleep(200 * time.Millisecond)
+	if !waitWithTimeout(&wg, 2*time.Second) {
+		t.Fatal("timed out waiting for event handlers")
+	}
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -365,11 +430,15 @@ func TestEventTypeFiltering(t *testing.T) {
 	countType1 := 0
 	countType2 := 0
 	var mu sync.Mutex
+	var wg sync.WaitGroup
+	// 2 consolidation events + 3 meta events = 5 handler calls
+	wg.Add(5)
 
 	bus.Subscribe(TypeConsolidationCompleted, func(ctx context.Context, event Event) error {
 		mu.Lock()
 		countType1++
 		mu.Unlock()
+		wg.Done()
 		return nil
 	})
 
@@ -377,6 +446,7 @@ func TestEventTypeFiltering(t *testing.T) {
 		mu.Lock()
 		countType2++
 		mu.Unlock()
+		wg.Done()
 		return nil
 	})
 
@@ -408,7 +478,9 @@ func TestEventTypeFiltering(t *testing.T) {
 		}
 	}
 
-	time.Sleep(200 * time.Millisecond)
+	if !waitWithTimeout(&wg, 2*time.Second) {
+		t.Fatal("timed out waiting for event handlers")
+	}
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -428,11 +500,14 @@ func TestUnsubscribeInvalidID(t *testing.T) {
 
 	count := 0
 	var mu sync.Mutex
+	var wg sync.WaitGroup
+	wg.Add(1)
 
 	bus.Subscribe(TypeMemoryAccessed, func(ctx context.Context, event Event) error {
 		mu.Lock()
 		count++
 		mu.Unlock()
+		wg.Done()
 		return nil
 	})
 
@@ -449,7 +524,9 @@ func TestUnsubscribeInvalidID(t *testing.T) {
 		t.Fatalf("publish failed: %v", err)
 	}
 
-	time.Sleep(100 * time.Millisecond)
+	if !waitWithTimeout(&wg, 2*time.Second) {
+		t.Fatal("timed out waiting for event handler")
+	}
 
 	mu.Lock()
 	defer mu.Unlock()
