@@ -98,6 +98,53 @@ func recallToolDef() ToolDefinition {
 	}
 }
 
+func batchRecallToolDef() ToolDefinition {
+	return ToolDefinition{
+		Name:        "batch_recall",
+		Description: "Run multiple recall queries in a single request. Returns structured JSON results for each query. Ideal for session start when you need project context, prior decisions, and task-specific memories in one round-trip.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"queries": map[string]interface{}{
+					"type":        "array",
+					"description": "Array of recall queries to execute",
+					"items": map[string]interface{}{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"query": map[string]interface{}{
+								"type":        "string",
+								"description": "The search query",
+							},
+							"limit": map[string]interface{}{
+								"type":        "integer",
+								"description": "Maximum results for this query (default: 5)",
+							},
+							"project": map[string]interface{}{
+								"type":        "string",
+								"description": "Filter by project name",
+							},
+							"source": map[string]interface{}{
+								"type":        "string",
+								"description": "Filter by memory source: mcp, filesystem, terminal, clipboard",
+							},
+							"type": map[string]interface{}{
+								"type":        "string",
+								"description": "Filter by memory type: decision, error, insight, learning, general",
+							},
+							"min_salience": map[string]interface{}{
+								"type":        "number",
+								"description": "Minimum salience threshold (0.0-1.0)",
+							},
+						},
+						"required": []string{"query"},
+					},
+				},
+			},
+			"required": []string{"queries"},
+		},
+	}
+}
+
 func forgetToolDef() ToolDefinition {
 	return ToolDefinition{
 		Name:        "forget",
@@ -482,6 +529,7 @@ func allToolDefs() []ToolDefinition {
 	return []ToolDefinition{
 		rememberToolDef(),
 		recallToolDef(),
+		batchRecallToolDef(),
 		forgetToolDef(),
 		statusToolDef(),
 		recallProjectToolDef(),
