@@ -72,6 +72,9 @@ func (MockStore) SearchByConcepts(context.Context, []string, int) ([]store.Memor
 func (MockStore) SearchByConceptsInProject(context.Context, []string, string, int) ([]store.Memory, error) {
 	return nil, nil
 }
+func (MockStore) GetAnalytics(context.Context) (store.AnalyticsData, error) {
+	return store.AnalyticsData{}, nil
+}
 
 // --- Association graph operations ---
 

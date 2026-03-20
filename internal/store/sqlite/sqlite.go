@@ -1806,6 +1806,140 @@ func (s *SQLiteStore) GetStatistics(ctx context.Context) (store.StoreStatistics,
 	return stats, nil
 }
 
+// GetAnalytics returns research-grade metrics about the memory system.
+func (s *SQLiteStore) GetAnalytics(ctx context.Context) (store.AnalyticsData, error) {
+	var data store.AnalyticsData
+
+	// Total raw memories
+	_ = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM raw_memories`).Scan(&data.TotalRaw)
+
+	// Signal-to-noise: per-source survival metrics
+	data.SignalNoise = make(map[string]store.SignalNoiseEntry)
+	snRows, err := s.db.QueryContext(ctx, `
+		SELECT source, COUNT(*) as total,
+		       SUM(CASE WHEN state='active' THEN 1 ELSE 0 END) as active,
+		       ROUND(AVG(salience), 3) as avg_sal
+		FROM memories WHERE state != 'merged'
+		GROUP BY source ORDER BY total DESC`)
+	if err == nil {
+		for snRows.Next() {
+			var source string
+			var entry store.SignalNoiseEntry
+			if err := snRows.Scan(&source, &entry.Total, &entry.Active, &entry.AvgSalience); err == nil {
+				if entry.Total > 0 {
+					entry.SurvivalRate = float64(entry.Active) / float64(entry.Total)
+				}
+				data.SignalNoise[source] = entry
+			}
+		}
+		_ = snRows.Close()
+	}
+
+	// Recall effectiveness: access count buckets vs avg salience
+	reRows, err := s.db.QueryContext(ctx, `
+		SELECT
+			CASE WHEN access_count = 0 THEN 'never recalled'
+			     WHEN access_count <= 2 THEN '1-2 times'
+			     WHEN access_count <= 5 THEN '3-5 times'
+			     ELSE '6+ times' END as bucket,
+			COUNT(*), ROUND(AVG(salience), 3)
+		FROM memories WHERE state != 'merged'
+		GROUP BY bucket ORDER BY MIN(access_count)`)
+	if err == nil {
+		for reRows.Next() {
+			var b store.RecallBucket
+			if err := reRows.Scan(&b.Bucket, &b.Count, &b.AvgSalience); err == nil {
+				data.RecallEffectiveness = append(data.RecallEffectiveness, b)
+			}
+		}
+		_ = reRows.Close()
+	}
+
+	// Feedback trend by day
+	fbRows, err := s.db.QueryContext(ctx, `
+		SELECT date(created_at) as day,
+		       SUM(CASE WHEN feedback='helpful' THEN 1 ELSE 0 END),
+		       SUM(CASE WHEN feedback='partial' THEN 1 ELSE 0 END),
+		       SUM(CASE WHEN feedback='irrelevant' THEN 1 ELSE 0 END)
+		FROM retrieval_feedback WHERE feedback != ''
+		GROUP BY day ORDER BY day DESC LIMIT 30`)
+	if err == nil {
+		for fbRows.Next() {
+			var f store.FeedbackTrendEntry
+			if err := fbRows.Scan(&f.Date, &f.Helpful, &f.Partial, &f.Irrelevant); err == nil {
+				data.FeedbackTrend = append(data.FeedbackTrend, f)
+			}
+		}
+		_ = fbRows.Close()
+	}
+
+	// Consolidation history by day
+	conRows, err := s.db.QueryContext(ctx, `
+		SELECT date(created_at) as day,
+		       SUM(memories_processed), SUM(memories_decayed), SUM(merged_clusters)
+		FROM consolidation_history
+		GROUP BY day ORDER BY day DESC LIMIT 30`)
+	if err == nil {
+		for conRows.Next() {
+			var c store.ConsolidationEntry
+			if err := conRows.Scan(&c.Date, &c.Processed, &c.Decayed, &c.Merged); err == nil {
+				data.ConsolidationHistory = append(data.ConsolidationHistory, c)
+			}
+		}
+		_ = conRows.Close()
+	}
+
+	// Memory survival by creation day
+	survRows, err := s.db.QueryContext(ctx, `
+		SELECT date(created_at) as day, COUNT(*) as created,
+		       SUM(CASE WHEN state='active' THEN 1 ELSE 0 END),
+		       SUM(CASE WHEN state='fading' THEN 1 ELSE 0 END),
+		       SUM(CASE WHEN state='archived' THEN 1 ELSE 0 END),
+		       SUM(CASE WHEN state='merged' THEN 1 ELSE 0 END)
+		FROM memories GROUP BY day ORDER BY day DESC LIMIT 30`)
+	if err == nil {
+		for survRows.Next() {
+			var sv store.SurvivalEntry
+			if err := survRows.Scan(&sv.Date, &sv.Created, &sv.Active, &sv.Fading, &sv.Archived, &sv.Merged); err == nil {
+				data.MemorySurvival = append(data.MemorySurvival, sv)
+			}
+		}
+		_ = survRows.Close()
+	}
+
+	// Salience distribution by source
+	data.SalienceDistribution = map[string]map[string]int{
+		"high":   {},
+		"medium": {},
+		"low":    {},
+		"noise":  {},
+	}
+	salRows, err := s.db.QueryContext(ctx, `
+		SELECT
+			CASE WHEN salience >= 0.8 THEN 'high'
+			     WHEN salience >= 0.5 THEN 'medium'
+			     WHEN salience >= 0.3 THEN 'low'
+			     ELSE 'noise' END as tier,
+			source, COUNT(*)
+		FROM memories WHERE state != 'merged'
+		GROUP BY tier, source`)
+	if err == nil {
+		for salRows.Next() {
+			var tier, source string
+			var count int
+			if err := salRows.Scan(&tier, &source, &count); err == nil {
+				if data.SalienceDistribution[tier] == nil {
+					data.SalienceDistribution[tier] = make(map[string]int)
+				}
+				data.SalienceDistribution[tier][source] = count
+			}
+		}
+		_ = salRows.Close()
+	}
+
+	return data, nil
+}
+
 // ============================================================================
 // Export/Backup operations
 // ============================================================================
