@@ -69,6 +69,9 @@ func (MockStore) SearchByEmbedding(context.Context, []float32, int) ([]store.Ret
 func (MockStore) SearchByConcepts(context.Context, []string, int) ([]store.Memory, error) {
 	return nil, nil
 }
+func (MockStore) SearchByConceptsInProject(context.Context, []string, string, int) ([]store.Memory, error) {
+	return nil, nil
+}
 
 // --- Association graph operations ---
 

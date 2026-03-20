@@ -248,7 +248,7 @@ func TestParseQueryConcepts(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := parseQueryConcepts(tc.query)
+			got := ParseQueryConcepts(tc.query)
 			if len(got) != len(tc.expected) {
 				t.Fatalf("expected %d concepts %v, got %d concepts %v", len(tc.expected), tc.expected, len(got), got)
 			}

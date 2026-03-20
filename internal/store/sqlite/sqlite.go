@@ -1234,6 +1234,44 @@ func (s *SQLiteStore) SearchByConcepts(ctx context.Context, concepts []string, l
 	return scanMemoryRows(rows)
 }
 
+// SearchByConceptsInProject searches for memories matching concepts within a specific project.
+func (s *SQLiteStore) SearchByConceptsInProject(ctx context.Context, concepts []string, project string, limit int) ([]store.Memory, error) {
+	if len(concepts) == 0 {
+		return []store.Memory{}, nil
+	}
+
+	query := `
+	SELECT ` + memoryColumns + `
+	FROM memories
+	WHERE (`
+
+	args := make([]interface{}, 0)
+	for i, concept := range concepts {
+		if i > 0 {
+			query += " OR "
+		}
+		query += "concepts LIKE ?"
+		args = append(args, "%"+concept+"%")
+	}
+
+	query += ")"
+
+	if project != "" {
+		query += " AND project = ?"
+		args = append(args, project)
+	}
+
+	query += ` ORDER BY salience DESC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search by concepts in project: %w", err)
+	}
+
+	return scanMemoryRows(rows)
+}
+
 // Association Operations
 
 // CreateAssociation creates a new association between two memories.

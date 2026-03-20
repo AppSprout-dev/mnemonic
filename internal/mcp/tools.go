@@ -145,6 +145,32 @@ func batchRecallToolDef() ToolDefinition {
 	}
 }
 
+func getContextToolDef() ToolDefinition {
+	return ToolDefinition{
+		Name:        "get_context",
+		Description: "Get proactive memory suggestions based on recent daemon activity (file edits, terminal commands, clipboard). Call at natural breakpoints to discover relevant context you haven't recalled yet. Returns memories related to what you're currently working on without needing to formulate a query.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"since_minutes": map[string]interface{}{
+					"type":        "integer",
+					"description": "Look-back window in minutes (default: 10)",
+				},
+				"limit": map[string]interface{}{
+					"type":        "integer",
+					"description": "Maximum suggestions to return (default: 5)",
+				},
+				"format": map[string]interface{}{
+					"type":        "string",
+					"description": "Output format: text (default) or json (structured data)",
+					"enum":        []string{"text", "json"},
+				},
+			},
+			"required": []string{},
+		},
+	}
+}
+
 func forgetToolDef() ToolDefinition {
 	return ToolDefinition{
 		Name:        "forget",
@@ -530,6 +556,7 @@ func allToolDefs() []ToolDefinition {
 		rememberToolDef(),
 		recallToolDef(),
 		batchRecallToolDef(),
+		getContextToolDef(),
 		forgetToolDef(),
 		statusToolDef(),
 		recallProjectToolDef(),

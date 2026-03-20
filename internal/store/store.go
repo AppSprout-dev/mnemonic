@@ -387,6 +387,7 @@ type Store interface {
 	SearchByFullText(ctx context.Context, query string, limit int) ([]Memory, error)
 	SearchByEmbedding(ctx context.Context, embedding []float32, limit int) ([]RetrievalResult, error)
 	SearchByConcepts(ctx context.Context, concepts []string, limit int) ([]Memory, error)
+	SearchByConceptsInProject(ctx context.Context, concepts []string, project string, limit int) ([]Memory, error)
 
 	// --- Association graph operations ---
 	CreateAssociation(ctx context.Context, assoc Association) error
