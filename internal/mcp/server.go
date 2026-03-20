@@ -420,6 +420,11 @@ func (srv *MCPServer) handleRecall(ctx context.Context, args map[string]interfac
 		}
 	}
 
+	explain := false
+	if e, ok := args["explain"].(bool); ok {
+		explain = e
+	}
+
 	// If concepts are specified, use concept-based search (no spread activation available)
 	if len(concepts) > 0 {
 		memories, err := srv.store.SearchByConcepts(ctx, concepts, limit)
@@ -489,9 +494,13 @@ func (srv *MCPServer) handleRecall(ctx context.Context, args map[string]interfac
 		if mem.Memory.Content != "" && mem.Memory.Content != mem.Memory.Summary {
 			contentSnippet = fmt.Sprintf("\n   Content: %s", mem.Memory.Content)
 		}
-		text += fmt.Sprintf("%d. [%.3f] %s\n   Summary: %s%s\n   Concepts: %v\n   Created: %s%s\n\n",
+		explanationInfo := ""
+		if explain && mem.Explanation != "" {
+			explanationInfo = fmt.Sprintf("\n   Explanation: %s", mem.Explanation)
+		}
+		text += fmt.Sprintf("%d. [%.3f] %s\n   Summary: %s%s\n   Concepts: %v\n   Created: %s%s%s\n\n",
 			i+1, mem.Score, mem.Memory.ID, mem.Memory.Summary, contentSnippet,
-			mem.Memory.Concepts, mem.Memory.CreatedAt.Format("2006-01-02 15:04"), projectInfo)
+			mem.Memory.Concepts, mem.Memory.CreatedAt.Format("2006-01-02 15:04"), projectInfo, explanationInfo)
 	}
 
 	if result.Synthesis != "" {

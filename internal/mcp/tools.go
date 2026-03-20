@@ -70,6 +70,10 @@ func recallToolDef() ToolDefinition {
 					"description": "Filter by memory state: active, fading, archived",
 					"enum":        []string{"active", "fading", "archived"},
 				},
+				"explain": map[string]interface{}{
+					"type":        "boolean",
+					"description": "If true, include score breakdown for each result (activation, recency, source weight, feedback adjustment)",
+				},
 			},
 			"required": []string{"query"},
 		},
