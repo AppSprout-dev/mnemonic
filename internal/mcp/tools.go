@@ -74,6 +74,10 @@ func recallToolDef() ToolDefinition {
 					"type":        "boolean",
 					"description": "If true, include score breakdown for each result (activation, recency, source weight, feedback adjustment)",
 				},
+				"include_associations": map[string]interface{}{
+					"type":        "boolean",
+					"description": "If true, include top associated memories for each result (default: false)",
+				},
 			},
 			"required": []string{"query"},
 		},

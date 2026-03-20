@@ -427,6 +427,11 @@ func (srv *MCPServer) handleRecall(ctx context.Context, args map[string]interfac
 		explain = e
 	}
 
+	includeAssociations := false
+	if ia, ok := args["include_associations"].(bool); ok {
+		includeAssociations = ia
+	}
+
 	// If concepts are specified, use concept-based search (no spread activation available)
 	if len(concepts) > 0 {
 		memories, err := srv.store.SearchByConcepts(ctx, concepts, limit)
@@ -500,9 +505,31 @@ func (srv *MCPServer) handleRecall(ctx context.Context, args map[string]interfac
 		if explain && mem.Explanation != "" {
 			explanationInfo = fmt.Sprintf("\n   Explanation: %s", mem.Explanation)
 		}
-		text += fmt.Sprintf("%d. [%.3f] %s\n   Summary: %s%s\n   Concepts: %v\n   Created: %s%s%s\n\n",
+		associationInfo := ""
+		if includeAssociations {
+			assocs, aErr := srv.store.GetAssociations(ctx, mem.Memory.ID)
+			if aErr == nil && len(assocs) > 0 {
+				limit := 3
+				if len(assocs) < limit {
+					limit = len(assocs)
+				}
+				associationInfo = "\n   Related:"
+				for j := 0; j < limit; j++ {
+					a := assocs[j]
+					targetSummary := a.TargetID[:8]
+					if tm, tErr := srv.store.GetMemory(ctx, a.TargetID); tErr == nil {
+						targetSummary = tm.Summary
+						if len(targetSummary) > 80 {
+							targetSummary = targetSummary[:80] + "..."
+						}
+					}
+					associationInfo += fmt.Sprintf("\n     - [%.2f, %s] %s", a.Strength, a.RelationType, targetSummary)
+				}
+			}
+		}
+		text += fmt.Sprintf("%d. [%.3f] %s\n   Summary: %s%s\n   Concepts: %v\n   Created: %s%s%s%s\n\n",
 			i+1, mem.Score, mem.Memory.ID, mem.Memory.Summary, contentSnippet,
-			mem.Memory.Concepts, mem.Memory.CreatedAt.Format("2006-01-02 15:04"), projectInfo, explanationInfo)
+			mem.Memory.Concepts, mem.Memory.CreatedAt.Format("2006-01-02 15:04"), projectInfo, explanationInfo, associationInfo)
 	}
 
 	if result.Synthesis != "" {
