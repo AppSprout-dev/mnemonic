@@ -4,6 +4,32 @@ All notable changes to Mnemonic will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.22.0](https://github.com/AppSprout-dev/mnemonic/compare/v0.21.0...v0.22.0) (2026-03-20)
+
+
+### Features
+
+* add explain parameter to recall for score breakdown ([314c0ce](https://github.com/AppSprout-dev/mnemonic/commit/314c0cefabac52947a152c1c7e6c715060e5e555)), closes [#229](https://github.com/AppSprout-dev/mnemonic/issues/229)
+* add feedback-informed ranking and source-weighted scoring to retrieval ([8f19f56](https://github.com/AppSprout-dev/mnemonic/commit/8f19f563f45dccd48888e0f78a31395425eee95e))
+* add LR bisection search with short probes ([8468f87](https://github.com/AppSprout-dev/mnemonic/commit/8468f872efe697bc9dc6bff1ea01f54519652bf8))
+* add memory amendment tool for in-place content correction ([f1f7706](https://github.com/AppSprout-dev/mnemonic/commit/f1f77062ea3bcbef40fb519ef8fe6bf0ba4e5359)), closes [#222](https://github.com/AppSprout-dev/mnemonic/issues/222)
+* add negative feedback auto-suppression ([f22239e](https://github.com/AppSprout-dev/mnemonic/commit/f22239e4d38c2c6d071f86e5068af0c58b1a41b4)), closes [#228](https://github.com/AppSprout-dev/mnemonic/issues/228)
+* add session-scoped recall with list_sessions and recall_session ([276e346](https://github.com/AppSprout-dev/mnemonic/commit/276e346391b467a2674e4099b8f11369d14f4d35)), closes [#225](https://github.com/AppSprout-dev/mnemonic/issues/225)
+* add Tools dashboard tab for MCP usage analytics ([70e7453](https://github.com/AppSprout-dev/mnemonic/commit/70e7453f3b953a333a0bbe5a4166c631abad433b))
+* add Tools dashboard tab for MCP usage analytics ([a92386f](https://github.com/AppSprout-dev/mnemonic/commit/a92386fe604d8e52e38a58ba822fd24350d1a961))
+* Claude-First Memory — 7 issues for collaborative knowledge system ([34858b4](https://github.com/AppSprout-dev/mnemonic/commit/34858b423867b83dcaa3780b2c45cc851ab24793))
+* enrich remember response and add check_memory MCP tool ([b184e2c](https://github.com/AppSprout-dev/mnemonic/commit/b184e2c4f099923f5abf90e145ad953c04239026)), closes [#227](https://github.com/AppSprout-dev/mnemonic/issues/227)
+* feedback-informed ranking and source-weighted scoring ([6d2aab0](https://github.com/AppSprout-dev/mnemonic/commit/6d2aab03aa23be8be373e34e91cc7bf2c30e0181))
+* LR bisection search for optimal pretraining LR ([4dc6735](https://github.com/AppSprout-dev/mnemonic/commit/4dc673580031b62f5545fe029d7a150c65cf1ffe))
+* soften abstraction demotion and add grace period ([17e03c7](https://github.com/AppSprout-dev/mnemonic/commit/17e03c7c4da1389102b3e169d7a52d14e9095811)), closes [#226](https://github.com/AppSprout-dev/mnemonic/issues/226)
+* surface associations in recall results ([8fc6ca0](https://github.com/AppSprout-dev/mnemonic/commit/8fc6ca0418d71f039d6eba4186d0afb8156ec527)), closes [#224](https://github.com/AppSprout-dev/mnemonic/issues/224)
+
+
+### Bug Fixes
+
+* prevent duplicate encoding across multiple mnemonic processes ([b2bcff5](https://github.com/AppSprout-dev/mnemonic/commit/b2bcff58a72de9f7d65f90160a281eb7a61b0fb1))
+* prevent duplicate encoding across multiple mnemonic processes ([0339564](https://github.com/AppSprout-dev/mnemonic/commit/03395646db4e4dd3bd8ed16c75642e9876fd45e3))
+
 ## [0.21.0](https://github.com/AppSprout-dev/mnemonic/compare/v0.20.0...v0.21.0) (2026-03-19)
 
 
