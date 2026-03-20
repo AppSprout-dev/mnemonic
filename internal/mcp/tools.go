@@ -82,6 +82,11 @@ func recallToolDef() ToolDefinition {
 					"type":        "boolean",
 					"description": "If true, include LLM-generated synthesis narrative (default: false). Adds 3-8s latency.",
 				},
+				"format": map[string]interface{}{
+					"type":        "string",
+					"description": "Output format: text (default) or json (structured data)",
+					"enum":        []string{"text", "json"},
+				},
 			},
 			"required": []string{"query"},
 		},

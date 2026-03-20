@@ -445,6 +445,11 @@ func (srv *MCPServer) handleRecall(ctx context.Context, args map[string]interfac
 		synthesize = s
 	}
 
+	outputFormat := "text"
+	if f, ok := args["format"].(string); ok && f == "json" {
+		outputFormat = f
+	}
+
 	// If concepts are specified, use concept-based search (no spread activation available)
 	if len(concepts) > 0 {
 		memories, err := srv.store.SearchByConcepts(ctx, concepts, limit)
@@ -569,7 +574,65 @@ func (srv *MCPServer) handleRecall(ctx context.Context, args map[string]interfac
 
 	srv.log.Info("recall completed", "query", query, "query_id", result.QueryID, "results", len(result.Memories), "patterns", len(result.Patterns), "abstractions", len(result.Abstractions), "took_ms", result.TookMs)
 
+	if outputFormat == "json" {
+		jsonResp := formatRecallJSON(result)
+		jsonBytes, err := json.Marshal(jsonResp)
+		if err != nil {
+			return toolResult(text), nil // fallback to text
+		}
+		return toolResult(string(jsonBytes)), nil
+	}
+
 	return toolResult(text), nil
+}
+
+// formatRecallJSON builds a structured map from retrieval results.
+func formatRecallJSON(result retrieval.QueryResponse) map[string]interface{} {
+	memories := make([]map[string]interface{}, len(result.Memories))
+	for i, m := range result.Memories {
+		memories[i] = map[string]interface{}{
+			"id":          m.Memory.ID,
+			"score":       m.Score,
+			"summary":     m.Memory.Summary,
+			"content":     m.Memory.Content,
+			"concepts":    m.Memory.Concepts,
+			"source":      m.Memory.Source,
+			"type":        m.Memory.Type,
+			"project":     m.Memory.Project,
+			"salience":    m.Memory.Salience,
+			"created_at":  m.Memory.CreatedAt,
+			"explanation": m.Explanation,
+		}
+	}
+
+	patterns := make([]map[string]interface{}, len(result.Patterns))
+	for i, p := range result.Patterns {
+		patterns[i] = map[string]interface{}{
+			"title":       p.Title,
+			"type":        p.PatternType,
+			"strength":    p.Strength,
+			"description": p.Description,
+		}
+	}
+
+	abstractions := make([]map[string]interface{}, len(result.Abstractions))
+	for i, a := range result.Abstractions {
+		abstractions[i] = map[string]interface{}{
+			"title":       a.Title,
+			"level":       a.Level,
+			"confidence":  a.Confidence,
+			"description": a.Description,
+		}
+	}
+
+	return map[string]interface{}{
+		"query_id":     result.QueryID,
+		"memories":     memories,
+		"patterns":     patterns,
+		"abstractions": abstractions,
+		"synthesis":    result.Synthesis,
+		"took_ms":      result.TookMs,
+	}
 }
 
 // handleForget archives a memory by ID.
