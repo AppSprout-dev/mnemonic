@@ -330,6 +330,26 @@ func ingestProjectToolDef() ToolDefinition {
 	}
 }
 
+func checkMemoryToolDef() ToolDefinition {
+	return ToolDefinition{
+		Name:        "check_memory",
+		Description: "Inspect a memory's encoding status, extracted concepts, associations, and current salience. Use raw_id (from remember) or memory_id to look up a specific memory.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"raw_id": map[string]interface{}{
+					"type":        "string",
+					"description": "The raw memory ID returned by remember",
+				},
+				"memory_id": map[string]interface{}{
+					"type":        "string",
+					"description": "The encoded memory ID",
+				},
+			},
+		},
+	}
+}
+
 // allToolDefs returns the complete list of MCP tool definitions.
 func allToolDefs() []ToolDefinition {
 	return []ToolDefinition{
@@ -346,5 +366,6 @@ func allToolDefs() []ToolDefinition {
 		auditEncodingsToolDef(),
 		coachLocalLLMToolDef(),
 		ingestProjectToolDef(),
+		checkMemoryToolDef(),
 	}
 }

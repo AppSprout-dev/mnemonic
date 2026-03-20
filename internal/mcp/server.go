@@ -245,6 +245,8 @@ func (srv *MCPServer) handleToolCall(ctx context.Context, req *jsonRPCRequest) *
 		result, toolErr = srv.handleCoachLocalLLM(ctx, params.Arguments)
 	case "ingest_project":
 		result, toolErr = srv.handleIngestProject(ctx, params.Arguments)
+	case "check_memory":
+		result, toolErr = srv.handleCheckMemory(ctx, params.Arguments)
 	default:
 		return errorResponse(req.ID, -32602, fmt.Sprintf("Unknown tool: %s", params.Name))
 	}
@@ -370,7 +372,8 @@ func (srv *MCPServer) handleRemember(ctx context.Context, args map[string]interf
 
 	srv.log.Info("memory stored", "id", raw.ID, "source", source, "type", memType, "project", project)
 
-	return toolResult(fmt.Sprintf("Stored memory %s (type: %s, project: %s)", raw.ID, memType, project)), nil
+	return toolResult(fmt.Sprintf("Stored memory %s (type: %s, project: %s)\n  Raw ID: %s\n  Initial salience: %.2f\n  Encoding: queued (async)\n\nTip: Use check_memory with raw_id \"%s\" to verify encoding status.",
+		raw.ID, memType, project, raw.ID, raw.InitialSalience, raw.ID)), nil
 }
 
 // handleRecall retrieves memories using semantic search and spread activation.
@@ -1401,4 +1404,88 @@ func (srv *MCPServer) onSessionEnd(ctx context.Context) {
 	}
 
 	srv.log.Info("MCP session ended", "session_id", srv.sessionID, "memories_created", memCount)
+}
+
+// handleCheckMemory inspects a memory's encoding status, concepts, and associations.
+func (srv *MCPServer) handleCheckMemory(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+	rawID, _ := args["raw_id"].(string)
+	memoryID, _ := args["memory_id"].(string)
+
+	if rawID == "" && memoryID == "" {
+		return nil, fmt.Errorf("at least one of raw_id or memory_id is required")
+	}
+
+	// Try to find the encoded memory
+	var mem store.Memory
+	var found bool
+
+	if memoryID != "" {
+		m, err := srv.store.GetMemory(ctx, memoryID)
+		if err == nil {
+			mem = m
+			found = true
+		}
+	}
+
+	if !found && rawID != "" {
+		m, err := srv.store.GetMemoryByRawID(ctx, rawID)
+		if err == nil {
+			mem = m
+			found = true
+		}
+	}
+
+	if !found {
+		// Check if the raw memory exists but hasn't been encoded yet
+		if rawID != "" {
+			raw, err := srv.store.GetRaw(ctx, rawID)
+			if err != nil {
+				return toolResult(fmt.Sprintf("No memory found for raw_id %q or memory_id %q.", rawID, memoryID)), nil
+			}
+			status := "pending"
+			if raw.Processed {
+				status = "processed (encoding may have been deduplicated)"
+			}
+			return toolResult(fmt.Sprintf("Raw memory %s found but not yet encoded.\n  Status: %s\n  Source: %s\n  Type: %s\n  Salience: %.2f\n  Created: %s",
+				raw.ID, status, raw.Source, raw.Type, raw.InitialSalience, raw.CreatedAt.Format(time.RFC3339))), nil
+		}
+		return toolResult(fmt.Sprintf("No memory found for memory_id %q.", memoryID)), nil
+	}
+
+	// Get associations
+	assocs, err := srv.store.GetAssociations(ctx, mem.ID)
+	if err != nil {
+		assocs = nil
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Memory %s (encoded)\n", mem.ID)
+	fmt.Fprintf(&sb, "  Raw ID: %s\n", mem.RawID)
+	fmt.Fprintf(&sb, "  Summary: %s\n", mem.Summary)
+	fmt.Fprintf(&sb, "  Concepts: %v\n", mem.Concepts)
+	fmt.Fprintf(&sb, "  Salience: %.2f\n", mem.Salience)
+	fmt.Fprintf(&sb, "  State: %s\n", mem.State)
+	fmt.Fprintf(&sb, "  Access count: %d\n", mem.AccessCount)
+	fmt.Fprintf(&sb, "  Source: %s\n", mem.Source)
+	fmt.Fprintf(&sb, "  Type: %s\n", mem.Type)
+	fmt.Fprintf(&sb, "  Created: %s\n", mem.CreatedAt.Format(time.RFC3339))
+	fmt.Fprintf(&sb, "  Associations: %d\n", len(assocs))
+
+	for i, a := range assocs {
+		if i >= 5 {
+			fmt.Fprintf(&sb, "  ... and %d more\n", len(assocs)-5)
+			break
+		}
+		targetMem, err := srv.store.GetMemory(ctx, a.TargetID)
+		summary := a.TargetID
+		if err == nil {
+			summary = targetMem.Summary
+			if len(summary) > 80 {
+				summary = summary[:80] + "..."
+			}
+		}
+		fmt.Fprintf(&sb, "    [%.2f, %s] %s\n", a.Strength, a.RelationType, summary)
+	}
+
+	return toolResult(sb.String()), nil
 }
