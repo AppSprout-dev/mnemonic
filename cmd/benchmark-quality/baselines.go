@@ -153,7 +153,7 @@ type mnemonicRetriever struct {
 
 func newMnemonicRetriever(s store.Store, p llm.Provider, cfg retrieval.RetrievalConfig, log *slog.Logger, name string) Retriever {
 	return &mnemonicRetriever{
-		agent: retrieval.NewRetrievalAgent(s, p, cfg, log),
+		agent: retrieval.NewRetrievalAgent(s, p, cfg, log, nil),
 		label: name,
 	}
 }

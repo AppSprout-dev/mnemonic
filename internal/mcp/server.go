@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/appsprout-dev/mnemonic/internal/agent/retrieval"
+	"github.com/appsprout-dev/mnemonic/internal/concepts"
 	"github.com/appsprout-dev/mnemonic/internal/events"
 	"github.com/appsprout-dev/mnemonic/internal/ingest"
 	"github.com/appsprout-dev/mnemonic/internal/store"
@@ -911,9 +911,9 @@ func (srv *MCPServer) handleGetContext(ctx context.Context, args map[string]inte
 	for _, raw := range relevant {
 		// Prefer encoded memory concepts if available.
 		mem, err := srv.store.GetMemoryByRawID(ctx, raw.ID)
-		var concepts []string
+		var extracted []string
 		if err == nil && len(mem.Concepts) > 0 {
-			concepts = mem.Concepts
+			extracted = mem.Concepts
 			encodedCount++
 			// Track encoding latency: time from raw creation to encoded memory creation.
 			if !mem.CreatedAt.IsZero() && !raw.CreatedAt.IsZero() {
@@ -927,23 +927,23 @@ func (srv *MCPServer) handleGetContext(ctx context.Context, args map[string]inte
 			// instead of content — raw content is source code whose tokens
 			// (Go keywords, type names, etc.) pollute theme extraction.
 			if pathVal, ok := raw.Metadata["path"].(string); ok && pathVal != "" {
-				concepts = conceptsFromPath(pathVal)
+				extracted = concepts.FromPath(pathVal)
 			}
 			// Enrich with the event action (created, modified, deleted).
-			if action := conceptFromEventType(raw.Type); action != "" {
-				concepts = append(concepts, action)
+			if action := concepts.FromEventType(raw.Type); action != "" {
+				extracted = append(extracted, action)
 			}
 			fallbackCount++
 		} else if raw.Source == "terminal" {
 			// For terminal events, extract command name and subcommand
 			// rather than treating the full command as natural language.
-			concepts = conceptsFromCommand(raw.Content)
+			extracted = concepts.FromCommand(raw.Content)
 			fallbackCount++
 		} else {
-			concepts = retrieval.ParseQueryConcepts(raw.Content)
+			extracted = retrieval.ParseQueryConcepts(raw.Content)
 			fallbackCount++
 		}
-		for _, c := range concepts {
+		for _, c := range extracted {
 			conceptCounts[c]++
 		}
 	}
@@ -1186,93 +1186,6 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dm", int(d.Minutes()))
 	}
 	return fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
-}
-
-// conceptsFromPath extracts meaningful concept tokens from a file path.
-// Used instead of ParseQueryConcepts on raw source code content, which
-// produces garbage themes from language keywords and syntax tokens.
-func conceptsFromPath(path string) []string {
-	// Strip extension and split into directory/file segments.
-	path = strings.TrimSuffix(path, filepath.Ext(path))
-	// Normalize separators and split.
-	parts := strings.FieldsFunc(path, func(r rune) bool {
-		return r == '/' || r == '\\' || r == '_' || r == '-' || r == '.'
-	})
-
-	// Filter short/noisy segments.
-	skip := map[string]bool{
-		"internal": true, "cmd": true, "pkg": true, "src": true,
-		"lib": true, "bin": true, "tmp": true, "test": true,
-		"main": true, "index": true, "mod": true, "sum": true,
-		"go": true, "the": true, "and": true, "for": true,
-	}
-
-	seen := make(map[string]bool)
-	var concepts []string
-	for _, seg := range parts {
-		seg = strings.ToLower(seg)
-		if len(seg) <= 2 || skip[seg] || seen[seg] {
-			continue
-		}
-		seen[seg] = true
-		concepts = append(concepts, seg)
-	}
-	return concepts
-}
-
-// conceptFromEventType extracts a meaningful action verb from a watcher event type.
-// e.g. "file_created" → "created", "file_modified" → "modified".
-// Returns empty string for generic types like "dir_activity".
-func conceptFromEventType(eventType string) string {
-	if strings.HasPrefix(eventType, "file_") {
-		action := strings.TrimPrefix(eventType, "file_")
-		if action != "" {
-			return action
-		}
-	}
-	return ""
-}
-
-// conceptsFromCommand extracts concepts from a terminal command string.
-// Returns the command name and subcommand for compound commands (git, docker, etc.).
-// e.g. "git commit -m 'fix'" → ["git", "commit"], "ls -la" → ["ls"].
-func conceptsFromCommand(content string) []string {
-	content = strings.TrimSpace(content)
-	if content == "" {
-		return nil
-	}
-
-	tokens := strings.Fields(content)
-	if len(tokens) == 0 {
-		return nil
-	}
-
-	// First non-flag token is the command.
-	command := strings.ToLower(tokens[0])
-	concepts := []string{command}
-
-	// Compound commands where the subcommand carries meaning.
-	compound := map[string]bool{
-		"git": true, "docker": true, "kubectl": true,
-		"npm": true, "go": true, "cargo": true,
-		"pip": true, "yarn": true, "make": true,
-		"systemctl": true, "brew": true, "apt": true,
-	}
-
-	if compound[command] && len(tokens) > 1 {
-		// Find the first non-flag token after the command.
-		for _, t := range tokens[1:] {
-			if !strings.HasPrefix(t, "-") {
-				sub := strings.ToLower(t)
-				if sub != "" {
-					concepts = append(concepts, sub)
-				}
-				break
-			}
-		}
-	}
-
-	return concepts
 }
 
 // handleForget archives a memory by ID.

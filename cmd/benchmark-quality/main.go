@@ -309,7 +309,7 @@ func runScenario(
 	if cfg.Provider != nil {
 		p = cfg.Provider
 	}
-	retAgent := retrieval.NewRetrievalAgent(s, p, cfg.Retrieval, log)
+	retAgent := retrieval.NewRetrievalAgent(s, p, cfg.Retrieval, log, nil)
 	consolAgent := consolidation.NewConsolidationAgent(s, p, cfg.Consolidation, log)
 
 	// Phase 1: Create a raw memory per benchmark memory so FK and UNIQUE
