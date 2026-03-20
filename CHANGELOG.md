@@ -4,6 +4,22 @@ All notable changes to Mnemonic will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.23.0](https://github.com/AppSprout-dev/mnemonic/compare/v0.22.0...v0.23.0) (2026-03-20)
+
+
+### Features
+
+* add exclude_path and list_exclusions MCP tools ([0ffc3d0](https://github.com/AppSprout-dev/mnemonic/commit/0ffc3d04fdf64c6a98c986b887199d3129d39846)), closes [#239](https://github.com/AppSprout-dev/mnemonic/issues/239)
+* add pipeline health and source distribution to status ([8ccae78](https://github.com/AppSprout-dev/mnemonic/commit/8ccae7845efdd2a8e8263b3e46ab75371728766d)), closes [#237](https://github.com/AppSprout-dev/mnemonic/issues/237)
+* add structured JSON output option to recall ([48138f1](https://github.com/AppSprout-dev/mnemonic/commit/48138f19aad1a23df0fc99e6fb4abb6a6374ec0b)), closes [#240](https://github.com/AppSprout-dev/mnemonic/issues/240)
+* archive never-recalled watcher memories after 30 days ([2fb6ddc](https://github.com/AppSprout-dev/mnemonic/commit/2fb6ddc7265d3e4d24595d2e16c4e10b1ccc8a0c)), closes [#233](https://github.com/AppSprout-dev/mnemonic/issues/233)
+* boost retrieval ranking for pattern and abstraction evidence ([aacbba2](https://github.com/AppSprout-dev/mnemonic/commit/aacbba272294a0672b0a7766114e614d377f7312)), closes [#238](https://github.com/AppSprout-dev/mnemonic/issues/238)
+* dynamic watcher exclusions and structured JSON recall output ([808c9e8](https://github.com/AppSprout-dev/mnemonic/commit/808c9e821d16f9fc8278b951d3ae653d73079a72))
+* improve concept extraction consistency ([2dd1bb6](https://github.com/AppSprout-dev/mnemonic/commit/2dd1bb6ca8469197791354148a4313a0bd345e59)), closes [#236](https://github.com/AppSprout-dev/mnemonic/issues/236)
+* make recall synthesis opt-in instead of default ([6ab4956](https://github.com/AppSprout-dev/mnemonic/commit/6ab495611fabe2255e13fa424c75d8d86f4c4d8d)), closes [#234](https://github.com/AppSprout-dev/mnemonic/issues/234)
+* prioritize MCP memories in encoding queue ([2466420](https://github.com/AppSprout-dev/mnemonic/commit/2466420ac288490bb0940a165486b2c9d1a26a17)), closes [#235](https://github.com/AppSprout-dev/mnemonic/issues/235)
+* signal quality and pipeline efficiency improvements ([a76d701](https://github.com/AppSprout-dev/mnemonic/commit/a76d7010ca842ae43ce9a6459c5aeecdb86577e9))
+
 ## [0.22.0](https://github.com/AppSprout-dev/mnemonic/compare/v0.21.0...v0.22.0) (2026-03-20)
 
 
