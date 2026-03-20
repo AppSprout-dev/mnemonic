@@ -48,6 +48,13 @@ internal/
 sdk/                   Python agent SDK (self-evolving assistant)
   agent/evolution/     Agent evolution data (created at runtime, gitignored)
   agent/evolution/examples/  Example evolution data for reference
+training/              Mnemonic-LM training infrastructure
+  scripts/             Training, sweep, bisection, data download scripts
+  configs/             Data mix config (pretrain_mix.yaml)
+  docs/                Experiment registry, analysis docs
+  data/                Tokenized pretraining shards (gitignored)
+  sweep_results.tsv    HP sweep results log
+  probe_results.tsv    Short probe results from LR bisection
 migrations/            SQLite schema migrations
 scripts/               Utility scripts
 ```
@@ -74,6 +81,23 @@ scripts/               Utility scripts
 | macOS ARM | Full support (primary dev platform) |
 | Linux x86_64 | Supported — `serve`, `install`, `start`, `stop`, `uninstall` all work via systemd |
 | Windows x86_64 | Supported — `serve`, `install`, `start`, `stop`, `uninstall` work via Windows Services |
+
+## Training (Mnemonic-LM)
+
+Training scripts live in `training/scripts/` and require the **Felix-LM venv**:
+
+```bash
+source ~/Projects/felixlm/.venv/bin/activate
+```
+
+Key scripts:
+
+- `train_mnemonic_lm.py` — Main training script (imports Felix-LM v3 from `~/Projects/felixlm`)
+- `run_sweep.sh` — Run HP sweep configs sequentially with auto-logging to TSV
+- `bisect_lr.sh` — Binary search for optimal LR using short probes + full confirmation
+- `validate.py` — Quality gate pipeline for fine-tuning data
+
+All experiments must be pre-registered in `training/docs/experiment_registry.md` before running. See `.claude/rules/scientific-method.md` and `.claude/rules/experiment-logging.md`.
 
 ## Known Issues
 
