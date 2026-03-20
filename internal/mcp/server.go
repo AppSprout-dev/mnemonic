@@ -249,6 +249,10 @@ func (srv *MCPServer) handleToolCall(ctx context.Context, req *jsonRPCRequest) *
 		result, toolErr = srv.handleListSessions(ctx, params.Arguments)
 	case "recall_session":
 		result, toolErr = srv.handleRecallSession(ctx, params.Arguments)
+	case "exclude_path":
+		result, toolErr = srv.handleExcludePath(ctx, params.Arguments)
+	case "list_exclusions":
+		result, toolErr = srv.handleListExclusions(ctx, params.Arguments)
 	case "amend":
 		result, toolErr = srv.handleAmend(ctx, params.Arguments)
 	case "check_memory":
@@ -441,6 +445,11 @@ func (srv *MCPServer) handleRecall(ctx context.Context, args map[string]interfac
 		synthesize = s
 	}
 
+	outputFormat := "text"
+	if f, ok := args["format"].(string); ok && f == "json" {
+		outputFormat = f
+	}
+
 	// If concepts are specified, use concept-based search (no spread activation available)
 	if len(concepts) > 0 {
 		memories, err := srv.store.SearchByConcepts(ctx, concepts, limit)
@@ -565,7 +574,65 @@ func (srv *MCPServer) handleRecall(ctx context.Context, args map[string]interfac
 
 	srv.log.Info("recall completed", "query", query, "query_id", result.QueryID, "results", len(result.Memories), "patterns", len(result.Patterns), "abstractions", len(result.Abstractions), "took_ms", result.TookMs)
 
+	if outputFormat == "json" {
+		jsonResp := formatRecallJSON(result)
+		jsonBytes, err := json.Marshal(jsonResp)
+		if err != nil {
+			return toolResult(text), nil // fallback to text
+		}
+		return toolResult(string(jsonBytes)), nil
+	}
+
 	return toolResult(text), nil
+}
+
+// formatRecallJSON builds a structured map from retrieval results.
+func formatRecallJSON(result retrieval.QueryResponse) map[string]interface{} {
+	memories := make([]map[string]interface{}, len(result.Memories))
+	for i, m := range result.Memories {
+		memories[i] = map[string]interface{}{
+			"id":          m.Memory.ID,
+			"score":       m.Score,
+			"summary":     m.Memory.Summary,
+			"content":     m.Memory.Content,
+			"concepts":    m.Memory.Concepts,
+			"source":      m.Memory.Source,
+			"type":        m.Memory.Type,
+			"project":     m.Memory.Project,
+			"salience":    m.Memory.Salience,
+			"created_at":  m.Memory.CreatedAt,
+			"explanation": m.Explanation,
+		}
+	}
+
+	patterns := make([]map[string]interface{}, len(result.Patterns))
+	for i, p := range result.Patterns {
+		patterns[i] = map[string]interface{}{
+			"title":       p.Title,
+			"type":        p.PatternType,
+			"strength":    p.Strength,
+			"description": p.Description,
+		}
+	}
+
+	abstractions := make([]map[string]interface{}, len(result.Abstractions))
+	for i, a := range result.Abstractions {
+		abstractions[i] = map[string]interface{}{
+			"title":       a.Title,
+			"level":       a.Level,
+			"confidence":  a.Confidence,
+			"description": a.Description,
+		}
+	}
+
+	return map[string]interface{}{
+		"query_id":     result.QueryID,
+		"memories":     memories,
+		"patterns":     patterns,
+		"abstractions": abstractions,
+		"synthesis":    result.Synthesis,
+		"took_ms":      result.TookMs,
+	}
 }
 
 // handleForget archives a memory by ID.
@@ -1579,6 +1646,40 @@ func (srv *MCPServer) handleRecallSession(ctx context.Context, args map[string]i
 	for i, mem := range memories {
 		fmt.Fprintf(&sb, "%d. [%s] %s\n   Summary: %s\n   Concepts: %v\n   Type: %s\n\n",
 			i+1, mem.CreatedAt.Format("15:04:05"), mem.ID, mem.Summary, mem.Concepts, mem.Type)
+	}
+	return toolResult(sb.String()), nil
+}
+
+// handleExcludePath adds a watcher exclusion pattern to the DB.
+func (srv *MCPServer) handleExcludePath(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+	pattern, ok := args["pattern"].(string)
+	if !ok || pattern == "" {
+		return nil, fmt.Errorf("pattern parameter is required")
+	}
+
+	if err := srv.store.AddRuntimeExclusion(ctx, pattern); err != nil {
+		return nil, fmt.Errorf("adding exclusion: %w", err)
+	}
+
+	srv.log.Info("runtime exclusion added", "pattern", pattern)
+	return toolResult(fmt.Sprintf("Added exclusion pattern %q. Takes effect on daemon restart.", pattern)), nil
+}
+
+// handleListExclusions returns all runtime watcher exclusion patterns.
+func (srv *MCPServer) handleListExclusions(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+	patterns, err := srv.store.ListRuntimeExclusions(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing exclusions: %w", err)
+	}
+
+	if len(patterns) == 0 {
+		return toolResult("No runtime exclusions configured. Use exclude_path to add patterns."), nil
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Runtime exclusions (%d):\n", len(patterns))
+	for _, p := range patterns {
+		fmt.Fprintf(&sb, "  - %s\n", p)
 	}
 	return toolResult(sb.String()), nil
 }

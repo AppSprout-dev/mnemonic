@@ -82,6 +82,11 @@ func recallToolDef() ToolDefinition {
 					"type":        "boolean",
 					"description": "If true, include LLM-generated synthesis narrative (default: false). Adds 3-8s latency.",
 				},
+				"format": map[string]interface{}{
+					"type":        "string",
+					"description": "Output format: text (default) or json (structured data)",
+					"enum":        []string{"text", "json"},
+				},
 			},
 			"required": []string{"query"},
 		},
@@ -383,6 +388,34 @@ func recallSessionToolDef() ToolDefinition {
 	}
 }
 
+func excludePathToolDef() ToolDefinition {
+	return ToolDefinition{
+		Name:        "exclude_path",
+		Description: "Add a path pattern to the watcher exclusion list. Prevents future watcher events from matching paths. Takes effect on daemon restart. Use list_exclusions to see current patterns.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"pattern": map[string]interface{}{
+					"type":        "string",
+					"description": "Path substring to exclude (e.g., '.cache/', 'node_modules/', '/tmp/')",
+				},
+			},
+			"required": []string{"pattern"},
+		},
+	}
+}
+
+func listExclusionsToolDef() ToolDefinition {
+	return ToolDefinition{
+		Name:        "list_exclusions",
+		Description: "List all runtime watcher exclusion patterns (added via exclude_path).",
+		InputSchema: map[string]interface{}{
+			"type":       "object",
+			"properties": map[string]interface{}{},
+		},
+	}
+}
+
 func amendToolDef() ToolDefinition {
 	return ToolDefinition{
 		Name:        "amend",
@@ -442,6 +475,8 @@ func allToolDefs() []ToolDefinition {
 		ingestProjectToolDef(),
 		listSessionsToolDef(),
 		recallSessionToolDef(),
+		excludePathToolDef(),
+		listExclusionsToolDef(),
 		amendToolDef(),
 		checkMemoryToolDef(),
 	}
