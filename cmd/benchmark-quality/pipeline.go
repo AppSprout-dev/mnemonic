@@ -56,7 +56,7 @@ func runPipelineScenario(
 	dreamAgent := dreaming.NewDreamingAgent(s, p, cfg.Dreaming, log)
 	consolAgent := consolidation.NewConsolidationAgent(s, p, cfg.Consolidation, log)
 	absAgent := abstraction.NewAbstractionAgent(s, p, cfg.Abstraction, log)
-	retAgent := retrieval.NewRetrievalAgent(s, p, cfg.Retrieval, log)
+	retAgent := retrieval.NewRetrievalAgent(s, p, cfg.Retrieval, log, nil)
 
 	// Phase 1: Inject raw events.
 	for _, raw := range sc.RawEvents {

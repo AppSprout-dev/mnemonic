@@ -1521,7 +1521,7 @@ func serveCommand(configPath string) {
 	}
 
 	// --- Create retrieval agent for API queries ---
-	retriever := retrieval.NewRetrievalAgent(memStore, wrap("retrieval"), buildRetrievalConfig(cfg), log)
+	retriever := retrieval.NewRetrievalAgent(memStore, wrap("retrieval"), buildRetrievalConfig(cfg), log, bus)
 
 	// --- Start consolidation agent ---
 	var consolidator *consolidation.ConsolidationAgent
@@ -1797,6 +1797,9 @@ func buildRetrievalConfig(cfg *config.Config) retrieval.RetrievalConfig {
 
 		FeedbackWeight: float32(cfg.Retrieval.FeedbackWeight),
 		SourceWeights:  convertSourceWeights(cfg.Retrieval.SourceWeights),
+
+		ContextBoostWindowMin: cfg.Perception.RecallBoostWindowMin,
+		ContextBoostMax:       float32(cfg.Perception.RecallBoostMax),
 	}
 }
 
@@ -1974,7 +1977,7 @@ func recallCommand(configPath, query string) {
 
 	ctx := context.Background()
 
-	retriever := retrieval.NewRetrievalAgent(db, llmProvider, buildRetrievalConfig(cfg), log)
+	retriever := retrieval.NewRetrievalAgent(db, llmProvider, buildRetrievalConfig(cfg), log, nil)
 
 	resp, err := retriever.Query(ctx, retrieval.QueryRequest{
 		Query:      query,
@@ -2604,7 +2607,7 @@ func mcpCommand(configPath string) {
 	defer func() { _ = encoder.Stop() }()
 
 	// Create retrieval agent for recall
-	retriever := retrieval.NewRetrievalAgent(db, llmProvider, buildRetrievalConfig(cfg), log)
+	retriever := retrieval.NewRetrievalAgent(db, llmProvider, buildRetrievalConfig(cfg), log, bus)
 
 	mcpResolver := config.NewProjectResolver(cfg.Projects)
 	server := mcp.NewMCPServer(db, retriever, bus, log, Version, cfg.Coaching.CoachingFile, cfg.Perception.Filesystem.ExcludePatterns, cfg.Perception.Filesystem.MaxContentBytes, mcpResolver)

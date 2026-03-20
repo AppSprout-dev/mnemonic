@@ -157,7 +157,7 @@ func TestNewRetrievalAgent(t *testing.T) {
 	cfg := DefaultConfig()
 	log := testLogger()
 
-	agent := NewRetrievalAgent(s, p, cfg, log)
+	agent := NewRetrievalAgent(s, p, cfg, log, nil)
 
 	if agent == nil {
 		t.Fatal("expected non-nil agent")
@@ -291,7 +291,7 @@ func TestGetAssociationTypeWeight(t *testing.T) {
 }
 
 func TestMergeEntryPoints(t *testing.T) {
-	agent := NewRetrievalAgent(&mockStore{}, &mockLLMProvider{}, DefaultConfig(), testLogger())
+	agent := NewRetrievalAgent(&mockStore{}, &mockLLMProvider{}, DefaultConfig(), testLogger(), nil)
 
 	t.Run("FTS only", func(t *testing.T) {
 		fts := []store.Memory{
@@ -410,7 +410,7 @@ func TestSpreadActivation(t *testing.T) {
 			DecayFactor:         0.7,
 			MaxResults:          10,
 		}
-		agent := NewRetrievalAgent(s, &mockLLMProvider{}, cfg, testLogger())
+		agent := NewRetrievalAgent(s, &mockLLMProvider{}, cfg, testLogger(), nil)
 
 		entryPoints := map[string]float32{"m1": 1.0}
 		result, _ := agent.spreadActivation(context.Background(), entryPoints)
@@ -464,7 +464,7 @@ func TestSpreadActivation(t *testing.T) {
 			DecayFactor:         0.7,
 			MaxResults:          10,
 		}
-		agent := NewRetrievalAgent(s, &mockLLMProvider{}, cfg, testLogger())
+		agent := NewRetrievalAgent(s, &mockLLMProvider{}, cfg, testLogger(), nil)
 
 		entryPoints := map[string]float32{"m1": 1.0}
 		result, _ := agent.spreadActivation(context.Background(), entryPoints)
@@ -516,7 +516,7 @@ func TestSpreadActivation(t *testing.T) {
 			DecayFactor:         0.7,
 			MaxResults:          10,
 		}
-		agent := NewRetrievalAgent(s, &mockLLMProvider{}, cfg, testLogger())
+		agent := NewRetrievalAgent(s, &mockLLMProvider{}, cfg, testLogger(), nil)
 
 		entryPoints := map[string]float32{"m1": 1.0}
 		result, _ := agent.spreadActivation(context.Background(), entryPoints)
@@ -534,7 +534,7 @@ func TestSpreadActivation(t *testing.T) {
 		}
 
 		cfg := DefaultConfig()
-		agent := NewRetrievalAgent(s, &mockLLMProvider{}, cfg, testLogger())
+		agent := NewRetrievalAgent(s, &mockLLMProvider{}, cfg, testLogger(), nil)
 
 		entryPoints := map[string]float32{"m1": 0.8, "m2": 0.5}
 		result, _ := agent.spreadActivation(context.Background(), entryPoints)
@@ -558,7 +558,7 @@ func TestSpreadActivation(t *testing.T) {
 		}
 
 		cfg := DefaultConfig()
-		agent := NewRetrievalAgent(s, &mockLLMProvider{}, cfg, testLogger())
+		agent := NewRetrievalAgent(s, &mockLLMProvider{}, cfg, testLogger(), nil)
 
 		entryPoints := map[string]float32{"m1": 1.0}
 		result, _ := agent.spreadActivation(context.Background(), entryPoints)
@@ -600,7 +600,7 @@ func TestQuery(t *testing.T) {
 	}
 	p := &mockLLMProvider{}
 	cfg := DefaultConfig()
-	agent := NewRetrievalAgent(s, p, cfg, testLogger())
+	agent := NewRetrievalAgent(s, p, cfg, testLogger(), nil)
 
 	resp, err := agent.Query(context.Background(), QueryRequest{
 		Query:      "Go concurrency",
@@ -662,7 +662,7 @@ func TestQueryWithSynthesis(t *testing.T) {
 	}
 
 	cfg := DefaultConfig()
-	agent := NewRetrievalAgent(s, p, cfg, testLogger())
+	agent := NewRetrievalAgent(s, p, cfg, testLogger(), nil)
 
 	resp, err := agent.Query(context.Background(), QueryRequest{
 		Query:      "Go concurrency",
@@ -697,7 +697,7 @@ func TestQueryEmptyResults(t *testing.T) {
 
 	p := &mockLLMProvider{}
 	cfg := DefaultConfig()
-	agent := NewRetrievalAgent(s, p, cfg, testLogger())
+	agent := NewRetrievalAgent(s, p, cfg, testLogger(), nil)
 
 	resp, err := agent.Query(context.Background(), QueryRequest{
 		Query: "something with no matches",
@@ -729,7 +729,7 @@ func TestQueryEmptyResultsWithSynthesis(t *testing.T) {
 
 	p := &mockLLMProvider{}
 	cfg := DefaultConfig()
-	agent := NewRetrievalAgent(s, p, cfg, testLogger())
+	agent := NewRetrievalAgent(s, p, cfg, testLogger(), nil)
 
 	resp, err := agent.Query(context.Background(), QueryRequest{
 		Query:      "nothing here",
@@ -775,7 +775,7 @@ func TestQueryMaxResultsOverride(t *testing.T) {
 
 	p := &mockLLMProvider{}
 	cfg := DefaultConfig()
-	agent := NewRetrievalAgent(s, p, cfg, testLogger())
+	agent := NewRetrievalAgent(s, p, cfg, testLogger(), nil)
 
 	resp, err := agent.Query(context.Background(), QueryRequest{
 		Query:      "test query",
@@ -794,7 +794,7 @@ func TestGetStats(t *testing.T) {
 	s := &mockStore{}
 	p := &mockLLMProvider{}
 	cfg := DefaultConfig()
-	agent := NewRetrievalAgent(s, p, cfg, testLogger())
+	agent := NewRetrievalAgent(s, p, cfg, testLogger(), nil)
 
 	t.Run("initial stats are zeroed", func(t *testing.T) {
 		stats := agent.GetStats()
@@ -842,7 +842,7 @@ func TestGetStats(t *testing.T) {
 				return store.Memory{ID: id, Summary: "test", Salience: 0.8, LastAccessed: now}, nil
 			},
 		}
-		agent := NewRetrievalAgent(s, &mockLLMProvider{}, DefaultConfig(), testLogger())
+		agent := NewRetrievalAgent(s, &mockLLMProvider{}, DefaultConfig(), testLogger(), nil)
 
 		_, err := agent.Query(context.Background(), QueryRequest{Query: "test"})
 		if err != nil {
@@ -882,7 +882,7 @@ func TestResetStats(t *testing.T) {
 		},
 	}
 	p := &mockLLMProvider{}
-	agent := NewRetrievalAgent(s, p, DefaultConfig(), testLogger())
+	agent := NewRetrievalAgent(s, p, DefaultConfig(), testLogger(), nil)
 
 	// Run a query to populate stats
 	_, err := agent.Query(context.Background(), QueryRequest{Query: "test"})
@@ -935,7 +935,7 @@ func TestQueryIncludeReasoning(t *testing.T) {
 		},
 	}
 	p := &mockLLMProvider{}
-	agent := NewRetrievalAgent(s, p, DefaultConfig(), testLogger())
+	agent := NewRetrievalAgent(s, p, DefaultConfig(), testLogger(), nil)
 
 	resp, err := agent.Query(context.Background(), QueryRequest{
 		Query:            "test",
@@ -972,7 +972,7 @@ func TestQueryWithoutReasoning(t *testing.T) {
 		},
 	}
 	p := &mockLLMProvider{}
-	agent := NewRetrievalAgent(s, p, DefaultConfig(), testLogger())
+	agent := NewRetrievalAgent(s, p, DefaultConfig(), testLogger(), nil)
 
 	resp, err := agent.Query(context.Background(), QueryRequest{
 		Query:            "test",
@@ -1047,7 +1047,7 @@ func TestRankResults_FeedbackInfluence(t *testing.T) {
 
 	cfg := DefaultConfig()
 	cfg.FeedbackWeight = 0.15
-	agent := NewRetrievalAgent(s, &mockLLMProvider{}, cfg, testLogger())
+	agent := NewRetrievalAgent(s, &mockLLMProvider{}, cfg, testLogger(), nil)
 
 	activated := map[string]activationState{
 		memA.ID: {activation: 0.8},
@@ -1089,7 +1089,7 @@ func TestRankResults_FeedbackErrorGraceful(t *testing.T) {
 	}
 
 	cfg := DefaultConfig()
-	agent := NewRetrievalAgent(s, &mockLLMProvider{}, cfg, testLogger())
+	agent := NewRetrievalAgent(s, &mockLLMProvider{}, cfg, testLogger(), nil)
 
 	activated := map[string]activationState{
 		"m1": {activation: 0.7},
@@ -1132,7 +1132,7 @@ func TestRankResults_SourceWeighting(t *testing.T) {
 		"mcp":        1.0,
 		"filesystem": 0.5,
 	}
-	agent := NewRetrievalAgent(s, &mockLLMProvider{}, cfg, testLogger())
+	agent := NewRetrievalAgent(s, &mockLLMProvider{}, cfg, testLogger(), nil)
 
 	activated := map[string]activationState{
 		mcpMem.ID: {activation: 0.8},
@@ -1173,7 +1173,7 @@ func TestRankResults_UnknownSourceGetsWeight1(t *testing.T) {
 		"mcp":        1.0,
 		"filesystem": 0.5,
 	}
-	agent := NewRetrievalAgent(s, &mockLLMProvider{}, cfg, testLogger())
+	agent := NewRetrievalAgent(s, &mockLLMProvider{}, cfg, testLogger(), nil)
 
 	activated := map[string]activationState{
 		"m1": {activation: 0.8},
@@ -1223,7 +1223,7 @@ func TestRankResults_SourceAndFeedbackCombined(t *testing.T) {
 		"filesystem": 0.5,
 	}
 	cfg.FeedbackWeight = 0.3 // high weight to override source bias
-	agent := NewRetrievalAgent(s, &mockLLMProvider{}, cfg, testLogger())
+	agent := NewRetrievalAgent(s, &mockLLMProvider{}, cfg, testLogger(), nil)
 
 	activated := map[string]activationState{
 		fsMem.ID:  {activation: 0.8},

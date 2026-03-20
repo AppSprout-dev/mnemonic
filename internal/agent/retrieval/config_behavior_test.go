@@ -63,7 +63,7 @@ func TestConfigMaxResultsLimitsOutput(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := DefaultConfig()
 			cfg.MaxResults = tc.maxResults
-			agent := NewRetrievalAgent(s, &mockLLMProvider{}, cfg, testLogger())
+			agent := NewRetrievalAgent(s, &mockLLMProvider{}, cfg, testLogger(), nil)
 
 			resp, err := agent.Query(context.Background(), QueryRequest{Query: "test"})
 			if err != nil {
@@ -110,7 +110,7 @@ func TestConfigMaxHopsControlsGraphDepth(t *testing.T) {
 				DecayFactor:         0.9, // high so activation survives multiple hops
 				MaxResults:          10,
 			}
-			agent := NewRetrievalAgent(s, &mockLLMProvider{}, cfg, testLogger())
+			agent := NewRetrievalAgent(s, &mockLLMProvider{}, cfg, testLogger(), nil)
 
 			entryPoints := map[string]float32{"m1": 1.0}
 			result, _ := agent.spreadActivation(context.Background(), entryPoints)
@@ -160,7 +160,7 @@ func TestConfigActivationThresholdPrunesWeak(t *testing.T) {
 				DecayFactor:         0.7,
 				MaxResults:          10,
 			}
-			agent := NewRetrievalAgent(s, &mockLLMProvider{}, cfg, testLogger())
+			agent := NewRetrievalAgent(s, &mockLLMProvider{}, cfg, testLogger(), nil)
 
 			entryPoints := map[string]float32{"m1": 1.0}
 			result, _ := agent.spreadActivation(context.Background(), entryPoints)
@@ -207,7 +207,7 @@ func TestConfigDecayFactorAffectsActivationMagnitude(t *testing.T) {
 				DecayFactor:         tc.decayFactor,
 				MaxResults:          10,
 			}
-			agent := NewRetrievalAgent(s, &mockLLMProvider{}, cfg, testLogger())
+			agent := NewRetrievalAgent(s, &mockLLMProvider{}, cfg, testLogger(), nil)
 
 			entryPoints := map[string]float32{"m1": 1.0}
 			result, _ := agent.spreadActivation(context.Background(), entryPoints)
@@ -243,7 +243,7 @@ func TestConfigMergeAlphaWeightsFTSvsEmbedding(t *testing.T) {
 			cfg := DefaultConfig()
 			cfg.MergeAlpha = tc.alpha
 			cfg.DualHitBonus = 0 // isolate alpha effect
-			agent := NewRetrievalAgent(&mockStore{}, &mockLLMProvider{}, cfg, testLogger())
+			agent := NewRetrievalAgent(&mockStore{}, &mockLLMProvider{}, cfg, testLogger(), nil)
 
 			result := agent.mergeEntryPoints(fts, emb)
 
@@ -283,7 +283,7 @@ func TestConfigDualHitBonusAddsToScore(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := DefaultConfig()
 			cfg.DualHitBonus = tc.bonus
-			agent := NewRetrievalAgent(&mockStore{}, &mockLLMProvider{}, cfg, testLogger())
+			agent := NewRetrievalAgent(&mockStore{}, &mockLLMProvider{}, cfg, testLogger(), nil)
 
 			result := agent.mergeEntryPoints(fts, emb)
 
@@ -340,7 +340,7 @@ func TestConfigSynthesisMaxTokensPassedToLLM(t *testing.T) {
 
 			cfg := DefaultConfig()
 			cfg.SynthesisMaxTokens = tc.maxTokens
-			agent := NewRetrievalAgent(s, p, cfg, testLogger())
+			agent := NewRetrievalAgent(s, p, cfg, testLogger(), nil)
 
 			_, err := agent.Query(context.Background(), QueryRequest{
 				Query:      "test",
@@ -415,7 +415,7 @@ func TestConfigMaxToolCallsLimitsSynthesisTools(t *testing.T) {
 
 			cfg := DefaultConfig()
 			cfg.MaxToolCalls = tc.maxToolCalls
-			agent := NewRetrievalAgent(s, p, cfg, testLogger())
+			agent := NewRetrievalAgent(s, p, cfg, testLogger(), nil)
 
 			_, err := agent.Query(context.Background(), QueryRequest{
 				Query:      "test",

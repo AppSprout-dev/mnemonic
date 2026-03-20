@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/appsprout-dev/mnemonic/internal/concepts"
+	"github.com/appsprout-dev/mnemonic/internal/events"
 	"github.com/appsprout-dev/mnemonic/internal/llm"
 	"github.com/appsprout-dev/mnemonic/internal/store"
 	"github.com/google/uuid"
@@ -61,6 +63,10 @@ type RetrievalConfig struct {
 
 	// Source-weighted scoring
 	SourceWeights map[string]float32 // per-source multipliers (default: mcp=1.0, terminal=0.8, clipboard=0.6, filesystem=0.5)
+
+	// Context boost from watcher activity
+	ContextBoostWindowMin int     // minutes context boost decays over (default: 30)
+	ContextBoostMax       float32 // max additive boost from watcher context (default: 0.2)
 }
 
 // DefaultConfig returns sensible defaults for retrieval configuration.
@@ -105,6 +111,8 @@ func DefaultConfig() RetrievalConfig {
 			"clipboard":  0.6,
 			"filesystem": 0.5,
 		},
+		ContextBoostWindowMin: 30,
+		ContextBoostMax:       0.2,
 	}
 }
 
@@ -154,12 +162,13 @@ type QueryResponse struct {
 
 // RetrievalAgent performs memory retrieval using full-text search, embeddings, and spread activation.
 type RetrievalAgent struct {
-	store  store.Store
-	llm    llm.Provider
-	config RetrievalConfig
-	log    *slog.Logger
-	mu     sync.RWMutex
-	stats  *retrievalStats
+	store    store.Store
+	llm      llm.Provider
+	config   RetrievalConfig
+	log      *slog.Logger
+	mu       sync.RWMutex
+	stats    *retrievalStats
+	activity *activityTracker // nil when bus is not available (e.g. CLI mode)
 }
 
 // retrievalStats tracks retrieval performance metrics.
@@ -172,8 +181,10 @@ type retrievalStats struct {
 }
 
 // NewRetrievalAgent creates a new retrieval agent with the given dependencies.
-func NewRetrievalAgent(s store.Store, llmProv llm.Provider, cfg RetrievalConfig, log *slog.Logger) *RetrievalAgent {
-	return &RetrievalAgent{
+// If bus is non-nil, the agent subscribes to watcher events and boosts recall
+// scores for memories whose concepts overlap with recent daemon activity.
+func NewRetrievalAgent(s store.Store, llmProv llm.Provider, cfg RetrievalConfig, log *slog.Logger, bus events.Bus) *RetrievalAgent {
+	ra := &RetrievalAgent{
 		store:  s,
 		llm:    llmProv,
 		config: cfg,
@@ -182,6 +193,41 @@ func NewRetrievalAgent(s store.Store, llmProv llm.Provider, cfg RetrievalConfig,
 			TotalQueries: 0,
 		},
 	}
+
+	// Wire up activity-based recall boost if the event bus is available.
+	if bus != nil {
+		windowMin := intOr(cfg.ContextBoostWindowMin, 30)
+		maxBoost := f32Or(cfg.ContextBoostMax, 0.2)
+		ra.activity = newActivityTracker(windowMin, maxBoost)
+		bus.Subscribe(events.TypeWatcherEvent, func(ctx context.Context, event events.Event) error {
+			we, ok := event.(events.WatcherEvent)
+			if !ok {
+				return nil
+			}
+			var extracted []string
+			switch we.Source {
+			case "filesystem":
+				if we.Path != "" {
+					extracted = concepts.FromPath(we.Path)
+				}
+				if action := concepts.FromEventType(we.Type); action != "" {
+					extracted = append(extracted, action)
+				}
+			case "terminal":
+				if we.Preview != "" {
+					extracted = concepts.FromCommand(we.Preview)
+				}
+			}
+			if len(extracted) > 0 {
+				ra.activity.observe(extracted)
+			}
+			return nil
+		})
+		log.Info("retrieval agent subscribed to watcher events for context boost",
+			"window_min", windowMin, "max_boost", maxBoost)
+	}
+
+	return ra
 }
 
 // Query executes a retrieval query and returns ranked results with optional synthesis.
@@ -550,6 +596,7 @@ func (ra *RetrievalAgent) rankResults(ctx context.Context, activated map[string]
 		finalScore     float32
 		recencyBonus   float32
 		activityBonus  float32
+		contextBoost   float32
 		sourceWeight   float32
 		feedbackAdjust float32
 	}
@@ -593,8 +640,14 @@ func (ra *RetrievalAgent) rankResults(ctx context.Context, activated map[string]
 		actScale := float64(f32Or(ra.config.ActivityBonusScale, 0.02))
 		activityBonus := float32(math.Min(actMax, actScale*math.Log1p(float64(state.activationCount))))
 
+		// Context boost from recent watcher activity
+		var contextBoost float32
+		if ra.activity != nil {
+			contextBoost = ra.activity.boostForMemory(mem.Concepts)
+		}
+
 		// Combined score
-		baseScore := state.activation * (1.0 + recencyBonus + activityBonus)
+		baseScore := state.activation * (1.0 + recencyBonus + activityBonus + contextBoost)
 
 		// Valence boost for significant memories
 		attrs, attrErr := ra.store.GetMemoryAttributes(ctx, memID)
@@ -629,6 +682,7 @@ func (ra *RetrievalAgent) rankResults(ctx context.Context, activated map[string]
 			finalScore:     finalScore,
 			recencyBonus:   recencyBonus,
 			activityBonus:  activityBonus,
+			contextBoost:   contextBoost,
 			sourceWeight:   sourceWeight,
 			feedbackAdjust: feedbackAdjust,
 		})
@@ -645,8 +699,8 @@ func (ra *RetrievalAgent) rankResults(ctx context.Context, activated map[string]
 		explanation := ""
 		if includeReasoning {
 			explanation = fmt.Sprintf(
-				"activation: %.3f, recency_bonus: %.3f, activity_bonus: %.3f, source_weight: %.2f, feedback_adjust: %.3f, combined_score: %.3f",
-				sm.activation, sm.recencyBonus, sm.activityBonus, sm.sourceWeight, sm.feedbackAdjust, sm.finalScore,
+				"activation: %.3f, recency_bonus: %.3f, activity_bonus: %.3f, context_boost: %.3f, source_weight: %.2f, feedback_adjust: %.3f, combined_score: %.3f",
+				sm.activation, sm.recencyBonus, sm.activityBonus, sm.contextBoost, sm.sourceWeight, sm.feedbackAdjust, sm.finalScore,
 			)
 		}
 

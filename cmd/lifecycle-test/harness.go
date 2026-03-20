@@ -21,13 +21,13 @@ import (
 
 // Harness holds the shared state for all lifecycle phases.
 type Harness struct {
-	Store        *sqlite.SQLiteStore
-	LLM          llm.Provider
-	Bus          events.Bus
-	Log          *slog.Logger
-	Clock        *SimClock
-	TmpDir       string
-	DBPath       string
+	Store  *sqlite.SQLiteStore
+	LLM    llm.Provider
+	Bus    events.Bus
+	Log    *slog.Logger
+	Clock  *SimClock
+	TmpDir string
+	DBPath string
 
 	Encoder      *encoding.EncodingAgent
 	Episoder     *episoding.EpisodingAgent
@@ -87,7 +87,7 @@ func NewHarness(provider llm.Provider, log *slog.Logger) (*Harness, error) {
 	h.Metacog = metacognition.NewMetacognitionAgent(s, provider, metacognition.MetacognitionConfig{
 		Interval: time.Hour,
 	}, log)
-	h.Retriever = retrieval.NewRetrievalAgent(s, provider, retrieval.DefaultConfig(), log)
+	h.Retriever = retrieval.NewRetrievalAgent(s, provider, retrieval.DefaultConfig(), log, nil)
 
 	return h, nil
 }
@@ -153,7 +153,7 @@ func NewHarnessFromCheckpoint(checkpointPath string, provider llm.Provider, log 
 	h.Metacog = metacognition.NewMetacognitionAgent(s, provider, metacognition.MetacognitionConfig{
 		Interval: time.Hour,
 	}, log)
-	h.Retriever = retrieval.NewRetrievalAgent(s, provider, retrieval.DefaultConfig(), log)
+	h.Retriever = retrieval.NewRetrievalAgent(s, provider, retrieval.DefaultConfig(), log, nil)
 
 	return h, nil
 }
