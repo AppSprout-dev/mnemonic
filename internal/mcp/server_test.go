@@ -442,3 +442,102 @@ func TestConceptsFromPath(t *testing.T) {
 		})
 	}
 }
+
+// TestConceptFromEventType tests event type to action concept mapping.
+func TestConceptFromEventType(t *testing.T) {
+	tests := []struct {
+		name      string
+		eventType string
+		expected  string
+	}{
+		{"file created", "file_created", "created"},
+		{"file modified", "file_modified", "modified"},
+		{"file deleted", "file_deleted", "deleted"},
+		{"dir activity skipped", "dir_activity", ""},
+		{"empty string", "", ""},
+		{"command executed skipped", "command_executed", ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := conceptFromEventType(tc.eventType)
+			if got != tc.expected {
+				t.Fatalf("conceptFromEventType(%q) = %q, want %q", tc.eventType, got, tc.expected)
+			}
+		})
+	}
+}
+
+// TestConceptsFromCommand tests terminal command concept extraction.
+func TestConceptsFromCommand(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  string
+		expected []string
+	}{
+		{
+			name:     "git commit with flags",
+			content:  "git commit -m 'fix bug'",
+			expected: []string{"git", "commit"},
+		},
+		{
+			name:     "git push",
+			content:  "git push origin main",
+			expected: []string{"git", "push"},
+		},
+		{
+			name:     "make build",
+			content:  "make build",
+			expected: []string{"make", "build"},
+		},
+		{
+			name:     "go test with flags",
+			content:  "go test -v ./...",
+			expected: []string{"go", "test"},
+		},
+		{
+			name:     "docker run with flags",
+			content:  "docker -D run --rm ubuntu",
+			expected: []string{"docker", "run"},
+		},
+		{
+			name:     "simple command",
+			content:  "ls -la",
+			expected: []string{"ls"},
+		},
+		{
+			name:     "simple command no flags",
+			content:  "pwd",
+			expected: []string{"pwd"},
+		},
+		{
+			name:     "npm install",
+			content:  "npm install express",
+			expected: []string{"npm", "install"},
+		},
+		{
+			name:     "empty string",
+			content:  "",
+			expected: nil,
+		},
+		{
+			name:     "whitespace only",
+			content:  "   ",
+			expected: nil,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := conceptsFromCommand(tc.content)
+			if len(got) != len(tc.expected) {
+				t.Fatalf("expected %v, got %v", tc.expected, got)
+			}
+			for i := range tc.expected {
+				if got[i] != tc.expected[i] {
+					t.Fatalf("expected[%d] = %q, got %q (full: %v)", i, tc.expected[i], got[i], got)
+				}
+			}
+		})
+	}
+}

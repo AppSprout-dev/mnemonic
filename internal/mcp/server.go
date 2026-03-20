@@ -870,6 +870,14 @@ func (srv *MCPServer) handleGetContext(ctx context.Context, args map[string]inte
 			if pathVal, ok := raw.Metadata["path"].(string); ok && pathVal != "" {
 				concepts = conceptsFromPath(pathVal)
 			}
+			// Enrich with the event action (created, modified, deleted).
+			if action := conceptFromEventType(raw.Type); action != "" {
+				concepts = append(concepts, action)
+			}
+		} else if raw.Source == "terminal" {
+			// For terminal events, extract command name and subcommand
+			// rather than treating the full command as natural language.
+			concepts = conceptsFromCommand(raw.Content)
 		} else {
 			concepts = retrieval.ParseQueryConcepts(raw.Content)
 		}
@@ -1008,6 +1016,61 @@ func conceptsFromPath(path string) []string {
 		seen[seg] = true
 		concepts = append(concepts, seg)
 	}
+	return concepts
+}
+
+// conceptFromEventType extracts a meaningful action verb from a watcher event type.
+// e.g. "file_created" → "created", "file_modified" → "modified".
+// Returns empty string for generic types like "dir_activity".
+func conceptFromEventType(eventType string) string {
+	if strings.HasPrefix(eventType, "file_") {
+		action := strings.TrimPrefix(eventType, "file_")
+		if action != "" {
+			return action
+		}
+	}
+	return ""
+}
+
+// conceptsFromCommand extracts concepts from a terminal command string.
+// Returns the command name and subcommand for compound commands (git, docker, etc.).
+// e.g. "git commit -m 'fix'" → ["git", "commit"], "ls -la" → ["ls"].
+func conceptsFromCommand(content string) []string {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return nil
+	}
+
+	tokens := strings.Fields(content)
+	if len(tokens) == 0 {
+		return nil
+	}
+
+	// First non-flag token is the command.
+	command := strings.ToLower(tokens[0])
+	concepts := []string{command}
+
+	// Compound commands where the subcommand carries meaning.
+	compound := map[string]bool{
+		"git": true, "docker": true, "kubectl": true,
+		"npm": true, "go": true, "cargo": true,
+		"pip": true, "yarn": true, "make": true,
+		"systemctl": true, "brew": true, "apt": true,
+	}
+
+	if compound[command] && len(tokens) > 1 {
+		// Find the first non-flag token after the command.
+		for _, t := range tokens[1:] {
+			if !strings.HasPrefix(t, "-") {
+				sub := strings.ToLower(t)
+				if sub != "" {
+					concepts = append(concepts, sub)
+				}
+				break
+			}
+		}
+	}
+
 	return concepts
 }
 
