@@ -223,6 +223,8 @@ func (srv *MCPServer) handleToolCall(ctx context.Context, req *jsonRPCRequest) *
 		result, toolErr = srv.handleRemember(ctx, params.Arguments)
 	case "recall":
 		result, toolErr = srv.handleRecall(ctx, params.Arguments)
+	case "batch_recall":
+		result, toolErr = srv.handleBatchRecall(ctx, params.Arguments)
 	case "forget":
 		result, toolErr = srv.handleForget(ctx, params.Arguments)
 	case "status":
@@ -682,6 +684,111 @@ func formatPatternsJSON(patterns []store.Pattern) []map[string]interface{} {
 		}
 	}
 	return result
+}
+
+// handleBatchRecall runs multiple recall queries in parallel and returns combined JSON results.
+func (srv *MCPServer) handleBatchRecall(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+	queriesRaw, ok := args["queries"].([]interface{})
+	if !ok || len(queriesRaw) == 0 {
+		return nil, fmt.Errorf("queries parameter is required and must be a non-empty array")
+	}
+
+	if len(queriesRaw) > 10 {
+		return nil, fmt.Errorf("maximum 10 queries per batch (got %d)", len(queriesRaw))
+	}
+
+	type batchResult struct {
+		Index int
+		Query string
+		Data  map[string]interface{}
+		Err   error
+	}
+
+	results := make(chan batchResult, len(queriesRaw))
+
+	for i, qRaw := range queriesRaw {
+		qMap, ok := qRaw.(map[string]interface{})
+		if !ok {
+			results <- batchResult{Index: i, Err: fmt.Errorf("query %d: invalid format", i)}
+			continue
+		}
+
+		query, _ := qMap["query"].(string)
+		if query == "" {
+			results <- batchResult{Index: i, Err: fmt.Errorf("query %d: query string is required", i)}
+			continue
+		}
+
+		go func(idx int, q string, qArgs map[string]interface{}) {
+			limit := 5
+			if l, ok := qArgs["limit"].(float64); ok {
+				limit = int(l)
+			}
+			project := ""
+			if p, ok := qArgs["project"].(string); ok {
+				project = p
+			}
+			source := ""
+			if s, ok := qArgs["source"].(string); ok {
+				source = s
+			}
+			memType := ""
+			if t, ok := qArgs["type"].(string); ok {
+				memType = t
+			}
+			var minSalience float32
+			if ms, ok := qArgs["min_salience"].(float64); ok {
+				minSalience = float32(ms)
+			}
+
+			qr, err := srv.retriever.Query(ctx, retrieval.QueryRequest{
+				Query:               q,
+				MaxResults:          limit,
+				IncludeReasoning:    true,
+				IncludePatterns:     true,
+				IncludeAbstractions: true,
+				Project:             project,
+				Source:              source,
+				Type:                memType,
+				MinSalience:         minSalience,
+			})
+			if err != nil {
+				results <- batchResult{Index: idx, Query: q, Err: err}
+				return
+			}
+
+			results <- batchResult{
+				Index: idx,
+				Query: q,
+				Data:  formatRecallJSON(qr),
+			}
+		}(i, query, qMap)
+	}
+
+	// Collect results in order.
+	collected := make([]map[string]interface{}, len(queriesRaw))
+	for range queriesRaw {
+		r := <-results
+		if r.Err != nil {
+			collected[r.Index] = map[string]interface{}{
+				"query": r.Query,
+				"error": r.Err.Error(),
+			}
+		} else {
+			r.Data["query"] = r.Query
+			collected[r.Index] = r.Data
+		}
+	}
+
+	jsonBytes, err := json.Marshal(map[string]interface{}{
+		"results": collected,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshaling batch results: %w", err)
+	}
+
+	srv.log.Info("batch recall completed", "queries", len(queriesRaw))
+	return toolResult(string(jsonBytes)), nil
 }
 
 // handleForget archives a memory by ID.
