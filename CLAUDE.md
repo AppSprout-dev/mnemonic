@@ -34,7 +34,7 @@ internal/
     reactor/           Event-driven rule engine
   api/                 REST API server + routes
   web/                 Embedded dashboard (single-page app, D3.js charts)
-  mcp/                 MCP server (13 tools for Claude Code)
+  mcp/                 MCP server (19 tools for Claude Code)
   store/               Store interface + SQLite implementation
   llm/                 LLM provider interface + implementations (LM Studio, Gemini/cloud API)
   ingest/              Project ingestion engine
@@ -107,23 +107,29 @@ See [GitHub Issues](https://github.com/appsprout-dev/mnemonic/issues) for tracke
 
 ## MCP Tools Available
 
-You have 13 tools via the `mnemonic` MCP server:
+You have 19 tools via the `mnemonic` MCP server:
 
 | Tool | When to Use |
 |------|-------------|
-| `remember` | Store decisions, errors, insights, learnings |
-| `recall` | Search for relevant memories before starting work |
+| `remember` | Store decisions, errors, insights, learnings (returns raw ID + salience) |
+| `recall` | Semantic search with spread activation (`explain`, `include_associations`, `format`, `synthesize` params) |
 | `forget` | Archive irrelevant memories |
-| `status` | Check memory system health and stats |
+| `amend` | Update a memory's content in place (preserves associations, history, salience) |
+| `check_memory` | Inspect a memory's encoding status, concepts, and associations |
+| `status` | System health, encoding pipeline status, source distribution |
 | `recall_project` | Get project-specific context and patterns |
 | `recall_timeline` | See what happened in a time range |
+| `recall_session` | Retrieve all memories from a specific MCP session |
+| `list_sessions` | List recent sessions with time range and memory count |
 | `session_summary` | Summarize current/recent session |
 | `get_patterns` | View discovered recurring patterns |
 | `get_insights` | View metacognition observations and abstractions |
-| `feedback` | Report recall quality (helps system learn) |
+| `feedback` | Report recall quality (drives ranking, can auto-suppress noisy memories) |
 | `audit_encodings` | Review recent encoding quality and suggest improvements |
 | `coach_local_llm` | Write coaching guidance to improve local LLM prompts |
 | `ingest_project` | Bulk-ingest a project directory into memory |
+| `exclude_path` | Add a watcher exclusion pattern at runtime |
+| `list_exclusions` | List all runtime watcher exclusion patterns |
 
 ### At Session Start
 
