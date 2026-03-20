@@ -70,6 +70,14 @@ func recallToolDef() ToolDefinition {
 					"description": "Filter by memory state: active, fading, archived",
 					"enum":        []string{"active", "fading", "archived"},
 				},
+				"explain": map[string]interface{}{
+					"type":        "boolean",
+					"description": "If true, include score breakdown for each result (activation, recency, source weight, feedback adjustment)",
+				},
+				"include_associations": map[string]interface{}{
+					"type":        "boolean",
+					"description": "If true, include top associated memories for each result (default: false)",
+				},
 			},
 			"required": []string{"query"},
 		},
@@ -330,6 +338,88 @@ func ingestProjectToolDef() ToolDefinition {
 	}
 }
 
+func listSessionsToolDef() ToolDefinition {
+	return ToolDefinition{
+		Name:        "list_sessions",
+		Description: "List recent MCP sessions with metadata (time range, memory count). Useful for finding a specific past session to recall.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"limit": map[string]interface{}{
+					"type":        "integer",
+					"description": "Maximum sessions to return (default: 10)",
+				},
+				"days_back": map[string]interface{}{
+					"type":        "integer",
+					"description": "How many days back to search (default: 30)",
+				},
+			},
+		},
+	}
+}
+
+func recallSessionToolDef() ToolDefinition {
+	return ToolDefinition{
+		Name:        "recall_session",
+		Description: "Retrieve all memories from a specific MCP session, ordered by creation time. Use list_sessions to find session IDs.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"session_id": map[string]interface{}{
+					"type":        "string",
+					"description": "The session ID to recall memories from",
+				},
+				"limit": map[string]interface{}{
+					"type":        "integer",
+					"description": "Maximum memories to return (default: 20)",
+				},
+			},
+			"required": []string{"session_id"},
+		},
+	}
+}
+
+func amendToolDef() ToolDefinition {
+	return ToolDefinition{
+		Name:        "amend",
+		Description: "Update a memory's content while preserving its ID, associations, activation history, and salience. Use when a recalled memory is stale or incorrect. Records an audit trail of the change.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"memory_id": map[string]interface{}{
+					"type":        "string",
+					"description": "The memory ID to amend",
+				},
+				"corrected_content": map[string]interface{}{
+					"type":        "string",
+					"description": "The updated memory content",
+				},
+			},
+			"required": []string{"memory_id", "corrected_content"},
+		},
+	}
+}
+
+func checkMemoryToolDef() ToolDefinition {
+	return ToolDefinition{
+		Name:        "check_memory",
+		Description: "Inspect a memory's encoding status, extracted concepts, associations, and current salience. Use raw_id (from remember) or memory_id to look up a specific memory.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"raw_id": map[string]interface{}{
+					"type":        "string",
+					"description": "The raw memory ID returned by remember",
+				},
+				"memory_id": map[string]interface{}{
+					"type":        "string",
+					"description": "The encoded memory ID",
+				},
+			},
+		},
+	}
+}
+
 // allToolDefs returns the complete list of MCP tool definitions.
 func allToolDefs() []ToolDefinition {
 	return []ToolDefinition{
@@ -346,5 +436,9 @@ func allToolDefs() []ToolDefinition {
 		auditEncodingsToolDef(),
 		coachLocalLLMToolDef(),
 		ingestProjectToolDef(),
+		listSessionsToolDef(),
+		recallSessionToolDef(),
+		amendToolDef(),
+		checkMemoryToolDef(),
 	}
 }

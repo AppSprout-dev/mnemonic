@@ -245,6 +245,14 @@ func (srv *MCPServer) handleToolCall(ctx context.Context, req *jsonRPCRequest) *
 		result, toolErr = srv.handleCoachLocalLLM(ctx, params.Arguments)
 	case "ingest_project":
 		result, toolErr = srv.handleIngestProject(ctx, params.Arguments)
+	case "list_sessions":
+		result, toolErr = srv.handleListSessions(ctx, params.Arguments)
+	case "recall_session":
+		result, toolErr = srv.handleRecallSession(ctx, params.Arguments)
+	case "amend":
+		result, toolErr = srv.handleAmend(ctx, params.Arguments)
+	case "check_memory":
+		result, toolErr = srv.handleCheckMemory(ctx, params.Arguments)
 	default:
 		return errorResponse(req.ID, -32602, fmt.Sprintf("Unknown tool: %s", params.Name))
 	}
@@ -370,7 +378,8 @@ func (srv *MCPServer) handleRemember(ctx context.Context, args map[string]interf
 
 	srv.log.Info("memory stored", "id", raw.ID, "source", source, "type", memType, "project", project)
 
-	return toolResult(fmt.Sprintf("Stored memory %s (type: %s, project: %s)", raw.ID, memType, project)), nil
+	return toolResult(fmt.Sprintf("Stored memory %s (type: %s, project: %s)\n  Raw ID: %s\n  Initial salience: %.2f\n  Encoding: queued (async)\n\nTip: Use check_memory with raw_id \"%s\" to verify encoding status.",
+		raw.ID, memType, project, raw.ID, raw.InitialSalience, raw.ID)), nil
 }
 
 // handleRecall retrieves memories using semantic search and spread activation.
@@ -415,6 +424,16 @@ func (srv *MCPServer) handleRecall(ctx context.Context, args map[string]interfac
 				concepts = append(concepts, s)
 			}
 		}
+	}
+
+	explain := false
+	if e, ok := args["explain"].(bool); ok {
+		explain = e
+	}
+
+	includeAssociations := false
+	if ia, ok := args["include_associations"].(bool); ok {
+		includeAssociations = ia
 	}
 
 	// If concepts are specified, use concept-based search (no spread activation available)
@@ -486,9 +505,35 @@ func (srv *MCPServer) handleRecall(ctx context.Context, args map[string]interfac
 		if mem.Memory.Content != "" && mem.Memory.Content != mem.Memory.Summary {
 			contentSnippet = fmt.Sprintf("\n   Content: %s", mem.Memory.Content)
 		}
-		text += fmt.Sprintf("%d. [%.3f] %s\n   Summary: %s%s\n   Concepts: %v\n   Created: %s%s\n\n",
+		explanationInfo := ""
+		if explain && mem.Explanation != "" {
+			explanationInfo = fmt.Sprintf("\n   Explanation: %s", mem.Explanation)
+		}
+		associationInfo := ""
+		if includeAssociations {
+			assocs, aErr := srv.store.GetAssociations(ctx, mem.Memory.ID)
+			if aErr == nil && len(assocs) > 0 {
+				limit := 3
+				if len(assocs) < limit {
+					limit = len(assocs)
+				}
+				associationInfo = "\n   Related:"
+				for j := 0; j < limit; j++ {
+					a := assocs[j]
+					targetSummary := a.TargetID[:8]
+					if tm, tErr := srv.store.GetMemory(ctx, a.TargetID); tErr == nil {
+						targetSummary = tm.Summary
+						if len(targetSummary) > 80 {
+							targetSummary = targetSummary[:80] + "..."
+						}
+					}
+					associationInfo += fmt.Sprintf("\n     - [%.2f, %s] %s", a.Strength, a.RelationType, targetSummary)
+				}
+			}
+		}
+		text += fmt.Sprintf("%d. [%.3f] %s\n   Summary: %s%s\n   Concepts: %v\n   Created: %s%s%s%s\n\n",
 			i+1, mem.Score, mem.Memory.ID, mem.Memory.Summary, contentSnippet,
-			mem.Memory.Concepts, mem.Memory.CreatedAt.Format("2006-01-02 15:04"), projectInfo)
+			mem.Memory.Concepts, mem.Memory.CreatedAt.Format("2006-01-02 15:04"), projectInfo, explanationInfo, associationInfo)
 	}
 
 	if result.Synthesis != "" {
@@ -1051,11 +1096,49 @@ func (srv *MCPServer) handleFeedback(ctx context.Context, args map[string]interf
 		}
 	}
 
+	// Update per-memory feedback scores for auto-suppression.
+	// Uses memoryIDs from the feedback call (the memories that were returned).
+	suppressionThreshold := -3
+	suppressed := 0
+	unsuppressed := 0
+	for _, memID := range memoryIDs {
+		mem, err := srv.store.GetMemory(ctx, memID)
+		if err != nil {
+			continue
+		}
+		switch quality {
+		case "helpful":
+			mem.FeedbackScore++
+			// Lift suppression if a helpful rating comes in
+			if mem.RecallSuppressed {
+				mem.RecallSuppressed = false
+				unsuppressed++
+			}
+		case "irrelevant":
+			mem.FeedbackScore--
+		}
+		// Check suppression threshold
+		if mem.FeedbackScore <= suppressionThreshold && !mem.RecallSuppressed {
+			mem.RecallSuppressed = true
+			suppressed++
+		}
+		mem.UpdatedAt = time.Now()
+		if err := srv.store.UpdateMemory(ctx, mem); err != nil {
+			srv.log.Warn("failed to update memory feedback score", "memory_id", memID, "error", err)
+		}
+	}
+
 	srv.log.Info("feedback recorded", "query", query, "quality", quality, "query_id", queryID, "adjustments", adjustments)
 
 	responseText := fmt.Sprintf("Feedback recorded: %s (query: %q)", quality, query)
 	if adjustments > 0 {
 		responseText += fmt.Sprintf(" — adjusted %d association strengths", adjustments)
+	}
+	if suppressed > 0 {
+		responseText += fmt.Sprintf(", suppressed %d memories from future recall", suppressed)
+	}
+	if unsuppressed > 0 {
+		responseText += fmt.Sprintf(", un-suppressed %d memories", unsuppressed)
 	}
 
 	return toolResult(responseText), nil
@@ -1343,9 +1426,6 @@ func parseRecallFilters(args map[string]interface{}) (source, state string, minS
 
 // filterMemories filters a slice of memories by source, state, and minimum salience.
 func filterMemories(memories []store.Memory, source, state string, minSalience float32) []store.Memory {
-	if source == "" && state == "" && minSalience <= 0 {
-		return memories
-	}
 	var filtered []store.Memory
 	for _, m := range memories {
 		if source != "" && m.Source != source {
@@ -1355,6 +1435,9 @@ func filterMemories(memories []store.Memory, source, state string, minSalience f
 			continue
 		}
 		if minSalience > 0 && m.Salience < minSalience {
+			continue
+		}
+		if m.RecallSuppressed {
 			continue
 		}
 		filtered = append(filtered, m)
@@ -1401,4 +1484,189 @@ func (srv *MCPServer) onSessionEnd(ctx context.Context) {
 	}
 
 	srv.log.Info("MCP session ended", "session_id", srv.sessionID, "memories_created", memCount)
+}
+
+// handleListSessions returns recent MCP sessions with metadata.
+func (srv *MCPServer) handleListSessions(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+	limit := 10
+	if l, ok := args["limit"].(float64); ok && int(l) > 0 {
+		limit = int(l)
+	}
+
+	daysBack := 30
+	if d, ok := args["days_back"].(float64); ok && int(d) > 0 {
+		daysBack = int(d)
+	}
+
+	since := time.Now().AddDate(0, 0, -daysBack)
+	sessions, err := srv.store.ListSessions(ctx, since, limit)
+	if err != nil {
+		return nil, fmt.Errorf("listing sessions: %w", err)
+	}
+
+	if len(sessions) == 0 {
+		return toolResult("No sessions found."), nil
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Found %d sessions:\n\n", len(sessions))
+	for i, s := range sessions {
+		fmt.Fprintf(&sb, "%d. %s\n   Time: %s to %s\n   Memories: %d\n\n",
+			i+1, s.SessionID,
+			s.StartTime.Format("2006-01-02 15:04"),
+			s.EndTime.Format("2006-01-02 15:04"),
+			s.MemoryCount)
+	}
+	return toolResult(sb.String()), nil
+}
+
+// handleRecallSession retrieves all memories from a specific session.
+func (srv *MCPServer) handleRecallSession(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+	sessionID, ok := args["session_id"].(string)
+	if !ok || sessionID == "" {
+		return nil, fmt.Errorf("session_id parameter is required")
+	}
+
+	limit := 20
+	if l, ok := args["limit"].(float64); ok && int(l) > 0 {
+		limit = int(l)
+	}
+
+	memories, err := srv.store.GetSessionMemories(ctx, sessionID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("getting session memories: %w", err)
+	}
+
+	if len(memories) == 0 {
+		return toolResult(fmt.Sprintf("No memories found for session %s.", sessionID)), nil
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Session %s (%d memories):\n\n", sessionID, len(memories))
+	for i, mem := range memories {
+		fmt.Fprintf(&sb, "%d. [%s] %s\n   Summary: %s\n   Concepts: %v\n   Type: %s\n\n",
+			i+1, mem.CreatedAt.Format("15:04:05"), mem.ID, mem.Summary, mem.Concepts, mem.Type)
+	}
+	return toolResult(sb.String()), nil
+}
+
+// handleAmend updates a memory's content in place, preserving associations and history.
+func (srv *MCPServer) handleAmend(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+	memoryID, ok := args["memory_id"].(string)
+	if !ok || memoryID == "" {
+		return nil, fmt.Errorf("memory_id parameter is required")
+	}
+
+	correctedContent, ok := args["corrected_content"].(string)
+	if !ok || correctedContent == "" {
+		return nil, fmt.Errorf("corrected_content parameter is required")
+	}
+
+	// Generate a simple summary (first 120 chars of content)
+	summary := correctedContent
+	if len(summary) > 120 {
+		summary = summary[:120] + "..."
+	}
+
+	// Use empty concepts and embedding — encoding agent can re-process if needed
+	if err := srv.store.AmendMemory(ctx, memoryID, correctedContent, summary, nil, nil); err != nil {
+		srv.log.Error("failed to amend memory", "memory_id", memoryID, "error", err)
+		return nil, fmt.Errorf("failed to amend memory: %w", err)
+	}
+
+	// Publish event
+	if srv.bus != nil {
+		_ = srv.bus.Publish(ctx, events.MemoryAmended{
+			MemoryID:   memoryID,
+			NewSummary: summary,
+			Ts:         time.Now(),
+		})
+	}
+
+	srv.log.Info("memory amended", "memory_id", memoryID)
+	return toolResult(fmt.Sprintf("Amended memory %s. Content updated, associations and history preserved. Salience bumped +0.05.", memoryID)), nil
+}
+
+// handleCheckMemory inspects a memory's encoding status, concepts, and associations.
+func (srv *MCPServer) handleCheckMemory(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+	rawID, _ := args["raw_id"].(string)
+	memoryID, _ := args["memory_id"].(string)
+
+	if rawID == "" && memoryID == "" {
+		return nil, fmt.Errorf("at least one of raw_id or memory_id is required")
+	}
+
+	// Try to find the encoded memory
+	var mem store.Memory
+	var found bool
+
+	if memoryID != "" {
+		m, err := srv.store.GetMemory(ctx, memoryID)
+		if err == nil {
+			mem = m
+			found = true
+		}
+	}
+
+	if !found && rawID != "" {
+		m, err := srv.store.GetMemoryByRawID(ctx, rawID)
+		if err == nil {
+			mem = m
+			found = true
+		}
+	}
+
+	if !found {
+		// Check if the raw memory exists but hasn't been encoded yet
+		if rawID != "" {
+			raw, err := srv.store.GetRaw(ctx, rawID)
+			if err != nil {
+				return toolResult(fmt.Sprintf("No memory found for raw_id %q or memory_id %q.", rawID, memoryID)), nil
+			}
+			status := "pending"
+			if raw.Processed {
+				status = "processed (encoding may have been deduplicated)"
+			}
+			return toolResult(fmt.Sprintf("Raw memory %s found but not yet encoded.\n  Status: %s\n  Source: %s\n  Type: %s\n  Salience: %.2f\n  Created: %s",
+				raw.ID, status, raw.Source, raw.Type, raw.InitialSalience, raw.CreatedAt.Format(time.RFC3339))), nil
+		}
+		return toolResult(fmt.Sprintf("No memory found for memory_id %q.", memoryID)), nil
+	}
+
+	// Get associations
+	assocs, err := srv.store.GetAssociations(ctx, mem.ID)
+	if err != nil {
+		assocs = nil
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Memory %s (encoded)\n", mem.ID)
+	fmt.Fprintf(&sb, "  Raw ID: %s\n", mem.RawID)
+	fmt.Fprintf(&sb, "  Summary: %s\n", mem.Summary)
+	fmt.Fprintf(&sb, "  Concepts: %v\n", mem.Concepts)
+	fmt.Fprintf(&sb, "  Salience: %.2f\n", mem.Salience)
+	fmt.Fprintf(&sb, "  State: %s\n", mem.State)
+	fmt.Fprintf(&sb, "  Access count: %d\n", mem.AccessCount)
+	fmt.Fprintf(&sb, "  Source: %s\n", mem.Source)
+	fmt.Fprintf(&sb, "  Type: %s\n", mem.Type)
+	fmt.Fprintf(&sb, "  Created: %s\n", mem.CreatedAt.Format(time.RFC3339))
+	fmt.Fprintf(&sb, "  Associations: %d\n", len(assocs))
+
+	for i, a := range assocs {
+		if i >= 5 {
+			fmt.Fprintf(&sb, "  ... and %d more\n", len(assocs)-5)
+			break
+		}
+		targetMem, err := srv.store.GetMemory(ctx, a.TargetID)
+		summary := a.TargetID
+		if err == nil {
+			summary = targetMem.Summary
+			if len(summary) > 80 {
+				summary = summary[:80] + "..."
+			}
+		}
+		fmt.Fprintf(&sb, "    [%.2f, %s] %s\n", a.Strength, a.RelationType, summary)
+	}
+
+	return toolResult(sb.String()), nil
 }

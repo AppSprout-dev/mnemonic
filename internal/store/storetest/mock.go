@@ -52,6 +52,12 @@ func (MockStore) ListMemories(context.Context, string, int, int) ([]store.Memory
 }
 func (MockStore) CountMemories(context.Context) (int, error) { return 0, nil }
 
+// --- Memory amendment ---
+
+func (MockStore) AmendMemory(context.Context, string, string, string, []string, []float32) error {
+	return nil
+}
+
 // --- Search operations ---
 
 func (MockStore) SearchByFullText(context.Context, string, int) ([]store.Memory, error) {
@@ -257,6 +263,15 @@ func (MockStore) GetProjectSummary(context.Context, string) (map[string]interfac
 	return nil, nil
 }
 func (MockStore) ListProjects(context.Context) ([]string, error) { return nil, nil }
+
+// --- Session queries ---
+
+func (MockStore) ListSessions(context.Context, time.Time, int) ([]store.SessionSummary, error) {
+	return nil, nil
+}
+func (MockStore) GetSessionMemories(context.Context, string, int) ([]store.Memory, error) {
+	return nil, nil
+}
 
 // --- Housekeeping ---
 

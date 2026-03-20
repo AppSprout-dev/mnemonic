@@ -434,6 +434,32 @@ CREATE INDEX IF NOT EXISTS idx_tool_usage_tool ON tool_usage(tool_name);
 	// Step 2: Create unique partial index (allows NULLs for gist/consolidated memories).
 	_, _ = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_memories_raw_id_unique ON memories(raw_id) WHERE raw_id IS NOT NULL`)
 
+	// Migration 012: Feedback score and recall suppression for negative feedback auto-suppression.
+	_, err = db.Exec(`ALTER TABLE memories ADD COLUMN feedback_score INTEGER NOT NULL DEFAULT 0`)
+	if err != nil && !isAlterTableDuplicateColumn(err) {
+		return fmt.Errorf("failed to add memories.feedback_score column: %w", err)
+	}
+	_, err = db.Exec(`ALTER TABLE memories ADD COLUMN recall_suppressed INTEGER NOT NULL DEFAULT 0`)
+	if err != nil && !isAlterTableDuplicateColumn(err) {
+		return fmt.Errorf("failed to add memories.recall_suppressed column: %w", err)
+	}
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_memories_suppressed ON memories(recall_suppressed) WHERE recall_suppressed = 1`)
+
+	// Migration 013: Memory amendments audit trail.
+	_, _ = db.Exec(`
+CREATE TABLE IF NOT EXISTS memory_amendments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    memory_id TEXT NOT NULL,
+    old_content TEXT NOT NULL,
+    old_summary TEXT NOT NULL,
+    new_content TEXT NOT NULL,
+    new_summary TEXT NOT NULL,
+    amended_at TEXT NOT NULL DEFAULT (datetime('now')),
+    source TEXT NOT NULL DEFAULT 'mcp'
+);
+CREATE INDEX IF NOT EXISTS idx_amendments_memory ON memory_amendments(memory_id);
+`)
+
 	return nil
 }
 

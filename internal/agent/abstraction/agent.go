@@ -383,6 +383,10 @@ func (aa *AbstractionAgent) verifyGrounding(ctx context.Context, report *CycleRe
 
 			groundingRatio := float32(activeEvidence) / float32(totalEvidence)
 
+			// Grace period: young abstractions (< 7 days) get a confidence floor
+			ageHours := time.Since(abs.CreatedAt).Hours()
+			isYoung := ageHours < 7*24
+
 			// Access-count protection: frequently-retrieved abstractions resist decay
 			if abs.AccessCount > 5 && groundingRatio >= 0.1 {
 				continue
@@ -401,12 +405,17 @@ func (aa *AbstractionAgent) verifyGrounding(ctx context.Context, report *CycleRe
 				abs.Confidence *= 0.7
 				report.AbstractionsDemoted++
 			default:
-				// Nearly all evidence gone: aggressive demotion
-				abs.Confidence *= 0.3
+				// Nearly all evidence gone: softened demotion (was 0.3, now 0.5)
+				abs.Confidence *= 0.5
 				if abs.Confidence < 0.1 {
 					abs.State = "fading"
 				}
 				report.AbstractionsDemoted++
+			}
+
+			// Enforce grace period floor for young abstractions
+			if isYoung && abs.Confidence < 0.5 {
+				abs.Confidence = 0.5
 			}
 
 			abs.UpdatedAt = time.Now()

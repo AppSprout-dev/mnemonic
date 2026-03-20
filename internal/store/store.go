@@ -63,11 +63,13 @@ type Memory struct {
 	State        string    `json:"state"`                // "active", "fading", "archived", "merged"
 	GistOf       []string  `json:"gist_of,omitempty"`    // if merged: source memory IDs
 	EpisodeID    string    `json:"episode_id,omitempty"` // link to parent episode
-	Source       string    `json:"source,omitempty"`     // origin: "filesystem", "terminal", "clipboard", "mcp", "consolidation"
-	Project      string    `json:"project,omitempty"`
-	SessionID    string    `json:"session_id,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	Source          string    `json:"source,omitempty"`     // origin: "filesystem", "terminal", "clipboard", "mcp", "consolidation"
+	Project         string    `json:"project,omitempty"`
+	SessionID       string    `json:"session_id,omitempty"`
+	FeedbackScore   int       `json:"feedback_score"`    // accumulated: helpful=+1, irrelevant=-1
+	RecallSuppressed bool     `json:"recall_suppressed"` // true when feedback_score <= suppression threshold
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 // Association is a weighted link between two memories.
@@ -317,6 +319,15 @@ type Abstraction struct {
 	UpdatedAt        time.Time `json:"updated_at"`
 }
 
+// SessionSummary aggregates metadata about an MCP session.
+type SessionSummary struct {
+	SessionID   string    `json:"session_id"`
+	StartTime   time.Time `json:"start_time"`
+	EndTime     time.Time `json:"end_time"`
+	MemoryCount int       `json:"memory_count"`
+	TopConcepts []string  `json:"top_concepts"`
+}
+
 // TraversedAssoc records an association traversed during spread activation.
 type TraversedAssoc struct {
 	SourceID string `json:"source_id"`
@@ -368,6 +379,9 @@ type Store interface {
 	IncrementAccess(ctx context.Context, id string) error
 	ListMemories(ctx context.Context, state string, limit, offset int) ([]Memory, error)
 	CountMemories(ctx context.Context) (int, error)
+
+	// --- Memory amendment ---
+	AmendMemory(ctx context.Context, id string, newContent string, newSummary string, newConcepts []string, newEmbedding []float32) error
 
 	// --- Search operations ---
 	SearchByFullText(ctx context.Context, query string, limit int) ([]Memory, error)
@@ -474,6 +488,10 @@ type Store interface {
 	ListMemoriesBySession(ctx context.Context, sessionID string) ([]Memory, error)
 	GetProjectSummary(ctx context.Context, project string) (map[string]interface{}, error)
 	ListProjects(ctx context.Context) ([]string, error)
+
+	// --- Session queries ---
+	ListSessions(ctx context.Context, since time.Time, limit int) ([]SessionSummary, error)
+	GetSessionMemories(ctx context.Context, sessionID string, limit int) ([]Memory, error)
 
 	// --- Housekeeping ---
 	GetStatistics(ctx context.Context) (StoreStatistics, error)
