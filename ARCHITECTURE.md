@@ -128,31 +128,47 @@ Raw Event → Size Filter → Pattern Blacklist → Frequency Dedup → Content 
 
 ### Layer 2 — Encoding (Compression & Linking)
 
-Triggered by `RawMemoryCreated` event:
-1. LLM compresses raw content → summary + concepts (structured output)
-2. Generate embedding via embedding provider
-3. Find similar memories via embedding + FTS
-4. Create association links with strength weights
-5. Emit `MemoryEncoded` event
+Triggered by `RawMemoryCreated` event. MCP-sourced memories are processed first (priority queue by source).
+
+1. Atomic claim via `ClaimRawForEncoding` (prevents duplicate encoding across processes)
+2. LLM compresses raw content → summary + concepts (structured output, enforced vocabulary)
+3. Post-process concepts: strip metadata, normalize casing, deduplicate
+4. Generate embedding via embedding provider
+5. Deduplication check: if cosine similarity > threshold, boost existing memory instead
+6. Find similar memories via embedding + FTS, create association links
+7. Emit `MemoryEncoded` event
 
 ### Layer 3 — Consolidation (Sleep Cycle)
 
 Runs every 6 hours (or on-demand). **Budget-constrained**: max 100 memories per cycle.
 
 Operations in order:
-1. **Decay**: `new_salience = salience * decay_rate^(hours_since_access)`
+1. **Decay**: `new_salience = salience * decay_rate^(hours_since_access)` with recency protection
 2. **State transitions**: active → fading (< 0.3) → archived (< 0.1) → deleted (> 90 days)
 3. **Strengthen**: Recently accessed memories get salience boost
 4. **Prune associations**: Weaken/remove low-strength, never-activated links
 5. **Merge** (max 5 per cycle): Cluster highly-related memories → LLM creates gist memory
+6. **Archive never-recalled noise**: Non-MCP memories with 0 access after 30 days → archived
+7. **Pattern extraction**: Identify recurring themes, deduplicate near-identical patterns
+8. **Abstraction dedup**: Archive zombie abstractions with near-zero confidence
 
 ### Layer 4 — Retrieval (Associative Recall)
 
 ```
-Query → [Parse + Embed] → Entry Points (FTS top 3 + Embedding top 3) → Spread Activation (3 hops) → Rank → Top 7 → [Optional: LLM Synthesis]
+Query → [Parse + Embed] → Entry Points (FTS + Embedding) → Spread Activation (3 hops) → Rank → Filter → Diversity (MMR) → [Optional: LLM Synthesis]
 ```
 
-Spread activation follows strongest association links, with activation decaying per hop. Every accessed memory gets strengthened (access_count++, last_accessed updated).
+Ranking considers multiple signals:
+- **Activation score** from spread activation traversal
+- **Recency bonus** (exponential decay from last access)
+- **Source weight** (MCP: 1.0, terminal: 0.8, filesystem: 0.5 -- configurable)
+- **Feedback adjustment** (memories rated helpful get boosted, irrelevant get penalized)
+- **Pattern evidence boost** (+0.1 for memories supporting matched patterns, +0.05 for abstraction sources)
+- **Significance multiplier** (critical/important memories from structured concept extraction)
+
+Suppressed memories (accumulated negative feedback) are filtered out by default. Every accessed memory gets strengthened (access_count++, last_accessed updated).
+
+The `recall` tool supports `explain: true` to surface score breakdowns, `include_associations: true` to show the knowledge graph, and `format: "json"` for structured output.
 
 ### Layer 5 — Episoding (Temporal Clustering)
 
@@ -195,7 +211,7 @@ Runs periodically (default every 2 hours). Builds hierarchical knowledge:
 - **Level 2 — Principles**: Generalizations across patterns
 - **Level 3 — Axioms**: Fundamental truths with high confidence
 
-Abstractions are grounded in evidence. Those that lose supporting evidence are demoted or archived.
+Abstractions are grounded in evidence via `verifyGrounding()`. Young abstractions (< 7 days) have a confidence floor of 0.5 to prevent premature demotion. Frequently accessed abstractions (> 5 recalls) resist decay. Demotion is graduated: 0.9x for moderate evidence loss, 0.7x for significant, 0.5x for near-total (softened from 0.3x).
 
 ### Layer 9 — Reactor (Event-Driven Rules)
 
@@ -236,6 +252,7 @@ GET    /abstractions            Hierarchical abstractions
 GET    /projects                Project summaries
 
 GET    /llm/usage               LLM token usage by agent
+GET    /tool/usage              MCP tool call analytics
 
 GET    /graph                   Association graph for D3.js visualization
 
@@ -265,6 +282,7 @@ Served at `http://localhost:9999/`. Features:
 - Query tester with score explanations
 - System health (LLM status, store health, watcher status)
 - LLM usage monitoring (per-agent token consumption and cost)
+- MCP tool usage analytics (call frequency, latency, error rates)
 - Memory source tags (hoverable, showing origin: filesystem, terminal, clipboard, MCP, consolidation)
 - 5 themes: Midnight, Ember, Nord, Slate, Parchment (persists in localStorage)
 - Agent SDK dashboard: evolution state, principles, strategies, session timeline, chat
@@ -442,6 +460,47 @@ CREATE TABLE llm_usage (
     latency_ms INTEGER NOT NULL DEFAULT 0,
     success INTEGER NOT NULL DEFAULT 1
 );
+
+-- MCP tool usage tracking
+CREATE TABLE tool_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    session_id TEXT NOT NULL DEFAULT '',
+    project TEXT NOT NULL DEFAULT '',
+    latency_ms INTEGER NOT NULL DEFAULT 0,
+    success INTEGER NOT NULL DEFAULT 1,
+    error_message TEXT NOT NULL DEFAULT '',
+    query_text TEXT NOT NULL DEFAULT '',
+    result_count INTEGER NOT NULL DEFAULT 0,
+    memory_type TEXT NOT NULL DEFAULT '',
+    rating TEXT NOT NULL DEFAULT '',
+    response_size INTEGER NOT NULL DEFAULT 0
+);
+
+-- Memory amendment audit trail
+CREATE TABLE memory_amendments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    memory_id TEXT NOT NULL,
+    old_content TEXT NOT NULL,
+    old_summary TEXT NOT NULL,
+    new_content TEXT NOT NULL,
+    new_summary TEXT NOT NULL,
+    amended_at TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'mcp'
+);
+
+-- Runtime watcher exclusions (managed via MCP tools)
+CREATE TABLE runtime_exclusions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pattern TEXT NOT NULL UNIQUE,
+    source TEXT NOT NULL DEFAULT 'mcp',
+    created_at TEXT NOT NULL
+);
+
+-- Additional columns on memories table (added via migrations):
+-- feedback_score INTEGER DEFAULT 0     — accumulated feedback (helpful=+1, irrelevant=-1)
+-- recall_suppressed INTEGER DEFAULT 0  — auto-suppressed when feedback_score <= -3
 ```
 
 ---
@@ -493,7 +552,7 @@ mnemonic/
 │   │   ├── server.go                      # Static file serving (go:embed)
 │   │   └── static/index.html              # Dashboard (D3.js graph, live feed, query tester)
 │   ├── ingest/                            # Project ingestion engine
-│   ├── mcp/server.go                      # MCP server (13 tools for Claude Code)
+│   ├── mcp/server.go                      # MCP server (19 tools for Claude Code)
 │   ├── backup/                            # Export/import logic
 │   ├── daemon/                            # Service management (macOS LaunchAgent + Linux systemd)
 │   ├── config/config.go                   # Configuration loading
