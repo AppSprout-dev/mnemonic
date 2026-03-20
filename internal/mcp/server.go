@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -56,6 +57,10 @@ type MCPServer struct {
 	coachingFile    string // path for coach_local_llm writes
 	excludePatterns []string
 	maxContentBytes int
+
+	// Proactive context state (session-scoped)
+	lastContextTime    time.Time          // watermark for get_context polling
+	sessionRecalledIDs map[string]bool    // memory IDs already surfaced via recall this session
 }
 
 // NewMCPServer creates a new MCP server with the given dependencies.
@@ -85,8 +90,10 @@ func NewMCPServer(s store.Store, r *retrieval.RetrievalAgent, bus events.Bus, lo
 		project:         project,
 		resolver:        resolver,
 		coachingFile:    coachingFile,
-		excludePatterns: excludePatterns,
-		maxContentBytes: maxContentBytes,
+		excludePatterns:    excludePatterns,
+		maxContentBytes:    maxContentBytes,
+		lastContextTime:    time.Now(),
+		sessionRecalledIDs: make(map[string]bool),
 	}
 }
 
@@ -225,6 +232,8 @@ func (srv *MCPServer) handleToolCall(ctx context.Context, req *jsonRPCRequest) *
 		result, toolErr = srv.handleRecall(ctx, params.Arguments)
 	case "batch_recall":
 		result, toolErr = srv.handleBatchRecall(ctx, params.Arguments)
+	case "get_context":
+		result, toolErr = srv.handleGetContext(ctx, params.Arguments)
 	case "forget":
 		result, toolErr = srv.handleForget(ctx, params.Arguments)
 	case "status":
@@ -513,6 +522,11 @@ func (srv *MCPServer) handleRecall(ctx context.Context, args map[string]interfac
 		AccessSnapshot:  snapshot,
 		CreatedAt:       time.Now(),
 	}
+	// Track recalled IDs for proactive context dedup.
+	for _, id := range retrievedIDs {
+		srv.sessionRecalledIDs[id] = true
+	}
+
 	if err := srv.store.WriteRetrievalFeedback(ctx, fb); err != nil {
 		srv.log.Warn("failed to save retrieval feedback record", "query_id", result.QueryID, "error", err)
 	}
@@ -789,6 +803,172 @@ func (srv *MCPServer) handleBatchRecall(ctx context.Context, args map[string]int
 
 	srv.log.Info("batch recall completed", "queries", len(queriesRaw))
 	return toolResult(string(jsonBytes)), nil
+}
+
+// handleGetContext returns proactive memory suggestions based on recent daemon activity.
+// It reads recent watcher events from the DB, extracts concepts, and finds related
+// encoded memories the agent hasn't already recalled this session.
+func (srv *MCPServer) handleGetContext(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+	sinceMinutes := 10
+	if m, ok := args["since_minutes"].(float64); ok && int(m) > 0 {
+		sinceMinutes = int(m)
+	}
+
+	limit := 5
+	if l, ok := args["limit"].(float64); ok && int(l) > 0 {
+		limit = int(l)
+	}
+
+	outputFormat := "text"
+	if f, ok := args["format"].(string); ok && f == "json" {
+		outputFormat = f
+	}
+
+	// Use watermark if available, otherwise use since_minutes.
+	since := srv.lastContextTime
+	sinceOverride := time.Now().Add(-time.Duration(sinceMinutes) * time.Minute)
+	if sinceOverride.Before(since) {
+		since = sinceOverride
+	}
+
+	// Step 1: Fetch recent raw memories (watcher activity).
+	raws, err := srv.store.ListRawMemoriesAfter(ctx, since, 50)
+	if err != nil {
+		return nil, fmt.Errorf("listing recent activity: %w", err)
+	}
+
+	// Filter to current project if set, and exclude MCP source (agent's own memories).
+	var relevant []store.RawMemory
+	for _, raw := range raws {
+		if raw.Source == "mcp" {
+			continue // Skip agent's own memories — we want daemon observations.
+		}
+		if srv.project != "" && raw.Project != "" && raw.Project != srv.project {
+			continue
+		}
+		relevant = append(relevant, raw)
+	}
+
+	if len(relevant) == 0 {
+		srv.lastContextTime = time.Now()
+		return toolResult("No recent activity detected. The daemon watcher hasn't observed new events since your last check."), nil
+	}
+
+	// Step 2: Extract concepts from recent activity.
+	conceptCounts := make(map[string]int)
+	for _, raw := range relevant {
+		// Prefer encoded memory concepts if available.
+		mem, err := srv.store.GetMemoryByRawID(ctx, raw.ID)
+		var concepts []string
+		if err == nil && len(mem.Concepts) > 0 {
+			concepts = mem.Concepts
+		} else {
+			concepts = retrieval.ParseQueryConcepts(raw.Content)
+		}
+		for _, c := range concepts {
+			conceptCounts[c]++
+		}
+	}
+
+	if len(conceptCounts) == 0 {
+		srv.lastContextTime = time.Now()
+		return toolResult("Recent activity detected but no meaningful concepts extracted."), nil
+	}
+
+	// Step 3: Rank concepts by frequency, take top 8.
+	type conceptFreq struct {
+		concept string
+		count   int
+	}
+	var ranked []conceptFreq
+	for c, n := range conceptCounts {
+		ranked = append(ranked, conceptFreq{c, n})
+	}
+	sort.Slice(ranked, func(i, j int) bool {
+		return ranked[i].count > ranked[j].count
+	})
+	topN := 8
+	if len(ranked) < topN {
+		topN = len(ranked)
+	}
+	topConcepts := make([]string, topN)
+	for i := 0; i < topN; i++ {
+		topConcepts[i] = ranked[i].concept
+	}
+
+	// Step 4: Search for related encoded memories.
+	candidates, err := srv.store.SearchByConceptsInProject(ctx, topConcepts, srv.project, limit*3)
+	if err != nil {
+		srv.log.Warn("proactive context search failed", "error", err)
+		candidates = nil
+	}
+
+	// Step 5: Filter — exclude already-recalled, suppressed, archived, low-match.
+	var suggestions []store.Memory
+	for _, mem := range candidates {
+		if srv.sessionRecalledIDs[mem.ID] {
+			continue
+		}
+		if mem.RecallSuppressed {
+			continue
+		}
+		if mem.State == "archived" {
+			continue
+		}
+		// Require at least 2 concept matches.
+		matches := 0
+		for _, mc := range mem.Concepts {
+			if conceptCounts[mc] > 0 {
+				matches++
+			}
+		}
+		if matches < 2 {
+			continue
+		}
+		suggestions = append(suggestions, mem)
+		if len(suggestions) >= limit {
+			break
+		}
+	}
+
+	// Step 6: Update watermark.
+	srv.lastContextTime = time.Now()
+
+	srv.log.Info("proactive context generated",
+		"recent_events", len(relevant),
+		"themes", topConcepts,
+		"suggestions", len(suggestions))
+
+	// Format output.
+	if outputFormat == "json" {
+		jsonResp := map[string]interface{}{
+			"recent_events": len(relevant),
+			"themes":        topConcepts,
+			"suggestions":   formatMemoriesJSON(suggestions),
+		}
+		jsonBytes, err := json.Marshal(jsonResp)
+		if err != nil {
+			return toolResult("json marshal error"), nil
+		}
+		return toolResult(string(jsonBytes)), nil
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Recent activity: %d events since last check\n", len(relevant))
+	fmt.Fprintf(&sb, "Activity themes: %v\n\n", topConcepts)
+
+	if len(suggestions) == 0 {
+		sb.WriteString("No new context suggestions — you've already recalled the relevant memories.\n")
+	} else {
+		fmt.Fprintf(&sb, "Suggested context (%d memories you haven't recalled):\n\n", len(suggestions))
+		for i, mem := range suggestions {
+			fmt.Fprintf(&sb, "%d. %s\n   Summary: %s\n   Concepts: %v\n   Created: %s\n\n",
+				i+1, mem.ID, mem.Summary, mem.Concepts,
+				mem.CreatedAt.Format("2006-01-02"))
+		}
+	}
+
+	return toolResult(sb.String()), nil
 }
 
 // handleForget archives a memory by ID.

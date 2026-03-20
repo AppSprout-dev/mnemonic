@@ -208,7 +208,7 @@ func (ra *RetrievalAgent) Query(ctx context.Context, req QueryRequest) (QueryRes
 	}
 
 	// Step 1: Parse the query to extract concepts
-	concepts := parseQueryConcepts(req.Query)
+	concepts := ParseQueryConcepts(req.Query)
 	ra.log.Debug("query concepts extracted", "query_id", queryID, "concepts_count", len(concepts))
 
 	// Step 2: Find entry points via full-text search
@@ -984,9 +984,9 @@ func (ra *RetrievalAgent) synthesizeNarrative(ctx context.Context, query string,
 	}
 }
 
-// parseQueryConcepts extracts meaningful tokens from the query text.
-// This is a simple v1 implementation that splits on spaces and filters common words.
-func parseQueryConcepts(query string) []string {
+// ParseQueryConcepts extracts meaningful tokens from text by splitting on spaces
+// and filtering common words. Useful for lightweight concept extraction without LLM.
+func ParseQueryConcepts(query string) []string {
 	commonWords := map[string]bool{
 		"the": true, "a": true, "an": true, "and": true, "or": true, "but": true,
 		"in": true, "on": true, "at": true, "to": true, "for": true, "of": true,
