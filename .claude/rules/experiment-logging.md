@@ -66,3 +66,4 @@ Benchmark results (IR quality, end-to-end Gemini) require:
 - Cherry-pick metrics — report all of them, including unfavorable ones
 - Leave an experiment as "RUNNING" after it finishes
 - Run a benchmark, get a number, and not document methodology
+- Let the registry config drift from what actually ran — if batch size, accum, or any HP changes mid-experiment, update the config line immediately
