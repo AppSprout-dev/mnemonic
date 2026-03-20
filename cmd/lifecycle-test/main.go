@@ -18,12 +18,14 @@ var Version = "dev"
 
 func main() {
 	var (
-		verbose    bool
-		llmMode    bool
-		configPath string
-		report     string
-		phaseFlag  string
-		skipFlag   string
+		verbose        bool
+		llmMode        bool
+		configPath     string
+		report         string
+		phaseFlag      string
+		skipFlag       string
+		checkpointDir  string
+		fromCheckpoint string
 	)
 
 	flag.BoolVar(&verbose, "verbose", false, "verbose output")
@@ -32,6 +34,8 @@ func main() {
 	flag.StringVar(&report, "report", "", "output format: 'markdown' writes lifecycle-results.md")
 	flag.StringVar(&phaseFlag, "phase", "", "run a single phase by name (auto-seeds prerequisites)")
 	flag.StringVar(&skipFlag, "skip", "", "comma-separated phases to skip")
+	flag.StringVar(&checkpointDir, "checkpoint", "", "save DB snapshot after each phase to this directory")
+	flag.StringVar(&fromCheckpoint, "from-checkpoint", "", "load DB from checkpoint file instead of creating fresh")
 	flag.Parse()
 
 	logLevel := slog.LevelError
@@ -99,16 +103,31 @@ func main() {
 
 	ctx := context.Background()
 
-	// Create harness.
-	h, err := NewHarness(provider, log)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating harness: %v\n", err)
-		os.Exit(1)
+	// Create harness — from checkpoint or fresh.
+	var h *Harness
+	if fromCheckpoint != "" {
+		var err error
+		h, err = NewHarnessFromCheckpoint(fromCheckpoint, provider, log)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error loading checkpoint: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("  Loaded checkpoint: %s\n\n", fromCheckpoint)
+	} else {
+		var err error
+		h, err = NewHarness(provider, log)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating harness: %v\n", err)
+			os.Exit(1)
+		}
 	}
 	defer h.Cleanup()
 
+	// When loading from checkpoint, only run the target phase (skip prerequisites).
+	skipPrereqs := fromCheckpoint != ""
+
 	// Run phases.
-	results, err := RunPhases(ctx, h, allPhases, phaseFlag, skipSet, verbose)
+	results, err := RunPhases(ctx, h, allPhases, phaseFlag, skipSet, checkpointDir, skipPrereqs, verbose)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)

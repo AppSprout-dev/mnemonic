@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -86,13 +88,20 @@ func (r *PhaseResult) Passed() bool {
 // RunPhases executes the phases according to the given filters.
 // If phaseFlag is set, only that phase runs (prerequisites are auto-seeded).
 // Phases in skipSet are skipped.
-func RunPhases(ctx context.Context, h *Harness, phases []Phase, phaseFlag string, skipSet map[string]bool, verbose bool) ([]*PhaseResult, error) {
+// If checkpointDir is non-empty, the DB is copied there after each phase.
+func RunPhases(ctx context.Context, h *Harness, phases []Phase, phaseFlag string, skipSet map[string]bool, checkpointDir string, skipPrereqs bool, verbose bool) ([]*PhaseResult, error) {
+	if checkpointDir != "" {
+		if err := os.MkdirAll(checkpointDir, 0o755); err != nil {
+			return nil, fmt.Errorf("creating checkpoint dir: %w", err)
+		}
+	}
+
 	var results []*PhaseResult
 
 	for _, p := range phases {
 		if phaseFlag != "" && p.Name() != phaseFlag {
-			// If targeting a specific phase, silently run prerequisites.
-			if !isPrerequisiteOf(p.Name(), phaseFlag, phases) {
+			// If targeting a specific phase, run prerequisites unless loading from checkpoint.
+			if skipPrereqs || !isPrerequisiteOf(p.Name(), phaseFlag, phases) {
 				continue
 			}
 		}
@@ -119,9 +128,28 @@ func RunPhases(ctx context.Context, h *Harness, phases []Phase, phaseFlag string
 		fmt.Printf("\r  [%s] %s (%dms)\n", status, p.Name(), result.Duration.Milliseconds())
 
 		results = append(results, result)
+
+		// Save checkpoint after each phase.
+		if checkpointDir != "" {
+			if err := saveCheckpoint(h.DBPath, checkpointDir, p.Name()); err != nil {
+				fmt.Printf("  [WARN] checkpoint failed for %s: %v\n", p.Name(), err)
+			} else if verbose {
+				fmt.Printf("  [CKPT] saved %s\n", filepath.Join(checkpointDir, p.Name()+".db"))
+			}
+		}
 	}
 
 	return results, nil
+}
+
+// saveCheckpoint copies the current DB to checkpointDir/phaseName.db.
+func saveCheckpoint(dbPath, checkpointDir, phaseName string) error {
+	src, err := os.ReadFile(dbPath)
+	if err != nil {
+		return fmt.Errorf("reading DB: %w", err)
+	}
+	dst := filepath.Join(checkpointDir, phaseName+".db")
+	return os.WriteFile(dst, src, 0o644)
 }
 
 // isPrerequisiteOf returns true if candidate comes before target in the phase list.

@@ -92,6 +92,72 @@ func NewHarness(provider llm.Provider, log *slog.Logger) (*Harness, error) {
 	return h, nil
 }
 
+// NewHarnessFromCheckpoint loads a DB snapshot and creates agents around it.
+// The checkpoint file is copied to a temp dir so the original is preserved.
+func NewHarnessFromCheckpoint(checkpointPath string, provider llm.Provider, log *slog.Logger) (*Harness, error) {
+	tmpDir, err := os.MkdirTemp("", "mnemonic-lifecycle-*")
+	if err != nil {
+		return nil, fmt.Errorf("creating temp dir: %w", err)
+	}
+
+	dbPath := filepath.Join(tmpDir, "lifecycle.db")
+
+	// Copy checkpoint to temp dir.
+	src, err := os.ReadFile(checkpointPath)
+	if err != nil {
+		_ = os.RemoveAll(tmpDir)
+		return nil, fmt.Errorf("reading checkpoint %s: %w", checkpointPath, err)
+	}
+	if err := os.WriteFile(dbPath, src, 0o644); err != nil {
+		_ = os.RemoveAll(tmpDir)
+		return nil, fmt.Errorf("writing checkpoint copy: %w", err)
+	}
+
+	s, err := sqlite.NewSQLiteStore(dbPath, 5000)
+	if err != nil {
+		_ = os.RemoveAll(tmpDir)
+		return nil, fmt.Errorf("opening checkpoint store: %w", err)
+	}
+
+	bus := events.NewInMemoryBus(100)
+
+	h := &Harness{
+		Store:  s,
+		LLM:    provider,
+		Bus:    bus,
+		Log:    log,
+		Clock:  NewSimClock(),
+		TmpDir: tmpDir,
+		DBPath: dbPath,
+	}
+
+	h.Encoder = encoding.NewEncodingAgentWithConfig(s, provider, log, encoding.DefaultConfig())
+	h.Episoder = episoding.NewEpisodingAgent(s, provider, log, episoding.EpisodingConfig{
+		EpisodeWindowSizeMin: 10,
+		MinEventsPerEpisode:  2,
+		PollingInterval:      10 * time.Second,
+	})
+	h.Consolidator = consolidation.NewConsolidationAgent(s, provider, consolidation.DefaultConfig(), log)
+	h.Dreamer = dreaming.NewDreamingAgent(s, provider, dreaming.DreamingConfig{
+		Interval:               time.Hour,
+		BatchSize:              60,
+		SalienceThreshold:      0.3,
+		AssociationBoostFactor: 1.15,
+		NoisePruneThreshold:    0.15,
+	}, log)
+	h.Abstractor = abstraction.NewAbstractionAgent(s, provider, abstraction.AbstractionConfig{
+		Interval:    time.Hour,
+		MinStrength: 0.4,
+		MaxLLMCalls: 5,
+	}, log)
+	h.Metacog = metacognition.NewMetacognitionAgent(s, provider, metacognition.MetacognitionConfig{
+		Interval: time.Hour,
+	}, log)
+	h.Retriever = retrieval.NewRetrievalAgent(s, provider, retrieval.DefaultConfig(), log)
+
+	return h, nil
+}
+
 // Cleanup removes the temp directory and closes resources.
 func (h *Harness) Cleanup() {
 	_ = h.Bus.Close()
