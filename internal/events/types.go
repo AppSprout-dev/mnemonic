@@ -195,6 +195,19 @@ func (e AssociationsPendingClassification) EventType() string {
 }
 func (e AssociationsPendingClassification) EventTimestamp() time.Time { return e.Ts }
 
+// MemoryAmended is emitted when a memory's content is updated in place.
+const TypeMemoryAmended = "memory_amended"
+
+type MemoryAmended struct {
+	MemoryID   string    `json:"memory_id"`
+	OldSummary string    `json:"old_summary"`
+	NewSummary string    `json:"new_summary"`
+	Ts         time.Time `json:"timestamp"`
+}
+
+func (e MemoryAmended) EventType() string         { return TypeMemoryAmended }
+func (e MemoryAmended) EventTimestamp() time.Time { return e.Ts }
+
 // SessionEnded is emitted when an MCP session disconnects (stdin EOF).
 type SessionEnded struct {
 	SessionID string    `json:"session_id"`

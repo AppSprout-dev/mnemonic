@@ -334,6 +334,27 @@ func ingestProjectToolDef() ToolDefinition {
 	}
 }
 
+func amendToolDef() ToolDefinition {
+	return ToolDefinition{
+		Name:        "amend",
+		Description: "Update a memory's content while preserving its ID, associations, activation history, and salience. Use when a recalled memory is stale or incorrect. Records an audit trail of the change.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"memory_id": map[string]interface{}{
+					"type":        "string",
+					"description": "The memory ID to amend",
+				},
+				"corrected_content": map[string]interface{}{
+					"type":        "string",
+					"description": "The updated memory content",
+				},
+			},
+			"required": []string{"memory_id", "corrected_content"},
+		},
+	}
+}
+
 func checkMemoryToolDef() ToolDefinition {
 	return ToolDefinition{
 		Name:        "check_memory",
@@ -370,6 +391,7 @@ func allToolDefs() []ToolDefinition {
 		auditEncodingsToolDef(),
 		coachLocalLLMToolDef(),
 		ingestProjectToolDef(),
+		amendToolDef(),
 		checkMemoryToolDef(),
 	}
 }

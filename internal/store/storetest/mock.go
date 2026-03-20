@@ -52,6 +52,12 @@ func (MockStore) ListMemories(context.Context, string, int, int) ([]store.Memory
 }
 func (MockStore) CountMemories(context.Context) (int, error) { return 0, nil }
 
+// --- Memory amendment ---
+
+func (MockStore) AmendMemory(context.Context, string, string, string, []string, []float32) error {
+	return nil
+}
+
 // --- Search operations ---
 
 func (MockStore) SearchByFullText(context.Context, string, int) ([]store.Memory, error) {

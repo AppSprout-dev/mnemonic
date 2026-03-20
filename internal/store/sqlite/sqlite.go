@@ -954,6 +954,57 @@ func (s *SQLiteStore) UpdateState(ctx context.Context, id string, state string) 
 	return nil
 }
 
+// AmendMemory updates a memory's content, summary, concepts, and embedding in place,
+// preserving its ID, associations, and lifecycle metadata. Records the amendment for audit.
+func (s *SQLiteStore) AmendMemory(ctx context.Context, id string, newContent string, newSummary string, newConcepts []string, newEmbedding []float32) error {
+	// Fetch old values for audit trail
+	old, err := s.GetMemory(ctx, id)
+	if err != nil {
+		return fmt.Errorf("fetching memory for amendment %s: %w", id, err)
+	}
+
+	conceptsStr, err := encodeStringSlice(newConcepts)
+	if err != nil {
+		return fmt.Errorf("encoding concepts: %w", err)
+	}
+
+	var embeddingBlob []byte
+	if len(newEmbedding) > 0 {
+		embeddingBlob = encodeEmbedding(newEmbedding)
+	}
+
+	now := time.Now().Format(time.RFC3339)
+
+	// Update the memory
+	query := `UPDATE memories SET content = ?, summary = ?, concepts = ?, embedding = ?, salience = salience + 0.05, updated_at = ? WHERE id = ?`
+	result, err := s.db.ExecContext(ctx, query, newContent, newSummary, conceptsStr, embeddingBlob, now, id)
+	if err != nil {
+		return fmt.Errorf("updating memory %s: %w", id, err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking rows affected: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("memory %s: %w", id, store.ErrNotFound)
+	}
+
+	// Update FTS is automatic via triggers
+
+	// Update embedding index
+	if len(newEmbedding) > 0 {
+		s.embIndex.Remove(id)
+		s.embIndex.Add(id, newEmbedding)
+	}
+
+	// Record audit trail
+	_, _ = s.db.ExecContext(ctx,
+		`INSERT INTO memory_amendments (memory_id, old_content, old_summary, new_content, new_summary, amended_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		id, old.Content, old.Summary, newContent, newSummary, now)
+
+	return nil
+}
+
 // IncrementAccess increments the access count and updates last_accessed.
 func (s *SQLiteStore) IncrementAccess(ctx context.Context, id string) error {
 	query := `UPDATE memories SET access_count = access_count + 1, last_accessed = ?, updated_at = ? WHERE id = ?`

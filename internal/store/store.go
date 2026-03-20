@@ -371,6 +371,9 @@ type Store interface {
 	ListMemories(ctx context.Context, state string, limit, offset int) ([]Memory, error)
 	CountMemories(ctx context.Context) (int, error)
 
+	// --- Memory amendment ---
+	AmendMemory(ctx context.Context, id string, newContent string, newSummary string, newConcepts []string, newEmbedding []float32) error
+
 	// --- Search operations ---
 	SearchByFullText(ctx context.Context, query string, limit int) ([]Memory, error)
 	SearchByEmbedding(ctx context.Context, embedding []float32, limit int) ([]RetrievalResult, error)

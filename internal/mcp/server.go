@@ -245,6 +245,8 @@ func (srv *MCPServer) handleToolCall(ctx context.Context, req *jsonRPCRequest) *
 		result, toolErr = srv.handleCoachLocalLLM(ctx, params.Arguments)
 	case "ingest_project":
 		result, toolErr = srv.handleIngestProject(ctx, params.Arguments)
+	case "amend":
+		result, toolErr = srv.handleAmend(ctx, params.Arguments)
 	case "check_memory":
 		result, toolErr = srv.handleCheckMemory(ctx, params.Arguments)
 	default:
@@ -1451,6 +1453,43 @@ func (srv *MCPServer) onSessionEnd(ctx context.Context) {
 	}
 
 	srv.log.Info("MCP session ended", "session_id", srv.sessionID, "memories_created", memCount)
+}
+
+// handleAmend updates a memory's content in place, preserving associations and history.
+func (srv *MCPServer) handleAmend(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+	memoryID, ok := args["memory_id"].(string)
+	if !ok || memoryID == "" {
+		return nil, fmt.Errorf("memory_id parameter is required")
+	}
+
+	correctedContent, ok := args["corrected_content"].(string)
+	if !ok || correctedContent == "" {
+		return nil, fmt.Errorf("corrected_content parameter is required")
+	}
+
+	// Generate a simple summary (first 120 chars of content)
+	summary := correctedContent
+	if len(summary) > 120 {
+		summary = summary[:120] + "..."
+	}
+
+	// Use empty concepts and embedding — encoding agent can re-process if needed
+	if err := srv.store.AmendMemory(ctx, memoryID, correctedContent, summary, nil, nil); err != nil {
+		srv.log.Error("failed to amend memory", "memory_id", memoryID, "error", err)
+		return nil, fmt.Errorf("failed to amend memory: %w", err)
+	}
+
+	// Publish event
+	if srv.bus != nil {
+		_ = srv.bus.Publish(ctx, events.MemoryAmended{
+			MemoryID:   memoryID,
+			NewSummary: summary,
+			Ts:         time.Now(),
+		})
+	}
+
+	srv.log.Info("memory amended", "memory_id", memoryID)
+	return toolResult(fmt.Sprintf("Amended memory %s. Content updated, associations and history preserved. Salience bumped +0.05.", memoryID)), nil
 }
 
 // handleCheckMemory inspects a memory's encoding status, concepts, and associations.
