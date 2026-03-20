@@ -514,6 +514,61 @@ type Store interface {
 	GetToolUsageLog(ctx context.Context, since time.Time, limit int) ([]ToolUsageRecord, error)
 	GetToolUsageChart(ctx context.Context, since time.Time, bucketSecs int) ([]ToolChartBucket, error)
 
+	// --- Research analytics ---
+	GetAnalytics(ctx context.Context) (AnalyticsData, error)
+
 	// --- Lifecycle ---
 	Close() error
+}
+
+// AnalyticsData holds research-grade metrics about the memory system.
+type AnalyticsData struct {
+	TotalRaw             int
+	SignalNoise          map[string]SignalNoiseEntry
+	RecallEffectiveness  []RecallBucket
+	FeedbackTrend        []FeedbackTrendEntry
+	ConsolidationHistory []ConsolidationEntry
+	MemorySurvival       []SurvivalEntry
+	SalienceDistribution map[string]map[string]int
+}
+
+// SignalNoiseEntry shows per-source survival metrics.
+type SignalNoiseEntry struct {
+	Total        int     `json:"total"`
+	Active       int     `json:"active"`
+	SurvivalRate float64 `json:"survival_rate"`
+	AvgSalience  float64 `json:"avg_salience"`
+}
+
+// RecallBucket shows access frequency vs salience.
+type RecallBucket struct {
+	Bucket      string  `json:"bucket"`
+	Count       int     `json:"count"`
+	AvgSalience float64 `json:"avg_salience"`
+}
+
+// FeedbackTrendEntry shows feedback quality per day.
+type FeedbackTrendEntry struct {
+	Date       string `json:"date"`
+	Helpful    int    `json:"helpful"`
+	Partial    int    `json:"partial"`
+	Irrelevant int    `json:"irrelevant"`
+}
+
+// ConsolidationEntry shows consolidation activity per day.
+type ConsolidationEntry struct {
+	Date      string `json:"date"`
+	Processed int    `json:"processed"`
+	Decayed   int    `json:"decayed"`
+	Merged    int    `json:"merged"`
+}
+
+// SurvivalEntry shows memory state distribution per creation day.
+type SurvivalEntry struct {
+	Date     string `json:"date"`
+	Created  int    `json:"created"`
+	Active   int    `json:"active"`
+	Fading   int    `json:"fading"`
+	Archived int    `json:"archived"`
+	Merged   int    `json:"merged"`
 }

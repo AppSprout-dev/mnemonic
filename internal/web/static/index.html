@@ -1557,7 +1557,7 @@
                 <div class="llm-view">
                     <div class="llm-header">
                         <div class="llm-header-title">MCP Tool Usage</div>
-                        <div class="llm-header-sub">recall &middot; remember &middot; feedback &middot; 13 tools</div>
+                        <div class="llm-header-sub">recall &middot; remember &middot; get_context &middot; 21 tools</div>
                         <div class="llm-header-meta">
                             <div class="llm-range-tabs" id="toolRangeTabs">
                                 <button class="llm-range-tab" data-range="1h" onclick="setToolRange('1h')">1h</button>
@@ -1595,10 +1595,27 @@
                     </div>
                     <div class="llm-grid" style="margin-bottom:16px">
                         <div class="llm-panel">
-                            <div class="llm-panel-title">Calls by Tool</div>
-                            <table class="llm-table" id="toolByToolTable">
-                                <thead><tr><th>Tool</th><th>Calls</th><th>Avg Latency</th><th>Avg Size</th></tr></thead>
-                                <tbody id="toolByToolBody"><tr><td colspan="4" class="llm-empty">No data yet</td></tr></tbody>
+                            <div class="llm-panel-title">Memory Types Stored</div>
+                            <div id="memTypeChart" style="display:flex;gap:8px;flex-wrap:wrap;padding:8px 0"></div>
+                        </div>
+                        <div class="llm-panel">
+                            <div class="llm-panel-title">Feedback Quality</div>
+                            <div id="feedbackChart" style="display:flex;gap:8px;flex-wrap:wrap;padding:8px 0"></div>
+                        </div>
+                    </div>
+                    <div class="llm-panel" style="margin-bottom:16px">
+                        <div class="llm-panel-title">Tool Performance</div>
+                        <table class="llm-table" id="toolByToolTable">
+                            <thead><tr><th>Tool</th><th>Calls</th><th>p50</th><th>p95</th><th>Max</th><th>Avg Size</th></tr></thead>
+                            <tbody id="toolByToolBody"><tr><td colspan="6" class="llm-empty">No data yet</td></tr></tbody>
+                        </table>
+                    </div>
+                    <div class="llm-grid" style="margin-bottom:16px">
+                        <div class="llm-panel">
+                            <div class="llm-panel-title">Sessions</div>
+                            <table class="llm-table" id="toolSessionTable">
+                                <thead><tr><th>Session</th><th>Calls</th><th>Tools Used</th><th>Duration</th></tr></thead>
+                                <tbody id="toolSessionBody"><tr><td colspan="4" class="llm-empty">No session data</td></tr></tbody>
                             </table>
                         </div>
                         <div class="llm-panel">
@@ -1616,6 +1633,38 @@
                                 <thead><tr><th>Time</th><th>Tool</th><th>Project</th><th>Query / Context</th><th>Latency</th><th>Size</th><th>Status</th></tr></thead>
                                 <tbody id="toolLogBody"><tr><td colspan="7" class="llm-empty">No tool calls recorded yet</td></tr></tbody>
                             </table>
+                        </div>
+                    </div>
+                    <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border-subtle)">
+                        <div style="font-size:0.85rem;font-weight:600;color:var(--text-primary);margin-bottom:4px">Research Analytics</div>
+                        <div style="font-size:0.68rem;color:var(--text-muted);margin-bottom:12px">Is the cognitive pipeline actually working?</div>
+                    </div>
+                    <div class="llm-cards" id="pipelineCards" style="margin-bottom:16px">
+                        <div class="llm-card"><div class="llm-card-label">Raw Observations</div><div class="llm-card-value" id="raRaw">-</div></div>
+                        <div class="llm-card"><div class="llm-card-label">Unique Encoded</div><div class="llm-card-value" id="raEncoded">-</div></div>
+                        <div class="llm-card"><div class="llm-card-label">Dedup Rate</div><div class="llm-card-value" id="raDedupRate">-</div></div>
+                        <div class="llm-card"><div class="llm-card-label">MCP Survival</div><div class="llm-card-value" id="raMCPSurvival">-</div></div>
+                        <div class="llm-card"><div class="llm-card-label">Noise Survival</div><div class="llm-card-value" id="raNoiseSurvival">-</div></div>
+                        <div class="llm-card"><div class="llm-card-label">Recall Learning</div><div class="llm-card-value" id="raLearning">-</div></div>
+                    </div>
+                    <div class="llm-grid" style="margin-bottom:16px">
+                        <div class="llm-panel">
+                            <div class="llm-panel-title">Signal vs Noise — Source Survival Rates</div>
+                            <div id="signalNoiseChart" style="padding:8px 0"></div>
+                        </div>
+                        <div class="llm-panel">
+                            <div class="llm-panel-title">Recall Effectiveness — Is the System Learning?</div>
+                            <div id="recallChart" style="padding:8px 0"></div>
+                        </div>
+                    </div>
+                    <div class="llm-grid" style="margin-bottom:16px">
+                        <div class="llm-panel">
+                            <div class="llm-panel-title">Memory Survival by Day</div>
+                            <div id="survivalChart" style="padding:8px 0"></div>
+                        </div>
+                        <div class="llm-panel">
+                            <div class="llm-panel-title">Feedback Quality Trend</div>
+                            <div id="feedbackTrendChart" style="padding:8px 0"></div>
                         </div>
                     </div>
                 </div>
@@ -3099,17 +3148,62 @@
                 toolExtras[t].count++;
             });
 
-            // By Tool table
+            // By Tool table with percentiles
+            var toolLatencies = {};
+            log.forEach(function(r) {
+                var t = r.tool_name || 'unknown';
+                if (!toolLatencies[t]) toolLatencies[t] = [];
+                toolLatencies[t].push(r.latency_ms || 0);
+            });
+            function percentile(arr, p) {
+                var sorted = arr.slice().sort(function(a, b) { return a - b; });
+                var idx = Math.ceil(sorted.length * p) - 1;
+                return sorted[Math.max(0, idx)] || 0;
+            }
             var toolBody = document.getElementById('toolByToolBody');
             var toolKeys = Object.keys(byTool).sort(function(a, b) { return byTool[b] - byTool[a]; });
             if (toolKeys.length === 0) {
-                toolBody.innerHTML = '<tr><td colspan="4" class="llm-empty">No tool data yet</td></tr>';
+                toolBody.innerHTML = '<tr><td colspan="6" class="llm-empty">No tool data yet</td></tr>';
             } else {
                 toolBody.innerHTML = toolKeys.map(function(k) {
+                    var lats = toolLatencies[k] || [];
+                    var p50 = lats.length ? percentile(lats, 0.5).toFixed(0) + 'ms' : '-';
+                    var p95 = lats.length ? percentile(lats, 0.95).toFixed(0) + 'ms' : '-';
+                    var mx = lats.length ? Math.max.apply(null, lats).toFixed(0) + 'ms' : '-';
+                    var p95Val = lats.length ? percentile(lats, 0.95) : 0;
+                    var p95Style = p95Val > 2000 ? ' style="color:var(--accent-red)"' : p95Val > 500 ? ' style="color:var(--accent-yellow)"' : '';
                     var ext = toolExtras[k] || {};
-                    var avgLat = ext.count ? (ext.latencySum / ext.count).toFixed(0) + 'ms' : '-';
                     var avgSize = ext.count ? formatBytes(ext.sizeSum / ext.count) : '-';
-                    return '<tr><td><strong>' + escapeHtml(k) + '</strong></td><td>' + byTool[k] + '</td><td>' + avgLat + '</td><td>' + avgSize + '</td></tr>';
+                    return '<tr><td><strong>' + escapeHtml(k) + '</strong></td><td>' + byTool[k] + '</td><td>' + p50 + '</td><td' + p95Style + '>' + p95 + '</td><td>' + mx + '</td><td>' + avgSize + '</td></tr>';
+                }).join('');
+            }
+
+            // Session table
+            var sessionData = {};
+            log.forEach(function(r) {
+                var sid = r.session_id || 'unknown';
+                if (!sessionData[sid]) sessionData[sid] = { calls: 0, tools: {}, first: r.timestamp, last: r.timestamp };
+                sessionData[sid].calls++;
+                sessionData[sid].tools[r.tool_name] = true;
+                if (r.timestamp < sessionData[sid].first) sessionData[sid].first = r.timestamp;
+                if (r.timestamp > sessionData[sid].last) sessionData[sid].last = r.timestamp;
+            });
+            var sessionBody = document.getElementById('toolSessionBody');
+            var sessionKeys = Object.keys(sessionData).sort(function(a, b) { return sessionData[b].calls - sessionData[a].calls; });
+            if (sessionKeys.length === 0) {
+                sessionBody.innerHTML = '<tr><td colspan="4" class="llm-empty">No session data</td></tr>';
+            } else {
+                sessionBody.innerHTML = sessionKeys.slice(0, 10).map(function(sid) {
+                    var s = sessionData[sid];
+                    var toolCount = Object.keys(s.tools).length;
+                    var dur = '-';
+                    try {
+                        var ms = new Date(s.last) - new Date(s.first);
+                        if (ms > 60000) dur = Math.round(ms / 60000) + 'm';
+                        else if (ms > 0) dur = Math.round(ms / 1000) + 's';
+                        else dur = '<1s';
+                    } catch(e) {}
+                    return '<tr><td><strong>' + escapeHtml(sid) + '</strong></td><td>' + s.calls + '</td><td>' + toolCount + '</td><td>' + dur + '</td></tr>';
                 }).join('');
             }
 
@@ -3145,9 +3239,175 @@
                 }).join('');
             }
 
+            // Memory type distribution (from remember calls)
+            var memTypes = {};
+            log.forEach(function(r) {
+                if (r.tool_name === 'remember' && r.memory_type) {
+                    memTypes[r.memory_type] = (memTypes[r.memory_type] || 0) + 1;
+                }
+            });
+            var memTypeEl = document.getElementById('memTypeChart');
+            var typeColors = { decision: 'var(--accent-cyan)', error: 'var(--accent-red)', insight: 'var(--accent-purple)', learning: 'var(--accent-green)', general: 'var(--text-muted)' };
+            var typeKeys = Object.keys(memTypes).sort(function(a, b) { return memTypes[b] - memTypes[a]; });
+            if (typeKeys.length === 0) {
+                memTypeEl.innerHTML = '<span class="llm-empty" style="font-size:0.75rem">No memories stored yet</span>';
+            } else {
+                var typeTotal = typeKeys.reduce(function(s, k) { return s + memTypes[k]; }, 0);
+                memTypeEl.innerHTML = typeKeys.map(function(k) {
+                    var pct = (memTypes[k] / typeTotal * 100).toFixed(0);
+                    var color = typeColors[k] || 'var(--text-muted)';
+                    return '<div style="flex:1;min-width:80px;text-align:center;padding:10px 6px;background:var(--bg-surface);border-radius:var(--radius-sm);border-radius:var(--radius-sm)">' +
+                        '<div style="font-size:1.1rem;font-weight:600;color:' + color + '">' + memTypes[k] + '</div>' +
+                        '<div style="font-size:0.7rem;color:var(--text-muted)">' + k + ' (' + pct + '%)</div></div>';
+                }).join('');
+            }
+
+            // Feedback quality breakdown
+            var ratings = { helpful: 0, partial: 0, irrelevant: 0 };
+            log.forEach(function(r) {
+                if (r.tool_name === 'feedback' && r.rating) {
+                    ratings[r.rating] = (ratings[r.rating] || 0) + 1;
+                }
+            });
+            var feedbackEl = document.getElementById('feedbackChart');
+            var ratingColors = { helpful: 'var(--accent-green)', partial: 'var(--accent-yellow)', irrelevant: 'var(--accent-red)' };
+            var ratingTotal = ratings.helpful + ratings.partial + ratings.irrelevant;
+            if (ratingTotal === 0) {
+                feedbackEl.innerHTML = '<span class="llm-empty" style="font-size:0.75rem">No feedback recorded yet</span>';
+            } else {
+                feedbackEl.innerHTML = ['helpful', 'partial', 'irrelevant'].map(function(k) {
+                    var pct = (ratings[k] / ratingTotal * 100).toFixed(0);
+                    var color = ratingColors[k];
+                    return '<div style="flex:1;min-width:80px;text-align:center;padding:10px 6px;background:var(--bg-surface);border-radius:var(--radius-sm);border-radius:var(--radius-sm)">' +
+                        '<div style="font-size:1.1rem;font-weight:600;color:' + color + '">' + ratings[k] + '</div>' +
+                        '<div style="font-size:0.7rem;color:var(--text-muted)">' + k + ' (' + pct + '%)</div></div>';
+                }).join('');
+            }
+
             renderToolChart(data.chart_buckets || [], _toolRange);
+            loadAnalytics();
         } catch (e) {
             document.getElementById('toolCalls').textContent = 'ERR';
+        }
+    }
+
+    async function loadAnalytics() {
+        try {
+            var data = await fetchJSON('/analytics');
+            var p = data.pipeline || {};
+            var sn = data.signal_noise || {};
+            var re = data.recall_effectiveness || [];
+            var fb = data.feedback_trend || [];
+            var sv = data.memory_survival || [];
+
+            // Pipeline summary cards
+            document.getElementById('raRaw').textContent = (p.total_raw || 0).toLocaleString();
+            document.getElementById('raEncoded').textContent = (p.total_encoded || 0).toLocaleString();
+            var dedupEl = document.getElementById('raDedupRate');
+            dedupEl.textContent = ((p.dedup_rate || 0) * 100).toFixed(1) + '%';
+            dedupEl.style.color = 'var(--accent-cyan)';
+
+            // MCP survival rate
+            var mcpData = sn.mcp || {};
+            var mcpSurv = document.getElementById('raMCPSurvival');
+            mcpSurv.textContent = ((mcpData.survival_rate || 0) * 100).toFixed(0) + '%';
+            mcpSurv.style.color = 'var(--accent-green)';
+
+            // Filesystem (noise) survival rate
+            var fsData = sn.filesystem || {};
+            var noiseSurv = document.getElementById('raNoiseSurvival');
+            noiseSurv.textContent = ((fsData.survival_rate || 0) * 100).toFixed(0) + '%';
+            noiseSurv.style.color = (fsData.survival_rate || 0) > 0.5 ? 'var(--accent-yellow)' : 'var(--accent-green)';
+
+            // Recall learning indicator: ratio of 6+ salience to never-recalled salience
+            var neverBucket = re.find(function(b) { return b.bucket.indexOf('never') >= 0; });
+            var highBucket = re.find(function(b) { return b.bucket.indexOf('6+') >= 0; });
+            var learningEl = document.getElementById('raLearning');
+            if (neverBucket && highBucket && neverBucket.avg_salience > 0) {
+                var ratio = (highBucket.avg_salience / neverBucket.avg_salience).toFixed(1) + 'x';
+                learningEl.textContent = ratio;
+                learningEl.style.color = 'var(--accent-green)';
+            } else {
+                learningEl.textContent = '-';
+            }
+
+            // Signal vs Noise — horizontal bars showing survival rate per source
+            var snEl = document.getElementById('signalNoiseChart');
+            var sources = Object.keys(sn).sort(function(a, b) { return (sn[b].total || 0) - (sn[a].total || 0); });
+            var sourceColors = { mcp: 'var(--accent-green)', filesystem: 'var(--accent-cyan)', terminal: 'var(--accent-yellow)', git: 'var(--accent-purple)', clipboard: 'var(--text-muted)', ingest: 'var(--accent-green)', benchmark: 'var(--accent-red)', system: 'var(--text-muted)' };
+            snEl.innerHTML = sources.map(function(src) {
+                var s = sn[src];
+                var survPct = ((s.survival_rate || 0) * 100).toFixed(1);
+                var barWidth = Math.max(2, (s.survival_rate || 0) * 100);
+                var color = sourceColors[src] || 'var(--text-muted)';
+                return '<div style="margin-bottom:8px">' +
+                    '<div style="display:flex;justify-content:space-between;font-size:0.72rem;margin-bottom:2px">' +
+                    '<span style="color:' + color + ';font-weight:600">' + src + ' <span style="color:var(--text-muted);font-weight:400">(' + s.total + ' memories)</span></span>' +
+                    '<span style="color:var(--text-muted)">' + s.active + ' active (' + survPct + '%)</span></div>' +
+                    '<div style="height:8px;background:var(--bg-surface);border-radius:4px;overflow:hidden">' +
+                    '<div style="height:100%;width:' + barWidth + '%;background:' + color + ';border-radius:4px;transition:width 0.3s"></div>' +
+                    '</div></div>';
+            }).join('');
+
+            // Recall Effectiveness — bar chart showing access buckets vs avg salience
+            var recallEl = document.getElementById('recallChart');
+            if (re.length === 0) {
+                recallEl.innerHTML = '<span class="llm-empty" style="font-size:0.75rem">No recall data</span>';
+            } else {
+                var maxSal = Math.max.apply(null, re.map(function(b) { return b.avg_salience; }));
+                recallEl.innerHTML = '<div style="font-size:0.68rem;color:var(--text-muted);margin-bottom:8px">Memories recalled more often have higher salience = system is learning</div>' +
+                    re.map(function(b) {
+                    var barWidth = maxSal > 0 ? (b.avg_salience / maxSal * 100) : 0;
+                    var color = b.bucket.indexOf('never') >= 0 ? 'var(--accent-red)' : b.bucket.indexOf('6+') >= 0 ? 'var(--accent-green)' : 'var(--accent-cyan)';
+                    return '<div style="margin-bottom:8px">' +
+                        '<div style="display:flex;justify-content:space-between;font-size:0.72rem;margin-bottom:2px">' +
+                        '<span style="color:var(--text-secondary)">' + b.bucket + ' <span style="color:var(--text-muted)">(' + b.count + ')</span></span>' +
+                        '<span style="color:' + color + ';font-weight:600">' + b.avg_salience.toFixed(3) + '</span></div>' +
+                        '<div style="height:8px;background:var(--bg-surface);border-radius:4px;overflow:hidden">' +
+                        '<div style="height:100%;width:' + barWidth + '%;background:' + color + ';border-radius:4px;transition:width 0.3s"></div>' +
+                        '</div></div>';
+                }).join('');
+            }
+
+            // Memory Survival by day — stacked text table (D3 chart would be ideal but text works)
+            var survEl = document.getElementById('survivalChart');
+            var survData = sv.slice().reverse().slice(-14); // last 14 days, chronological
+            if (survData.length === 0) {
+                survEl.innerHTML = '<span class="llm-empty" style="font-size:0.75rem">No survival data</span>';
+            } else {
+                survEl.innerHTML = '<table class="llm-table"><thead><tr><th>Date</th><th>Created</th><th style="color:var(--accent-green)">Active</th><th style="color:var(--accent-yellow)">Fading</th><th style="color:var(--text-muted)">Archived</th><th style="color:var(--accent-cyan)">Merged</th></tr></thead><tbody>' +
+                    survData.map(function(d) {
+                        var total = d.created || 1;
+                        var activePct = ((d.active / total) * 100).toFixed(0);
+                        return '<tr><td>' + d.date.substring(5) + '</td><td>' + d.created + '</td>' +
+                            '<td style="color:var(--accent-green)">' + d.active + ' <span style="color:var(--text-muted);font-size:0.65rem">(' + activePct + '%)</span></td>' +
+                            '<td style="color:var(--accent-yellow)">' + d.fading + '</td>' +
+                            '<td style="color:var(--text-muted)">' + d.archived + '</td>' +
+                            '<td style="color:var(--accent-cyan)">' + d.merged + '</td></tr>';
+                    }).join('') + '</tbody></table>';
+            }
+
+            // Feedback trend
+            var fbEl = document.getElementById('feedbackTrendChart');
+            var fbData = fb.slice().reverse().slice(-14);
+            if (fbData.length === 0) {
+                fbEl.innerHTML = '<span class="llm-empty" style="font-size:0.75rem">No feedback data</span>';
+            } else {
+                fbEl.innerHTML = '<table class="llm-table"><thead><tr><th>Date</th><th style="color:var(--accent-green)">Helpful</th><th style="color:var(--accent-yellow)">Partial</th><th style="color:var(--accent-red)">Irrelevant</th><th>Quality</th></tr></thead><tbody>' +
+                    fbData.map(function(d) {
+                        var total = d.helpful + d.partial + d.irrelevant;
+                        var quality = total > 0 ? ((d.helpful / total) * 100).toFixed(0) + '%' : '-';
+                        var qColor = total > 0 && (d.helpful / total) >= 0.5 ? 'var(--accent-green)' : 'var(--accent-yellow)';
+                        return '<tr><td>' + d.date.substring(5) + '</td>' +
+                            '<td style="color:var(--accent-green)">' + d.helpful + '</td>' +
+                            '<td style="color:var(--accent-yellow)">' + d.partial + '</td>' +
+                            '<td style="color:var(--accent-red)">' + d.irrelevant + '</td>' +
+                            '<td style="color:' + qColor + ';font-weight:600">' + quality + '</td></tr>';
+                    }).join('') + '</tbody></table>';
+            }
+
+        } catch(e) {
+            console.error('Analytics load failed:', e);
         }
     }
 
