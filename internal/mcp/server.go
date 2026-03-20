@@ -436,6 +436,11 @@ func (srv *MCPServer) handleRecall(ctx context.Context, args map[string]interfac
 		includeAssociations = ia
 	}
 
+	synthesize := false
+	if s, ok := args["synthesize"].(bool); ok {
+		synthesize = s
+	}
+
 	// If concepts are specified, use concept-based search (no spread activation available)
 	if len(concepts) > 0 {
 		memories, err := srv.store.SearchByConcepts(ctx, concepts, limit)
@@ -457,7 +462,7 @@ func (srv *MCPServer) handleRecall(ctx context.Context, args map[string]interfac
 		Query:               query,
 		MaxResults:          limit,
 		IncludeReasoning:    true,
-		Synthesize:          true,
+		Synthesize:          synthesize,
 		IncludePatterns:     true,
 		IncludeAbstractions: true,
 		Project:             project,
