@@ -1,4 +1,4 @@
-.PHONY: build run clean test fmt vet start stop restart status watch install uninstall export backup insights dream-cycle mcp benchmark benchmark-quality benchmark-compare setup-hooks lint
+.PHONY: build run clean test fmt vet start stop restart status watch install uninstall export backup insights dream-cycle mcp benchmark benchmark-quality benchmark-compare lifecycle-test setup-hooks lint
 
 BUILD_DIR=bin
 VERSION=0.24.0 # x-release-please-version
@@ -128,6 +128,10 @@ benchmark-quality:
 benchmark-compare:
 	go build $(TAGS) $(LDFLAGS) -o $(BUILD_DIR)/benchmark-quality ./cmd/benchmark-quality
 	./$(BUILD_DIR)/benchmark-quality --compare --cycles 5 --verbose
+
+lifecycle-test:
+	go build $(TAGS) $(LDFLAGS) -o $(BUILD_DIR)/lifecycle-test ./cmd/lifecycle-test
+	./$(BUILD_DIR)/lifecycle-test --verbose
 
 # --- Lint ---
 lint:
