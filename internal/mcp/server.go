@@ -48,6 +48,50 @@ type ProjectResolver interface {
 	Resolve(input string) string
 }
 
+// MemoryDefaults holds shared salience and feedback tuning values.
+type MemoryDefaults struct {
+	SalienceGeneral  float32
+	SalienceDecision float32
+	SalienceError    float32
+	SalienceInsight  float32
+	SalienceLearning float32
+	SalienceHandoff  float32
+	FeedbackStrengthDelta float32
+	FeedbackSalienceBoost float32
+}
+
+// SalienceForType returns the initial salience for a given memory type.
+func (d MemoryDefaults) SalienceForType(memType string) float32 {
+	switch memType {
+	case "decision":
+		return d.SalienceDecision
+	case "error":
+		return d.SalienceError
+	case "insight":
+		return d.SalienceInsight
+	case "learning":
+		return d.SalienceLearning
+	case "handoff":
+		return d.SalienceHandoff
+	default:
+		return d.SalienceGeneral
+	}
+}
+
+// DefaultMemoryDefaults returns the built-in defaults (used when no config override).
+func DefaultMemoryDefaults() MemoryDefaults {
+	return MemoryDefaults{
+		SalienceGeneral:       0.7,
+		SalienceDecision:      0.85,
+		SalienceError:         0.8,
+		SalienceInsight:       0.9,
+		SalienceLearning:      0.8,
+		SalienceHandoff:       0.95,
+		FeedbackStrengthDelta: 0.05,
+		FeedbackSalienceBoost: 0.02,
+	}
+}
+
 // MCPServer implements the Model Context Protocol over JSON-RPC 2.0
 type MCPServer struct {
 	store           store.Store
@@ -61,6 +105,7 @@ type MCPServer struct {
 	coachingFile    string // path for coach_local_llm writes
 	excludePatterns []string
 	maxContentBytes int
+	memDefaults     MemoryDefaults // shared salience and feedback tuning
 
 	// Proactive context state (session-scoped)
 	lastContextTime    time.Time       // watermark for get_context polling
@@ -77,7 +122,7 @@ type MCPServer struct {
 }
 
 // NewMCPServer creates a new MCP server with the given dependencies.
-func NewMCPServer(s store.Store, r *retrieval.RetrievalAgent, bus events.Bus, log *slog.Logger, version string, coachingFile string, excludePatterns []string, maxContentBytes int, resolver ProjectResolver, daemonURL string) *MCPServer {
+func NewMCPServer(s store.Store, r *retrieval.RetrievalAgent, bus events.Bus, log *slog.Logger, version string, coachingFile string, excludePatterns []string, maxContentBytes int, resolver ProjectResolver, daemonURL string, memDefaults MemoryDefaults) *MCPServer {
 	// Auto-detect project from working directory
 	wd, _ := os.Getwd()
 	var project string
@@ -105,6 +150,7 @@ func NewMCPServer(s store.Store, r *retrieval.RetrievalAgent, bus events.Bus, lo
 		coachingFile:        coachingFile,
 		excludePatterns:     excludePatterns,
 		maxContentBytes:     maxContentBytes,
+		memDefaults:         memDefaults,
 		daemonURL:           daemonURL,
 		lastContextTime:     time.Now(),
 		sessionRecalledIDs:  make(map[string]bool),
@@ -455,16 +501,7 @@ func (srv *MCPServer) handleRemember(ctx context.Context, args map[string]interf
 	}
 
 	// Boost salience for specific types
-	switch memType {
-	case "decision":
-		raw.InitialSalience = 0.85
-	case "error":
-		raw.InitialSalience = 0.8
-	case "insight":
-		raw.InitialSalience = 0.9
-	case "learning":
-		raw.InitialSalience = 0.8
-	}
+	raw.InitialSalience = srv.memDefaults.SalienceForType(memType)
 
 	if err := srv.store.WriteRaw(ctx, raw); err != nil {
 		srv.log.Error("failed to write raw memory", "error", err)
@@ -1823,11 +1860,7 @@ func (srv *MCPServer) handleGetInsights(ctx context.Context, args map[string]int
 	return toolResult(text), nil
 }
 
-// Feedback tuning constants
-const (
-	feedbackStrengthDelta float32 = 0.05
-	feedbackSalienceBoost float32 = 0.02
-)
+// srv.memDefaults.FeedbackStrengthDelta and srv.memDefaults.FeedbackSalienceBoost are now on srv.memDefaults.
 
 // handleFeedback records quality feedback for a recall result and adjusts association strengths.
 func (srv *MCPServer) handleFeedback(ctx context.Context, args map[string]interface{}) (interface{}, error) {
@@ -1894,7 +1927,7 @@ func (srv *MCPServer) handleFeedback(ctx context.Context, args map[string]interf
 					}
 					for _, a := range assocs {
 						if a.TargetID == ta.TargetID {
-							newStrength := a.Strength + feedbackStrengthDelta
+							newStrength := a.Strength + srv.memDefaults.FeedbackStrengthDelta
 							if newStrength > 1.0 {
 								newStrength = 1.0
 							}
@@ -1911,7 +1944,7 @@ func (srv *MCPServer) handleFeedback(ctx context.Context, args map[string]interf
 					if err != nil {
 						continue
 					}
-					newSalience := mem.Salience + feedbackSalienceBoost
+					newSalience := mem.Salience + srv.memDefaults.FeedbackSalienceBoost
 					if newSalience > 1.0 {
 						newSalience = 1.0
 					}
@@ -1929,7 +1962,7 @@ func (srv *MCPServer) handleFeedback(ctx context.Context, args map[string]interf
 					}
 					for _, a := range assocs {
 						if a.TargetID == ta.TargetID {
-							newStrength := a.Strength - feedbackStrengthDelta
+							newStrength := a.Strength - srv.memDefaults.FeedbackStrengthDelta
 							if newStrength < 0.05 {
 								newStrength = 0.05
 							}
@@ -2671,7 +2704,7 @@ func (srv *MCPServer) handleCreateHandoff(ctx context.Context, args map[string]i
 		Timestamp:       time.Now(),
 		CreatedAt:       time.Now(),
 		HeuristicScore:  0.9,
-		InitialSalience: 0.95,
+		InitialSalience: srv.memDefaults.SalienceForType("handoff"),
 		Processed:       false,
 		Project:         srv.project,
 		SessionID:       srv.sessionID,
