@@ -4,6 +4,22 @@ All notable changes to Mnemonic will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.33.0](https://github.com/AppSprout-dev/mnemonic/compare/v0.32.0...v0.33.0) (2026-03-21)
+
+
+### Features
+
+* add Mind page to dashboard — force-directed memory graph visualization ([a8ae051](https://github.com/AppSprout-dev/mnemonic/commit/a8ae0517ae16483acdf3b1a8ebad7edd1d2d928d))
+* live cognitive metrics, system analysis, and embedding backfill ([442e999](https://github.com/AppSprout-dev/mnemonic/commit/442e999c77e39ba5bde74a1b8012bfbd162f845d))
+* Mind graph page, live cognitive metrics, and system analysis ([aca26f7](https://github.com/AppSprout-dev/mnemonic/commit/aca26f7d926a124e2de133fbcf7f2474bfb43ecf))
+* redesign tools page research analytics and session activity ([1fb5018](https://github.com/AppSprout-dev/mnemonic/commit/1fb5018a8d319e39899bcf82b2b4a2f273d11372))
+
+
+### Bug Fixes
+
+* NULL raw_id crash, feedback bloat, and runtime metrics ([470e207](https://github.com/AppSprout-dev/mnemonic/commit/470e207b29126bb65373bb0f81bc35d654a739f8))
+* NULL raw_id crash, feedback bloat, and runtime metrics ([#332](https://github.com/AppSprout-dev/mnemonic/issues/332), [#333](https://github.com/AppSprout-dev/mnemonic/issues/333), [#334](https://github.com/AppSprout-dev/mnemonic/issues/334)) ([ecc6f94](https://github.com/AppSprout-dev/mnemonic/commit/ecc6f945e57f02dfeb1c69377d811ac898bdcf5d))
+
 ## [0.32.0](https://github.com/AppSprout-dev/mnemonic/compare/v0.31.0...v0.32.0) (2026-03-21)
 
 
