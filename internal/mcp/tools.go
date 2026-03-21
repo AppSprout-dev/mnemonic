@@ -57,6 +57,11 @@ func recallToolDef() ToolDefinition {
 					"items":       map[string]interface{}{"type": "string"},
 					"description": "Filter by specific concepts",
 				},
+				"exclude_concepts": map[string]interface{}{
+					"type":        "array",
+					"items":       map[string]interface{}{"type": "string"},
+					"description": "Exclude memories containing any of these concepts",
+				},
 				"source": map[string]interface{}{
 					"type":        "string",
 					"description": "Filter by memory source: mcp, filesystem, terminal, clipboard",
@@ -174,16 +179,20 @@ func getContextToolDef() ToolDefinition {
 func forgetToolDef() ToolDefinition {
 	return ToolDefinition{
 		Name:        "forget",
-		Description: "Archive a memory by ID",
+		Description: "Archive one or more memories by ID. Supports single memory_id or bulk memory_ids array.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"memory_id": map[string]interface{}{
 					"type":        "string",
-					"description": "The ID of the memory to archive",
+					"description": "Single memory ID to archive",
+				},
+				"memory_ids": map[string]interface{}{
+					"type":        "array",
+					"items":       map[string]interface{}{"type": "string"},
+					"description": "Array of memory IDs to archive in bulk",
 				},
 			},
-			"required": []string{"memory_id"},
 		},
 	}
 }
