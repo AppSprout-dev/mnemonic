@@ -147,6 +147,7 @@ type QueryRequest struct {
 	Type                string    // if set, filter by memory type (decision, error, insight, learning, general)
 	MinSalience         float32   // if > 0, filter out memories below this salience
 	IncludeSuppressed   bool      // if true, include recall-suppressed memories
+	ExcludeConcepts     []string  // if set, exclude memories containing any of these concepts
 }
 
 // QueryResponse is the output of a retrieval query.
@@ -1145,9 +1146,24 @@ func (ra *RetrievalAgent) applyFilters(results []store.RetrievalResult, req Quer
 		if r.Memory.RecallSuppressed && !req.IncludeSuppressed {
 			continue
 		}
+		if len(req.ExcludeConcepts) > 0 && hasAnyConcept(r.Memory.Concepts, req.ExcludeConcepts) {
+			continue
+		}
 		filtered = append(filtered, r)
 	}
 	return filtered
+}
+
+// hasAnyConcept returns true if any of the memory's concepts match any excluded concept (case-insensitive).
+func hasAnyConcept(memoryConcepts, excluded []string) bool {
+	for _, mc := range memoryConcepts {
+		for _, ec := range excluded {
+			if strings.EqualFold(mc, ec) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // cosineSimilarity computes the cosine similarity between two embedding vectors.
