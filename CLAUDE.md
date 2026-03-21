@@ -46,6 +46,7 @@ internal/
   events/              Event bus (in-memory pub/sub)
   config/              Config loading (config.yaml)
   logger/              Structured logging (slog)
+  concepts/            Shared concept extraction (paths, commands, event types)
   backup/              Export/import
   testutil/            Shared test infrastructure (stub LLM provider)
 sdk/                   Python agent SDK (self-evolving assistant)
@@ -74,7 +75,7 @@ scripts/               Utility scripts
 
 - **New agent:** Implement `agent.Agent` interface, register in `cmd/mnemonic/main.go` serve pipeline.
 - **New CLI command:** Add case to the command switch in `cmd/mnemonic/main.go`.
-- **New API route:** Add handler in `internal/api/routes/`, register in `internal/api/server.go`.
+- **New API route:** Add handler in `internal/api/routes/`, register in `internal/api/server.go`. Existing routes include `/api/v1/activity` (watcher concept tracker for MCP sync).
 - **New MCP tool:** Add to `internal/mcp/server.go` tool registration.
 
 ## Platform Support
@@ -103,8 +104,6 @@ Key scripts:
 All experiments must be pre-registered in `training/docs/experiment_registry.md` before running. See `.claude/rules/scientific-method.md` and `.claude/rules/experiment-logging.md`.
 
 ## Known Issues
-
-- **FTS5 scan column mismatch:** `SearchByFullText` fails with "sql: expected 19 destination arguments in Scan, not 21" — the memories table has 2 new columns not reflected in the FTS scan query. Retrieval falls back to embedding search, so functionality is not blocked. Needs a fix in `internal/store/sqlite/sqlite.go`.
 
 See [GitHub Issues](https://github.com/appsprout-dev/mnemonic/issues) for tracked bugs.
 
