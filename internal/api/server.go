@@ -128,6 +128,9 @@ func (s *Server) registerRoutes() {
 	// MCP tool usage analytics
 	s.mux.HandleFunc("GET /api/v1/tool/usage", routes.HandleToolUsage(s.deps.Store, s.deps.Log))
 
+	// Sessions
+	s.mux.HandleFunc("GET /api/v1/sessions", routes.HandleSessions(s.deps.Store, s.deps.Log))
+
 	// Research analytics
 	s.mux.HandleFunc("GET /api/v1/analytics", routes.HandleAnalytics(s.deps.Store, s.deps.Log))
 
