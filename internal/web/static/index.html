@@ -959,6 +959,22 @@
             transition: width 0.3s ease;
         }
         .concept-time { flex: 0 0 auto; font-size: 0.7rem; color: var(--text-muted); min-width: 45px; text-align: right; }
+        .session-lane { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border-subtle); }
+        .session-lane:last-child { border-bottom: none; }
+        .session-label { flex: 0 0 100px; font-size: 0.72rem; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .session-bar-track { flex: 1; height: 20px; position: relative; background: var(--bg-tertiary); border-radius: 3px; }
+        .session-bar { position: absolute; height: 100%; border-radius: 3px; min-width: 4px; display: flex; align-items: center; justify-content: center; font-size: 0.65rem; color: #fff; font-weight: 600; }
+        .session-meta { flex: 0 0 60px; font-size: 0.68rem; color: var(--text-muted); text-align: right; }
+        .pipeline-bar { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+        .pipeline-bar-label { flex: 0 0 80px; font-size: 0.75rem; color: var(--text-dim); }
+        .pipeline-bar-track { flex: 1; height: 16px; background: var(--bg-tertiary); border-radius: 3px; overflow: hidden; }
+        .pipeline-bar-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+        .pipeline-bar-value { flex: 0 0 50px; font-size: 0.72rem; color: var(--text-muted); text-align: right; }
+        .salience-row { display: flex; align-items: center; gap: 4px; margin: 4px 0; }
+        .salience-label { flex: 0 0 60px; font-size: 0.72rem; color: var(--text-dim); text-transform: capitalize; }
+        .salience-stacked { flex: 1; height: 18px; display: flex; border-radius: 3px; overflow: hidden; }
+        .salience-seg { height: 100%; min-width: 2px; transition: width 0.3s; }
+        .salience-count { flex: 0 0 40px; font-size: 0.68rem; color: var(--text-muted); text-align: right; }
         .pattern-archive-btn {
             float: right; background: none; border: 1px solid var(--border-color);
             color: var(--text-muted); cursor: pointer; font-size: 0.7rem;
@@ -1688,6 +1704,20 @@
                             <div class="llm-panel-title">Feedback Quality Trend</div>
                             <div id="feedbackTrendChart" style="padding:8px 0"></div>
                         </div>
+                    </div>
+                    <div class="llm-grid" style="margin-bottom:16px">
+                        <div class="llm-panel">
+                            <div class="llm-panel-title">Encoding Pipeline</div>
+                            <div id="encodingPipelineChart" style="padding:8px 0"></div>
+                        </div>
+                        <div class="llm-panel">
+                            <div class="llm-panel-title">Salience Distribution</div>
+                            <div id="salienceHistogram" style="padding:8px 0"></div>
+                        </div>
+                    </div>
+                    <div class="llm-panel" style="margin-bottom:16px">
+                        <div class="llm-panel-title">Session Timeline</div>
+                        <div id="sessionTimeline" style="padding:8px 0;overflow-x:auto"></div>
                     </div>
                 </div>
             </section>
@@ -3366,6 +3396,7 @@
 
             renderToolChart(data.chart_buckets || [], _toolRange);
             loadAnalytics();
+            loadSessionTimeline();
         } catch (e) {
             document.getElementById('toolCalls').textContent = 'ERR';
         }
@@ -3486,9 +3517,113 @@
                     }).join('') + '</tbody></table>';
             }
 
+            // Encoding Pipeline — funnel visualization
+            var epEl = document.getElementById('encodingPipelineChart');
+            var totalRaw = p.total_raw || 0;
+            var totalEncoded = p.total_encoded || 0;
+            var totalMerged = p.total_merged || 0;
+            var maxVal = Math.max(totalRaw, 1);
+            var stages = [
+                { label: 'Raw', value: totalRaw, color: 'var(--accent-blue)' },
+                { label: 'Encoded', value: totalEncoded, color: 'var(--accent-cyan)' },
+                { label: 'Merged', value: totalMerged, color: 'var(--accent-violet)' },
+                { label: 'Active', value: totalEncoded - totalMerged, color: 'var(--accent-green)' }
+            ];
+            epEl.innerHTML = stages.map(function(s) {
+                var pct = Math.max(((s.value / maxVal) * 100), 2);
+                return '<div class="pipeline-bar"><span class="pipeline-bar-label">' + s.label + '</span>' +
+                    '<div class="pipeline-bar-track"><div class="pipeline-bar-fill" style="width:' + pct.toFixed(1) + '%;background:' + s.color + '"></div></div>' +
+                    '<span class="pipeline-bar-value">' + (s.value >= 0 ? s.value.toLocaleString() : 0) + '</span></div>';
+            }).join('');
+
+            // Salience Distribution — stacked bar chart by tier
+            var sdEl = document.getElementById('salienceHistogram');
+            var sd = data.salience_distribution || {};
+            var sourceColors = {
+                mcp: 'var(--accent-cyan)', filesystem: 'var(--accent-blue)',
+                git: 'var(--accent-violet)', terminal: 'var(--accent-green)',
+                clipboard: 'var(--accent-yellow)', benchmark: 'var(--accent-pink)',
+                ingest: 'var(--accent-red)', system: 'var(--text-muted)'
+            };
+            var tiers = ['high', 'medium', 'low', 'noise'];
+            var allSources = new Set();
+            tiers.forEach(function(t) { Object.keys(sd[t] || {}).forEach(function(s) { allSources.add(s); }); });
+            var sources = Array.from(allSources);
+            var maxTierTotal = 0;
+            tiers.forEach(function(t) {
+                var total = 0;
+                sources.forEach(function(s) { total += (sd[t] || {})[s] || 0; });
+                if (total > maxTierTotal) maxTierTotal = total;
+            });
+            if (maxTierTotal === 0) {
+                sdEl.innerHTML = '<span class="llm-empty" style="font-size:0.75rem">No salience data</span>';
+            } else {
+                sdEl.innerHTML = tiers.map(function(tier) {
+                    var tierData = sd[tier] || {};
+                    var tierTotal = 0;
+                    sources.forEach(function(s) { tierTotal += tierData[s] || 0; });
+                    var segs = sources.map(function(s) {
+                        var val = tierData[s] || 0;
+                        if (val === 0) return '';
+                        var pct = (val / maxTierTotal) * 100;
+                        return '<div class="salience-seg" style="width:' + pct.toFixed(1) + '%;background:' + (sourceColors[s] || 'var(--text-muted)') + '" title="' + s + ': ' + val + '"></div>';
+                    }).join('');
+                    return '<div class="salience-row"><span class="salience-label">' + tier + '</span>' +
+                        '<div class="salience-stacked">' + segs + '</div>' +
+                        '<span class="salience-count">' + tierTotal + '</span></div>';
+                }).join('') +
+                '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">' +
+                sources.map(function(s) {
+                    return '<span style="font-size:0.65rem;display:flex;align-items:center;gap:3px"><span style="width:8px;height:8px;border-radius:2px;background:' + (sourceColors[s] || 'var(--text-muted)') + '"></span>' + s + '</span>';
+                }).join('') + '</div>';
+            }
+
         } catch(e) {
             console.error('Analytics load failed:', e);
         }
+    }
+
+    // Session Timeline — swimlane visualization
+    async function loadSessionTimeline() {
+        try {
+            var resp = await fetch(CONFIG.API_BASE + '/sessions?days=7&limit=15');
+            if (!resp.ok) return;
+            var data = await resp.json();
+            var sessions = data.sessions || [];
+            var el = document.getElementById('sessionTimeline');
+            if (sessions.length === 0) {
+                el.innerHTML = '<span class="llm-empty" style="font-size:0.75rem">No sessions found</span>';
+                return;
+            }
+
+            // Find time range across all sessions
+            var minT = Infinity, maxT = -Infinity;
+            sessions.forEach(function(s) {
+                var st = new Date(s.start_time).getTime();
+                var et = new Date(s.end_time).getTime();
+                if (st < minT) minT = st;
+                if (et > maxT) maxT = et;
+            });
+            var rangeMs = maxT - minT || 1;
+
+            var colors = ['var(--accent-cyan)', 'var(--accent-green)', 'var(--accent-violet)', 'var(--accent-blue)', 'var(--accent-pink)', 'var(--accent-yellow)'];
+
+            el.innerHTML = sessions.map(function(s, i) {
+                var st = new Date(s.start_time).getTime();
+                var et = new Date(s.end_time).getTime();
+                var left = ((st - minT) / rangeMs) * 100;
+                var width = Math.max(((et - st) / rangeMs) * 100, 2);
+                var label = s.session_id.replace('mcp-', '').substring(0, 8);
+                var dur = Math.round((et - st) / 60000);
+                var color = colors[i % colors.length];
+                return '<div class="session-lane">' +
+                    '<span class="session-label" title="' + escapeHtml(s.session_id) + '">' + escapeHtml(label) + '</span>' +
+                    '<div class="session-bar-track">' +
+                    '<div class="session-bar" style="left:' + left.toFixed(1) + '%;width:' + width.toFixed(1) + '%;background:' + color + '">' +
+                    (s.memory_count > 0 ? s.memory_count : '') + '</div></div>' +
+                    '<span class="session-meta">' + dur + 'm / ' + s.memory_count + '</span></div>';
+            }).join('');
+        } catch(e) { /* ignore */ }
     }
 
     function formatBytes(bytes) {
