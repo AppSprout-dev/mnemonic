@@ -89,17 +89,7 @@ func HandleCreateMemory(s store.Store, bus events.Bus, log *slog.Logger) http.Ha
 
 		// Create RawMemory
 		now := time.Now()
-		salience := float32(0.7)
-		switch req.Type {
-		case "decision":
-			salience = 0.85
-		case "error":
-			salience = 0.8
-		case "insight":
-			salience = 0.9
-		case "learning":
-			salience = 0.8
-		}
+		salience := InitialSalienceForType(req.Type)
 
 		rawMem := store.RawMemory{
 			ID:        uuid.New().String(),

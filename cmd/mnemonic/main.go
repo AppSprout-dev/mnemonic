@@ -39,6 +39,7 @@ import (
 	"github.com/appsprout-dev/mnemonic/internal/agent/reactor"
 	"github.com/appsprout-dev/mnemonic/internal/agent/retrieval"
 	"github.com/appsprout-dev/mnemonic/internal/api"
+	"github.com/appsprout-dev/mnemonic/internal/api/routes"
 	"github.com/appsprout-dev/mnemonic/internal/backup"
 	"github.com/appsprout-dev/mnemonic/internal/mcp"
 	"github.com/appsprout-dev/mnemonic/internal/store"
@@ -1713,6 +1714,13 @@ func serveCommand(configPath string) {
 			apiDeps.AgentWebPort = cfg.AgentSDK.WebPort
 		}
 
+		// Set API routes memory defaults from config
+		routes.FeedbackStrengthDelta = cfg.MemoryDefaults.FeedbackStrengthDelta
+		routes.FeedbackSalienceBoost = cfg.MemoryDefaults.FeedbackSalienceBoost
+		routes.InitialSalienceForType = func(memType string) float32 {
+			return cfg.MemoryDefaults.SalienceForType(memType)
+		}
+
 		apiServer := api.NewServer(api.ServerConfig{
 			Host:              cfg.API.Host,
 			Port:              cfg.API.Port,
@@ -2668,7 +2676,17 @@ func mcpCommand(configPath string) {
 
 	mcpResolver := config.NewProjectResolver(cfg.Projects)
 	daemonURL := fmt.Sprintf("http://%s:%d", cfg.API.Host, cfg.API.Port)
-	server := mcp.NewMCPServer(db, retriever, bus, log, Version, cfg.Coaching.CoachingFile, cfg.Perception.Filesystem.ExcludePatterns, cfg.Perception.Filesystem.MaxContentBytes, mcpResolver, daemonURL)
+	memDefaults := mcp.MemoryDefaults{
+		SalienceGeneral:       cfg.MemoryDefaults.InitialSalienceGeneral,
+		SalienceDecision:      cfg.MemoryDefaults.InitialSalienceDecision,
+		SalienceError:         cfg.MemoryDefaults.InitialSalienceError,
+		SalienceInsight:       cfg.MemoryDefaults.InitialSalienceInsight,
+		SalienceLearning:      cfg.MemoryDefaults.InitialSalienceLearning,
+		SalienceHandoff:       cfg.MemoryDefaults.InitialSalienceHandoff,
+		FeedbackStrengthDelta: cfg.MemoryDefaults.FeedbackStrengthDelta,
+		FeedbackSalienceBoost: cfg.MemoryDefaults.FeedbackSalienceBoost,
+	}
+	server := mcp.NewMCPServer(db, retriever, bus, log, Version, cfg.Coaching.CoachingFile, cfg.Perception.Filesystem.ExcludePatterns, cfg.Perception.Filesystem.MaxContentBytes, mcpResolver, daemonURL, memDefaults)
 
 	// Handle signal for graceful shutdown
 	sigChan := make(chan os.Signal, 1)

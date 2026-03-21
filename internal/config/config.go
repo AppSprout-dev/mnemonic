@@ -28,8 +28,9 @@ type Config struct {
 	Episoding     EpisodingConfig     `yaml:"episoding"`
 	Abstraction   AbstractionConfig   `yaml:"abstraction"`
 	Orchestrator  OrchestratorConfig  `yaml:"orchestrator"`
-	Reactor       ReactorConfig       `yaml:"reactor"`
-	MCP           MCPConfig           `yaml:"mcp"`
+	Reactor        ReactorConfig        `yaml:"reactor"`
+	MemoryDefaults MemoryDefaultsConfig `yaml:"memory_defaults"`
+	MCP            MCPConfig            `yaml:"mcp"`
 	AgentSDK      AgentSDKConfig      `yaml:"agent_sdk"`
 	Training      TrainingConfig      `yaml:"training"`
 	Coaching      CoachingConfig      `yaml:"coaching"`
@@ -361,6 +362,36 @@ type OrchestratorConfig struct {
 // ReactorConfig configures the event-driven reactor engine.
 type ReactorConfig struct {
 	Cooldowns map[string]string `yaml:"cooldowns"` // chain ID -> duration string (e.g., "30m", "1h")
+}
+
+// MemoryDefaultsConfig holds shared defaults used by both MCP and API.
+type MemoryDefaultsConfig struct {
+	InitialSalienceGeneral  float32 `yaml:"initial_salience_general"`  // default: 0.7
+	InitialSalienceDecision float32 `yaml:"initial_salience_decision"` // default: 0.85
+	InitialSalienceError    float32 `yaml:"initial_salience_error"`    // default: 0.8
+	InitialSalienceInsight  float32 `yaml:"initial_salience_insight"`  // default: 0.9
+	InitialSalienceLearning float32 `yaml:"initial_salience_learning"` // default: 0.8
+	InitialSalienceHandoff  float32 `yaml:"initial_salience_handoff"`  // default: 0.95
+	FeedbackStrengthDelta   float32 `yaml:"feedback_strength_delta"`   // default: 0.05
+	FeedbackSalienceBoost   float32 `yaml:"feedback_salience_boost"`   // default: 0.02
+}
+
+// SalienceForType returns the initial salience for a given memory type.
+func (c MemoryDefaultsConfig) SalienceForType(memType string) float32 {
+	switch memType {
+	case "decision":
+		return c.InitialSalienceDecision
+	case "error":
+		return c.InitialSalienceError
+	case "insight":
+		return c.InitialSalienceInsight
+	case "learning":
+		return c.InitialSalienceLearning
+	case "handoff":
+		return c.InitialSalienceHandoff
+	default:
+		return c.InitialSalienceGeneral
+	}
 }
 
 // MCPConfig holds MCP server settings.
@@ -735,6 +766,16 @@ func Default() *Config {
 			HealthReportInterval:    5 * time.Minute,
 		},
 		Reactor: ReactorConfig{},
+		MemoryDefaults: MemoryDefaultsConfig{
+			InitialSalienceGeneral:  0.7,
+			InitialSalienceDecision: 0.85,
+			InitialSalienceError:    0.8,
+			InitialSalienceInsight:  0.9,
+			InitialSalienceLearning: 0.8,
+			InitialSalienceHandoff:  0.95,
+			FeedbackStrengthDelta:   0.05,
+			FeedbackSalienceBoost:   0.02,
+		},
 		MCP: MCPConfig{
 			Enabled: true,
 		},

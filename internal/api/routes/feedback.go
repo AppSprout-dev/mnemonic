@@ -11,10 +11,31 @@ import (
 	"github.com/google/uuid"
 )
 
-const (
-	feedbackStrengthDelta float32 = 0.05
-	feedbackSalienceBoost float32 = 0.02
+// FeedbackStrengthDelta and FeedbackSalienceBoost are tunable via MemoryDefaults.
+// Package-level defaults; override via SetMemoryDefaults before registering routes.
+var (
+	FeedbackStrengthDelta float32 = 0.05
+	FeedbackSalienceBoost float32 = 0.02
 )
+
+// InitialSalienceForType returns the configured initial salience for a memory type.
+// Package-level defaults; override via SetMemoryDefaults before registering routes.
+var InitialSalienceForType = defaultSalienceForType
+
+func defaultSalienceForType(memType string) float32 {
+	switch memType {
+	case "decision":
+		return 0.85
+	case "error":
+		return 0.8
+	case "insight":
+		return 0.9
+	case "learning":
+		return 0.8
+	default:
+		return 0.7
+	}
+}
 
 // FeedbackRequest is the JSON request body for submitting recall feedback.
 type FeedbackRequest struct {
@@ -97,7 +118,7 @@ func HandleFeedback(s store.Store, log *slog.Logger) http.HandlerFunc {
 				}
 				for _, a := range assocs {
 					if a.TargetID == ta.TargetID {
-						newStrength := a.Strength + feedbackStrengthDelta
+						newStrength := a.Strength + FeedbackStrengthDelta
 						if newStrength > 1.0 {
 							newStrength = 1.0
 						}
@@ -114,7 +135,7 @@ func HandleFeedback(s store.Store, log *slog.Logger) http.HandlerFunc {
 				if err != nil {
 					continue
 				}
-				newSalience := mem.Salience + feedbackSalienceBoost
+				newSalience := mem.Salience + FeedbackSalienceBoost
 				if newSalience > 1.0 {
 					newSalience = 1.0
 				}
@@ -132,7 +153,7 @@ func HandleFeedback(s store.Store, log *slog.Logger) http.HandlerFunc {
 				}
 				for _, a := range assocs {
 					if a.TargetID == ta.TargetID {
-						newStrength := a.Strength - feedbackStrengthDelta
+						newStrength := a.Strength - FeedbackStrengthDelta
 						if newStrength < 0.05 {
 							newStrength = 0.05
 						}
