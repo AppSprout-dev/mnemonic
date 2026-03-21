@@ -127,8 +127,8 @@ func TestHandleToolsList(t *testing.T) {
 		t.Fatalf("tools is not an array, got %T", toolsInterface)
 	}
 
-	if len(toolsArray) != 22 {
-		t.Fatalf("expected 22 tools, got %d", len(toolsArray))
+	if len(toolsArray) != 23 {
+		t.Fatalf("expected 23 tools, got %d", len(toolsArray))
 	}
 
 	// Verify tool names
@@ -155,6 +155,7 @@ func TestHandleToolsList(t *testing.T) {
 		"exclude_path":    false,
 		"list_exclusions": false,
 		"dismiss_pattern": false,
+		"create_handoff":  false,
 	}
 
 	for _, toolInterface := range toolsArray {
