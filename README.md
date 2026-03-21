@@ -106,7 +106,7 @@ For the full deep dive, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## MCP Integration
 
-Mnemonic exposes 19 tools via the [Model Context Protocol](https://modelcontextprotocol.io/) for Claude Code and other AI agents:
+Mnemonic exposes 21 tools via the [Model Context Protocol](https://modelcontextprotocol.io/) for Claude Code and other AI agents:
 
 **Claude Code config** (`~/.claude/settings.local.json`):
 
