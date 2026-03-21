@@ -256,6 +256,15 @@ func (pa *PerceptionAgent) processWatcherEvents(
 				Metadata:  event.Metadata,
 			}
 
+			// Publish to bus so other agents (e.g. retrieval) can react to activity.
+			_ = pa.bus.Publish(ctx, events.WatcherEvent{
+				Source:  event.Source,
+				Type:    event.Type,
+				Path:    event.Path,
+				Preview: pa.truncateContent(event.Content, 200),
+				Ts:      event.Timestamp,
+			})
+
 			// Process the event through the pipeline
 			pa.processEvent(ctx, evt)
 		}
