@@ -627,7 +627,7 @@ func (ea *EncodingAgent) pollAndProcessRawMemories(ctx context.Context) error {
 	if floor := ea.config.SalienceFloor; floor > 0 {
 		filtered := compressed[:0]
 		for _, cm := range compressed {
-			if cm.raw.Source != "mcp" && cm.raw.Source != "ingest" && cm.compression.Salience < floor {
+			if cm.raw.Source != "mcp" && cm.compression.Salience < floor {
 				ea.log.Info("skipping low-salience memory",
 					"raw_id", cm.rawID, "salience", cm.compression.Salience, "floor", floor, "source", cm.raw.Source)
 				if err := ea.store.MarkRawProcessed(ctx, cm.rawID); err != nil {
