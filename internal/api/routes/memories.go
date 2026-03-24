@@ -210,6 +210,11 @@ func HandleListMemories(s store.Store, log *slog.Logger) http.HandlerFunc {
 			memories = epFiltered
 		}
 
+		// Strip embeddings from list response (saves ~42KB per memory)
+		for i := range memories {
+			memories[i].Embedding = nil
+		}
+
 		resp := ListMemoriesResponse{
 			Memories: memories,
 			Count:    len(memories),
