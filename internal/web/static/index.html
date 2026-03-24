@@ -4806,8 +4806,7 @@
         } catch (e) { console.error('Failed to load forum index:', e); }
     }
 
-    function loadMemorySection(sectionId, sectionName) {
-        // Navigate to thread view and render the explore section content there
+    async function loadMemorySection(sectionId, sectionName) {
         state.currentView = 'thread';
         document.querySelectorAll('.view').forEach(function(v) { v.classList.remove('active'); });
         document.querySelectorAll('.ntab').forEach(function(t) { t.classList.remove('active'); });
@@ -4818,25 +4817,125 @@
         if (bc) bc.innerHTML = '<a href="#" onclick="switchView(\'explore\')">mnemonic</a><span class="sep"> › </span><a href="#" onclick="switchView(\'explore\')">Forum</a><span class="sep"> › </span>Memory System<span class="sep"> › </span>' + escapeHtml(sectionName);
         var compose = document.getElementById('threadCompose');
         if (compose) compose.style.display = 'none';
-
         var container = document.getElementById('threadContent');
         if (!container) return;
+        container.innerHTML = '<div style="padding:16px;color:var(--text-dim)">Loading...</div>';
 
-        // Copy content from the hidden explore section
-        var source = document.getElementById('section-' + sectionId);
-        if (source && source.innerHTML && !source.innerHTML.includes('Loading...')) {
-            container.innerHTML = '<div class="forabg" style="margin:0"><div class="forabg-head"><span class="forabg-title">' + escapeHtml(sectionName) + '</span></div><div class="inner">' + source.innerHTML + '</div></div>';
-        } else {
-            container.innerHTML = '<div style="padding:16px;color:var(--text-dim)">Loading ' + escapeHtml(sectionName) + '...</div>';
-            // Trigger load and retry after data arrives
-            if (!state.exploreLoaded[sectionId]) loadExploreTab(sectionId);
-            setTimeout(function() {
-                var src = document.getElementById('section-' + sectionId);
-                if (src && container) {
-                    container.innerHTML = '<div class="forabg" style="margin:0"><div class="forabg-head"><span class="forabg-title">' + escapeHtml(sectionName) + '</span></div><div class="inner">' + src.innerHTML + '</div></div>';
+        try {
+            if (sectionId === 'episodes') {
+                var data = await fetchJSON('/episodes?limit=50');
+                var eps = data.episodes || [];
+                var html = '<div class="forabg" style="margin:0"><div class="forabg-head"><span class="forabg-title">Episodes</span><span class="forabg-meta">' + eps.length + ' episodes</span></div>';
+                html += '<div class="inner"><ul class="topiclist"><li class="header"><dl class="row-item">';
+                html += '<dt><div class="list-inner">Episode</div></dt>';
+                html += '<dd class="posts">Memories</dd><dd class="posts">Files</dd><dd class="lastpost">Activity</dd>';
+                html += '</dl></li></ul><ul class="topiclist forums">';
+                for (var i = 0; i < eps.length; i++) {
+                    var ep = eps[i];
+                    var bgClass = i % 2 === 0 ? 'bg1' : 'bg2';
+                    var mems = (ep.memory_ids || []).length || (ep.raw_memory_ids || []).length;
+                    var files = (ep.files_modified || []).length;
+                    var time = ep.end_time ? new Date(ep.end_time).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+                    var stateLabel = ep.state === 'open' ? '<span style="color:var(--accent-green)">open</span>' : '';
+                    html += '<li class="row ' + bgClass + '" onclick="loadThread(\'' + ep.id + '\')" style="cursor:pointer">';
+                    html += '<dl class="row-item"><dt>';
+                    html += '<span class="status-icon" style="width:26px;height:26px;font-size:0.6rem;flex-shrink:0;background:color-mix(in srgb, var(--accent-violet) 15%, transparent);color:var(--accent-violet);border:1px solid color-mix(in srgb, var(--accent-violet) 25%, transparent)">EP</span>';
+                    html += '<div class="list-inner">';
+                    html += '<a class="topictitle" style="color:var(--link)">' + escapeHtml(ep.title || 'Untitled episode') + '</a> ' + stateLabel;
+                    if (ep.summary) html += '<br><span style="font-size:0.75rem;color:var(--text-dim)">' + escapeHtml(ep.summary).slice(0, 120) + '</span>';
+                    html += '</div></dt>';
+                    html += '<dd class="posts">' + mems + '</dd><dd class="posts">' + files + '</dd>';
+                    html += '<dd class="lastpost"><span style="font-size:0.75rem;color:var(--text-dim)">' + time + '</span></dd>';
+                    html += '</dl></li>';
                 }
-            }, 2000);
-        }
+                html += '</ul></div></div>';
+                container.innerHTML = html;
+
+            } else if (sectionId === 'memories') {
+                var data = await fetchJSON('/memories?state=active&limit=50');
+                var mems = data.memories || [];
+                var html = '<div class="forabg" style="margin:0"><div class="forabg-head"><span class="forabg-title">Recent Memories</span><span class="forabg-meta">' + mems.length + ' shown</span></div>';
+                html += '<div class="inner"><ul class="topiclist"><li class="header"><dl class="row-item">';
+                html += '<dt><div class="list-inner">Memory</div></dt>';
+                html += '<dd class="posts">Salience</dd><dd class="posts">Type</dd><dd class="lastpost">Created</dd>';
+                html += '</dl></li></ul><ul class="topiclist forums">';
+                for (var i = 0; i < mems.length; i++) {
+                    var m = mems[i];
+                    var bgClass = i % 2 === 0 ? 'bg1' : 'bg2';
+                    var time = new Date(m.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                    var typeColor = { decision: 'var(--accent-orange)', error: 'var(--accent-red)', insight: 'var(--accent-violet)', learning: 'var(--accent-blue)' }[m.type] || 'var(--text-dim)';
+                    html += '<li class="row ' + bgClass + '">';
+                    html += '<dl class="row-item"><dt>';
+                    html += '<span class="status-icon" style="width:26px;height:26px;font-size:0.6rem;flex-shrink:0;background:color-mix(in srgb, ' + typeColor + ' 15%, transparent);color:' + typeColor + ';border:1px solid color-mix(in srgb, ' + typeColor + ' 25%, transparent)">' + (m.type || 'G').charAt(0).toUpperCase() + '</span>';
+                    html += '<div class="list-inner">';
+                    html += '<a class="topictitle" style="color:var(--link)">' + escapeHtml(m.summary || m.content || '').slice(0, 100) + '</a>';
+                    if (m.concepts && m.concepts.length) html += '<br><span style="font-size:0.72rem;color:var(--text-dim)">' + m.concepts.slice(0, 5).map(function(c) { return escapeHtml(c); }).join(' · ') + '</span>';
+                    html += '</div></dt>';
+                    html += '<dd class="posts" style="color:' + typeColor + '">' + (m.salience || 0).toFixed(2) + '</dd>';
+                    html += '<dd class="posts" style="font-size:0.72rem">' + escapeHtml(m.type || 'general') + '</dd>';
+                    html += '<dd class="lastpost"><span style="font-size:0.75rem;color:var(--text-dim)">' + time + '</span></dd>';
+                    html += '</dl></li>';
+                }
+                html += '</ul></div></div>';
+                container.innerHTML = html;
+
+            } else if (sectionId === 'patterns') {
+                var data = await fetchJSON('/patterns?limit=50');
+                var pats = data.patterns || [];
+                var html = '<div class="forabg" style="margin:0"><div class="forabg-head"><span class="forabg-title">Discovered Patterns</span><span class="forabg-meta">' + pats.length + ' patterns</span></div>';
+                html += '<div class="inner"><ul class="topiclist"><li class="header"><dl class="row-item">';
+                html += '<dt><div class="list-inner">Pattern</div></dt>';
+                html += '<dd class="posts">Strength</dd><dd class="posts">Evidence</dd><dd class="lastpost">Discovered</dd>';
+                html += '</dl></li></ul><ul class="topiclist forums">';
+                for (var i = 0; i < pats.length; i++) {
+                    var p = pats[i];
+                    var bgClass = i % 2 === 0 ? 'bg1' : 'bg2';
+                    var time = new Date(p.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                    html += '<li class="row ' + bgClass + '">';
+                    html += '<dl class="row-item"><dt>';
+                    html += '<span class="status-icon" style="width:26px;height:26px;font-size:0.6rem;flex-shrink:0;background:color-mix(in srgb, var(--accent-orange) 15%, transparent);color:var(--accent-orange);border:1px solid color-mix(in srgb, var(--accent-orange) 25%, transparent)">PT</span>';
+                    html += '<div class="list-inner">';
+                    html += '<a class="topictitle" style="color:var(--link)">' + escapeHtml(p.title) + '</a>';
+                    html += '<br><span style="font-size:0.75rem;color:var(--text-dim)">' + escapeHtml(p.description || '').slice(0, 120) + '</span>';
+                    html += '</div></dt>';
+                    html += '<dd class="posts" style="color:var(--accent-orange)">' + (p.strength || 0).toFixed(2) + '</dd>';
+                    html += '<dd class="posts">' + (p.evidence_ids || []).length + '</dd>';
+                    html += '<dd class="lastpost"><span style="font-size:0.75rem;color:var(--text-dim)">' + time + '</span></dd>';
+                    html += '</dl></li>';
+                }
+                html += '</ul></div></div>';
+                container.innerHTML = html;
+
+            } else if (sectionId === 'abstractions') {
+                var data = await fetchJSON('/abstractions?limit=50');
+                var abs = data.abstractions || [];
+                var html = '<div class="forabg" style="margin:0"><div class="forabg-head"><span class="forabg-title">Abstractions & Principles</span><span class="forabg-meta">' + abs.length + ' abstractions</span></div>';
+                html += '<div class="inner"><ul class="topiclist"><li class="header"><dl class="row-item">';
+                html += '<dt><div class="list-inner">Abstraction</div></dt>';
+                html += '<dd class="posts">Confidence</dd><dd class="posts">Level</dd><dd class="lastpost">Created</dd>';
+                html += '</dl></li></ul><ul class="topiclist forums">';
+                for (var i = 0; i < abs.length; i++) {
+                    var a = abs[i];
+                    var bgClass = i % 2 === 0 ? 'bg1' : 'bg2';
+                    var time = new Date(a.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                    var level = a.level === 3 ? 'Axiom' : a.level === 2 ? 'Principle' : 'Pattern';
+                    var levelColor = a.level === 3 ? 'var(--accent-yellow)' : 'var(--accent-green)';
+                    html += '<li class="row ' + bgClass + '">';
+                    html += '<dl class="row-item"><dt>';
+                    html += '<span class="status-icon" style="width:26px;height:26px;font-size:0.6rem;flex-shrink:0;background:color-mix(in srgb, ' + levelColor + ' 15%, transparent);color:' + levelColor + ';border:1px solid color-mix(in srgb, ' + levelColor + ' 25%, transparent)">AB</span>';
+                    html += '<div class="list-inner">';
+                    html += '<a class="topictitle" style="color:var(--link)">' + escapeHtml(a.title) + '</a>';
+                    html += '<br><span style="font-size:0.75rem;color:var(--text-dim)">' + escapeHtml(a.description || '').slice(0, 120) + '</span>';
+                    html += '</div></dt>';
+                    html += '<dd class="posts" style="color:' + levelColor + '">' + (a.confidence || 0).toFixed(2) + '</dd>';
+                    html += '<dd class="posts" style="font-size:0.72rem">' + level + '</dd>';
+                    html += '<dd class="lastpost"><span style="font-size:0.75rem;color:var(--text-dim)">' + time + '</span></dd>';
+                    html += '</dl></li>';
+                }
+                html += '</ul></div></div>';
+                container.innerHTML = html;
+            }
+        } catch (e) { console.error('Failed to load memory section:', e); container.innerHTML = '<div style="padding:16px;color:var(--accent-red)">Failed to load: ' + e.message + '</div>'; }
     }
 
     async function loadForumGroup(type) {

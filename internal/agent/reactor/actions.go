@@ -119,7 +119,7 @@ type CreateForumPostAction struct {
 func (a *CreateForumPostAction) Name() string { return "create_forum_post" }
 
 func (a *CreateForumPostAction) Execute(ctx context.Context, trigger events.Event, state *ReactorState) error {
-	content, agentKey := forum.ComposePost(trigger)
+	content, agentKey, project := forum.ComposePost(trigger)
 	if content == "" || agentKey == "" {
 		return nil // event type not handled by personality templates
 	}
@@ -132,9 +132,11 @@ func (a *CreateForumPostAction) Execute(ctx context.Context, trigger events.Even
 	postID := uuid.New().String()
 	now := time.Now()
 
-	// Determine category: per-agent sub-forum or shared
+	// Determine category: project sub-forum if available, else per-agent or shared
 	categoryID := "agent-" + agentKey
-	if !a.PerAgentSubforums {
+	if project != "" {
+		categoryID = "project-" + project
+	} else if !a.PerAgentSubforums {
 		categoryID = "system-reports"
 	}
 

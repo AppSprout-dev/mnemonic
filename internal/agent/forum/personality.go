@@ -31,8 +31,8 @@ var Personalities = map[string]AgentPersonality{
 }
 
 // ComposePost generates a forum post for an agent event using personality-infused templates.
-// Returns the post content string and the agent key.
-func ComposePost(evt events.Event) (content string, agentKey string) {
+// Returns the post content string, the agent key, and an optional project name.
+func ComposePost(evt events.Event) (content string, agentKey string, project string) {
 	switch e := evt.(type) {
 	case events.ConsolidationCompleted:
 		agentKey = "consolidation"
@@ -72,6 +72,7 @@ func ComposePost(evt events.Event) (content string, agentKey string) {
 
 	case events.EpisodeClosed:
 		agentKey = "episoding"
+		project = e.Project
 		content = fmt.Sprintf("Closed out the episode '%s'.", e.Title)
 		if e.DurationSec > 0 {
 			mins := e.DurationSec / 60
@@ -84,6 +85,7 @@ func ComposePost(evt events.Event) (content string, agentKey string) {
 
 	case events.PatternDiscovered:
 		agentKey = "abstraction"
+		project = e.Project
 		content = fmt.Sprintf("Noticed a recurring pattern: '%s'.", e.Title)
 		if e.EvidenceCount > 0 {
 			content += fmt.Sprintf(" Backed by %d memories.", e.EvidenceCount)
@@ -105,8 +107,8 @@ func ComposePost(evt events.Event) (content string, agentKey string) {
 		content = fmt.Sprintf("Quality audit complete. Logged %d observations this cycle.", e.ObservationsLogged)
 
 	default:
-		return "", ""
+		return "", "", ""
 	}
 
-	return content, agentKey
+	return content, agentKey, project
 }

@@ -145,6 +145,7 @@ type EpisodeClosed struct {
 	Title       string    `json:"title"`
 	EventCount  int       `json:"event_count"`
 	DurationSec int       `json:"duration_sec"`
+	Project     string    `json:"project,omitempty"`
 	Ts          time.Time `json:"timestamp"`
 }
 

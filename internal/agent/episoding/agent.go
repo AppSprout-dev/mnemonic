@@ -458,6 +458,7 @@ Respond with ONLY a JSON object (no prose, no fences):
 			Title:       ep.Title,
 			EventCount:  len(ep.RawMemoryIDs),
 			DurationSec: ep.DurationSec,
+			Project:     ep.Project,
 			Ts:          time.Now(),
 		})
 	}
