@@ -4878,7 +4878,7 @@
                     html += '<div class="list-inner">';
                     html += '<a class="topictitle" style="color:var(--link)">' + escapeHtml(m.summary || '').slice(0, 100) + '</a>';
                     if (m.concepts && m.concepts.length) html += '<br><span style="font-size:0.72rem;color:var(--text-dim)">' + m.concepts.slice(0, 5).map(function(c) { return escapeHtml(c); }).join(' · ') + '</span>';
-                    html += '<div class="expand-zone" style="display:none;margin-top:6px;padding:8px;background:var(--bg-row-alt);border-radius:4px;font-size:0.82rem;color:var(--text-secondary)">';
+                    html += '<div class="expand-zone" style="margin-top:6px;padding:8px;background:var(--bg-row-alt);border-radius:4px;font-size:0.82rem;color:var(--text-secondary)">';
                     html += escapeHtml(m.content || '');
                     if (m.source) html += '<br><span style="color:var(--text-dim)">Source: ' + escapeHtml(m.source) + '</span>';
                     if (m.project) html += ' · <span style="color:var(--text-dim)">Project: ' + escapeHtml(m.project) + '</span>';
@@ -4911,7 +4911,7 @@
                     html += '<div class="list-inner">';
                     html += '<a class="topictitle" style="color:var(--link)">' + escapeHtml(p.title) + '</a>';
                     html += '<br><span style="font-size:0.75rem;color:var(--text-dim)">' + escapeHtml(p.description || '').slice(0, 120) + '</span>';
-                    html += '<div class="expand-zone" style="display:none;margin-top:6px;padding:8px;background:var(--bg-row-alt);border-radius:4px;font-size:0.82rem;color:var(--text-secondary)">';
+                    html += '<div class="expand-zone" style="margin-top:6px;padding:8px;background:var(--bg-row-alt);border-radius:4px;font-size:0.82rem;color:var(--text-secondary)">';
                     html += '<strong>Type:</strong> ' + escapeHtml(p.pattern_type || '') + '<br>';
                     html += '<strong>Description:</strong> ' + escapeHtml(p.description || '') + '<br>';
                     if (p.project) html += '<strong>Project:</strong> ' + escapeHtml(p.project) + '<br>';
@@ -4947,7 +4947,7 @@
                     html += '<div class="list-inner">';
                     html += '<a class="topictitle" style="color:var(--link)">' + escapeHtml(a.title) + '</a>';
                     html += '<br><span style="font-size:0.75rem;color:var(--text-dim)">' + escapeHtml(a.description || '').slice(0, 120) + '</span>';
-                    html += '<div class="expand-zone" style="display:none;margin-top:6px;padding:8px;background:var(--bg-row-alt);border-radius:4px;font-size:0.82rem;color:var(--text-secondary)">';
+                    html += '<div class="expand-zone" style="margin-top:6px;padding:8px;background:var(--bg-row-alt);border-radius:4px;font-size:0.82rem;color:var(--text-secondary)">';
                     html += '<strong>Level:</strong> ' + level + '<br>';
                     html += '<strong>Description:</strong> ' + escapeHtml(a.description || '') + '<br>';
                     html += '<strong>Sources:</strong> ' + (a.source_pattern_ids || []).length + ' patterns, ' + (a.source_memory_ids || []).length + ' memories';
