@@ -1280,7 +1280,7 @@
     <div id="app">
         <!-- Nav -->
         <div class="top" id="forumTop">
-                <div class="top-brand"><img src="/logo.png" alt="" style="height:20px;vertical-align:middle;margin-right:6px">mnemonic <small id="navVersion"></small></div>
+                <div class="top-brand"><img src="/logo.png" alt="" style="height:20px;vertical-align:middle;margin-right:6px">mnemonic <a id="navVersion" target="_blank" rel="noopener" style="font-size:0.7rem;font-weight:normal;color:var(--text-dim);text-decoration:none"></a></div>
                 <div class="top-right">
                     <select class="nav-theme-select" id="themeSelect" onchange="setTheme(this.value)">
                         <option value="midnight">Midnight</option>
@@ -2889,7 +2889,10 @@
             }
             if (health.version) {
                 var vEl = document.getElementById('navVersion');
-                if (vEl) vEl.textContent = 'v' + health.version;
+                if (vEl) {
+                    vEl.textContent = 'v' + health.version;
+                    vEl.href = 'https://github.com/AppSprout-dev/mnemonic/releases/tag/v' + health.version;
+                }
             }
             if (health.tool_count) {
                 document.getElementById('toolHeaderSub').textContent = 'recall \u00b7 remember \u00b7 get_context \u00b7 ' + health.tool_count + ' tools';
