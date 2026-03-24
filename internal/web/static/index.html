@@ -3267,8 +3267,25 @@
             return [event.clientX - rect.left, event.clientY - rect.top];
         }
 
+        function scaleSqrt() {
+            var s = scaleLinear();
+            var origScale = s;
+            function sqrtScale(val) {
+                var d0 = s.domain()[0], d1 = s.domain()[1], r0 = s.range()[0], r1 = s.range()[1];
+                if (d1 === d0) return r0;
+                var t = (val - d0) / (d1 - d0);
+                return r0 + Math.sqrt(Math.max(0, t)) * (r1 - r0);
+            }
+            sqrtScale.domain = s.domain;
+            sqrtScale.range = s.range;
+            sqrtScale.nice = function() { return sqrtScale; };
+            sqrtScale.ticks = s.ticks;
+            return sqrtScale;
+        }
+
         return {
             select: select, scaleLinear: scaleLinear, scaleBand: scaleBand, scalePoint: scalePoint,
+            scaleSqrt: scaleSqrt,
             axisBottom: axisBottom, axisLeft: axisLeft, max: max, stack: stack, area: area, line: line,
             curveMonotoneX: curveMonotoneX, extent: extent, format: format, pointer: pointer
         };
