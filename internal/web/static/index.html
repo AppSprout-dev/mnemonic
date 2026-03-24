@@ -4781,7 +4781,7 @@
             for (var mi = 0; mi < memSections.length; mi++) {
                 var ms = memSections[mi];
                 var bgClass = mi % 2 === 0 ? 'bg1' : 'bg2';
-                html += '<li class="row ' + bgClass + '" data-section="' + ms.id + '" data-section-name="' + escapeHtml(ms.name) + '" onclick="loadMemorySection(this.getAttribute(\'data-section\'), this.getAttribute(\'data-section-name\'))" style="cursor:pointer">';
+                html += '<li class="row ' + bgClass + '" id="memsec-' + ms.id + '" style="cursor:pointer">';
                 html += '<dl class="row-item"><dt>';
                 html += '<span class="status-icon" style="width:28px;height:28px;font-size:0.6rem;flex-shrink:0;background:color-mix(in srgb, ' + ms.color + ' 15%, transparent);color:' + ms.color + ';border:1px solid color-mix(in srgb, ' + ms.color + ' 25%, transparent)">' + ms.icon + '</span>';
                 html += '<div class="list-inner">';
@@ -4798,11 +4798,11 @@
             html += '<div style="padding:6px 16px"><button class="recall-btn" style="font-size:0.78rem;padding:3px 10px" onclick="showNewThreadForm()">+ New Thread</button></div>';
             container.innerHTML = html;
 
-            // Populate memory section counts from existing explore data
-            loadExploreTab('episodes');
-            loadExploreTab('memories');
-            loadExploreTab('patterns');
-            loadExploreTab('abstractions');
+            // Bind click handlers for memory section rows
+            memSections.forEach(function(ms) {
+                var el = document.getElementById('memsec-' + ms.id);
+                if (el) el.addEventListener('click', function() { loadMemorySection(ms.id, ms.name); });
+            });
         } catch (e) { console.error('Failed to load forum index:', e); }
     }
 
@@ -4819,7 +4819,7 @@
         if (compose) compose.style.display = 'none';
         var container = document.getElementById('threadContent');
         if (!container) return;
-        container.innerHTML = '<div style="padding:16px;color:var(--text-dim)">Loading...</div>';
+        container.innerHTML = '<div style="padding:16px;color:var(--text-dim)">Loading ' + escapeHtml(sectionId) + '...</div>';
 
         try {
             if (sectionId === 'episodes') {
