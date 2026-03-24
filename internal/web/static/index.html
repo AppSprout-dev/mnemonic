@@ -3029,7 +3029,7 @@
                 on: function(evt, fn) { el.addEventListener(evt, fn); return obj; },
                 node: function() { return el; },
                 remove: function() { if (el.parentNode) el.parentNode.removeChild(el); return obj; },
-                selectAll: function(sel) { return wrapAll(el.querySelectorAll(sel)); },
+                selectAll: function(sel) { return wrapAll(el.querySelectorAll(sel), el); },
                 select: function(sel) { return wrap(el.querySelector(sel)); },
                 classed: function(cls, val) { if (val) el.classList.add(cls); else el.classList.remove(cls); return obj; },
                 datum: function() { return obj; },
@@ -3039,16 +3039,16 @@
             return obj;
         }
 
-        function wrapAll(nodeList) {
+        function wrapAll(nodeList, parentEl) {
             var arr = Array.from(nodeList);
+            var _parent = parentEl || (arr.length > 0 ? arr[0].parentNode : null);
             return {
                 data: function(data) {
                     return { enter: function() { return { append: function(tag) {
-                        var parent = arr.length > 0 ? arr[0].parentNode : null;
                         var results = data.map(function(d) {
-                            var child = ['g','rect','line','circle','path','text'].indexOf(tag) >= 0
+                            var child = ['g','rect','line','circle','path','text','clipPath','defs'].indexOf(tag) >= 0
                                 ? document.createElementNS(SVG_NS, tag) : document.createElement(tag);
-                            if (parent) parent.appendChild(child);
+                            if (_parent) _parent.appendChild(child);
                             child.__data__ = d;
                             return wrap(child);
                         });
@@ -3057,6 +3057,7 @@
                             style: function(name, fn) { results.forEach(function(w, i) { w.style(name, typeof fn === 'function' ? fn(data[i], i) : fn); }); return this; },
                             text: function(fn) { results.forEach(function(w, i) { w.text(typeof fn === 'function' ? fn(data[i], i) : fn); }); return this; },
                             on: function(evt, fn) { results.forEach(function(w, i) { w.on(evt, function(e) { fn.call(this, e, data[i]); }); }); return this; },
+                            classed: function(cls, fn) { results.forEach(function(w, i) { var v = typeof fn === 'function' ? fn(data[i], i) : fn; if (v) w._el.classList.add(cls); }); return this; },
                         };
                     }};},
                     exit: function() { return { remove: function() { arr.forEach(function(n) { if (n.parentNode) n.parentNode.removeChild(n); }); } }; }
@@ -3064,6 +3065,7 @@
                 },
                 remove: function() { arr.forEach(function(n) { if (n.parentNode) n.parentNode.removeChild(n); }); },
                 attr: function(name, fn) { arr.forEach(function(n, i) { n.setAttribute(name, typeof fn === 'function' ? fn(n.__data__, i) : fn); }); return this; },
+                style: function(name, fn) { arr.forEach(function(n, i) { n.style[name] = typeof fn === 'function' ? fn(n.__data__, i) : fn; }); return this; },
             };
         }
 
@@ -3129,55 +3131,75 @@
         }
 
         function axisBottom(scale) {
-            return function(g) {
-                var ticks = scale.domain ? scale.domain() : [];
-                if (typeof scale.ticks === 'function') ticks = scale.ticks(5);
+            var _tickValues = null;
+            var _tickFormat = null;
+            var _ticks = 5;
+            var axisFn = function(g) {
+                var ticks = _tickValues || (typeof scale.ticks === 'function' ? scale.ticks(_ticks) : scale.domain());
                 var gNode = g._el || g;
+                // Draw baseline
+                var domain = scale.range ? scale.range() : [0, 100];
+                var baseline = document.createElementNS(SVG_NS, 'line');
+                baseline.setAttribute('x1', domain[0]); baseline.setAttribute('x2', domain[1]);
+                baseline.setAttribute('stroke', 'currentColor'); baseline.setAttribute('opacity', '0.3');
+                baseline.setAttribute('class', 'domain');
+                gNode.appendChild(baseline);
                 ticks.forEach(function(t) {
-                    var x = scale(t);
+                    var xPos = scale(t) + (scale.bandwidth ? scale.bandwidth() / 2 : 0);
                     var tick = document.createElementNS(SVG_NS, 'g');
-                    tick.setAttribute('transform', 'translate(' + x + ',0)');
-                    var line = document.createElementNS(SVG_NS, 'line');
-                    line.setAttribute('y2', '4');
-                    line.setAttribute('stroke', 'currentColor');
-                    line.setAttribute('opacity', '0.3');
-                    tick.appendChild(line);
-                    var text = document.createElementNS(SVG_NS, 'text');
-                    text.setAttribute('y', '12');
-                    text.setAttribute('text-anchor', 'middle');
-                    text.setAttribute('fill', 'currentColor');
-                    text.setAttribute('font-size', '9');
-                    text.textContent = typeof t === 'number' ? (t >= 1000 ? (t/1000).toFixed(0) + 'k' : t.toFixed(0)) : t;
-                    tick.appendChild(text);
+                    tick.setAttribute('transform', 'translate(' + xPos + ',0)');
+                    tick.setAttribute('class', 'tick');
+                    var ln = document.createElementNS(SVG_NS, 'line');
+                    ln.setAttribute('y2', '4'); ln.setAttribute('stroke', 'currentColor'); ln.setAttribute('opacity', '0.3');
+                    tick.appendChild(ln);
+                    var txt = document.createElementNS(SVG_NS, 'text');
+                    txt.setAttribute('y', '14'); txt.setAttribute('text-anchor', 'middle');
+                    txt.setAttribute('fill', 'currentColor'); txt.setAttribute('font-size', '9');
+                    txt.textContent = _tickFormat ? _tickFormat(t) : (typeof t === 'number' ? (t >= 1000 ? (t/1000).toFixed(0) + 'k' : String(t)) : String(t));
+                    tick.appendChild(txt);
                     gNode.appendChild(tick);
                 });
+                return wrapAll(gNode.querySelectorAll('.tick'), gNode);
             };
+            axisFn.tickValues = function(v) { _tickValues = v; return axisFn; };
+            axisFn.tickFormat = function(f) { _tickFormat = f; return axisFn; };
+            axisFn.ticks = function(n) { _ticks = n; return axisFn; };
+            return axisFn;
         }
 
         function axisLeft(scale) {
-            return function(g) {
-                var ticks = scale.ticks ? scale.ticks(5) : scale.domain();
+            var _tickFormat = null;
+            var _ticks = 5;
+            var axisFn = function(g) {
+                var ticks = scale.ticks ? scale.ticks(_ticks) : scale.domain();
                 var gNode = g._el || g;
+                // Draw baseline
+                var range = scale.range ? scale.range() : [0, 100];
+                var baseline = document.createElementNS(SVG_NS, 'line');
+                baseline.setAttribute('y1', range[0]); baseline.setAttribute('y2', range[1]);
+                baseline.setAttribute('stroke', 'currentColor'); baseline.setAttribute('opacity', '0.3');
+                baseline.setAttribute('class', 'domain');
+                gNode.appendChild(baseline);
                 ticks.forEach(function(t) {
-                    var y = scale(t);
+                    var yPos = scale(t);
                     var tick = document.createElementNS(SVG_NS, 'g');
-                    tick.setAttribute('transform', 'translate(0,' + y + ')');
-                    var line = document.createElementNS(SVG_NS, 'line');
-                    line.setAttribute('x2', '-4');
-                    line.setAttribute('stroke', 'currentColor');
-                    line.setAttribute('opacity', '0.3');
-                    tick.appendChild(line);
-                    var text = document.createElementNS(SVG_NS, 'text');
-                    text.setAttribute('x', '-8');
-                    text.setAttribute('dy', '0.32em');
-                    text.setAttribute('text-anchor', 'end');
-                    text.setAttribute('fill', 'currentColor');
-                    text.setAttribute('font-size', '9');
-                    text.textContent = typeof t === 'number' ? (t >= 1000000 ? (t/1000000).toFixed(1) + 'M' : t >= 1000 ? (t/1000).toFixed(0) + 'k' : t.toFixed(0)) : t;
-                    tick.appendChild(text);
+                    tick.setAttribute('transform', 'translate(0,' + yPos + ')');
+                    tick.setAttribute('class', 'tick');
+                    var ln = document.createElementNS(SVG_NS, 'line');
+                    ln.setAttribute('x2', '-4'); ln.setAttribute('stroke', 'currentColor'); ln.setAttribute('opacity', '0.3');
+                    tick.appendChild(ln);
+                    var txt = document.createElementNS(SVG_NS, 'text');
+                    txt.setAttribute('x', '-8'); txt.setAttribute('dy', '0.32em');
+                    txt.setAttribute('text-anchor', 'end'); txt.setAttribute('fill', 'currentColor'); txt.setAttribute('font-size', '9');
+                    txt.textContent = _tickFormat ? _tickFormat(t) : (typeof t === 'number' ? (t >= 1000000 ? (t/1000000).toFixed(1) + 'M' : t >= 1000 ? (t/1000).toFixed(0) + 'k' : String(Math.round(t))) : String(t));
+                    tick.appendChild(txt);
                     gNode.appendChild(tick);
                 });
+                return wrapAll(gNode.querySelectorAll('.tick'), gNode);
             };
+            axisFn.tickFormat = function(f) { _tickFormat = f; return axisFn; };
+            axisFn.ticks = function(n) { _ticks = n; return axisFn; };
+            return axisFn;
         }
 
         function max(arr, fn) {
