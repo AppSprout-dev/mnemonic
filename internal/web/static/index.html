@@ -4711,16 +4711,36 @@
                 });
                 select.innerHTML = optHtml;
             }
+            var groupDescs = {
+                system: 'General discussion, announcements, and system reports',
+                project: 'Threads organized by project',
+                agent: 'Each cognitive agent has its own sub-forum',
+                custom: 'User-created categories'
+            };
+            var groupIcons = { system: 'GN', project: 'PJ', agent: 'AG', custom: 'CU' };
+            var groupColors = { system: 'var(--accent-cyan)', project: 'var(--accent-green)', agent: 'var(--accent-violet)', custom: 'var(--accent-orange)' };
             var html = '';
             ['system', 'project', 'agent', 'custom'].forEach(function(type) {
                 var cats = groups[type];
                 if (cats.length === 0) return;
-                html += '<div class="forabg">';
-                html += '<div class="forabg-head" onclick="this.nextElementSibling.classList.toggle(\'collapsed\')">';
+                var totalThreads = cats.reduce(function(s, c) { return s + c.thread_count; }, 0);
+                var totalPosts = cats.reduce(function(s, c) { return s + c.post_count; }, 0);
+                // Category group header — looks like a top-level forum entry
+                html += '<div class="forabg" style="margin-bottom:2px">';
+                html += '<div class="forabg-head">';
                 html += '<span class="forabg-title">' + groupLabels[type] + '</span>';
-                html += '<span class="forabg-meta">' + cats.length + ' sub-forums</span>';
+                html += '<span class="forabg-meta">' + totalThreads + ' threads · ' + totalPosts + ' posts</span>';
                 html += '</div>';
-                html += '<div class="inner"><ul class="topiclist forums">';
+                // Sub-forum list — indented rows
+                html += '<div class="inner">';
+                html += '<ul class="topiclist forums">';
+                // Column headers
+                html += '<li class="row" style="border-bottom:1px solid var(--border-subtle)">';
+                html += '<dl class="row-item"><dt style="padding-left:40px"><span style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-dim)">Sub-forum</span></dt>';
+                html += '<dd class="posts" style="font-size:0.7rem;color:var(--text-dim)">Threads</dd>';
+                html += '<dd class="posts" style="font-size:0.7rem;color:var(--text-dim)">Posts</dd>';
+                html += '<dd class="lastpost" style="font-size:0.7rem;color:var(--text-dim)">Last post</dd>';
+                html += '</dl></li>';
                 for (var i = 0; i < cats.length; i++) {
                     var c = cats[i];
                     var cat = c.category;
@@ -4728,10 +4748,11 @@
                     var lastInfo = '';
                     if (c.last_post) {
                         var lp = c.last_post;
+                        var lpAuthor = lp.author_type === 'agent' ? ('@' + (lp.author_key || 'agent')) : (lp.author_name || 'Human');
                         var lpTime = new Date(lp.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-                        lastInfo = '<span style="font-size:0.75rem;color:var(--text-dim)">' + escapeHtml(lp.author_name || 'Unknown') + '<br>' + lpTime + '</span>';
+                        lastInfo = '<span style="font-size:0.75rem;color:var(--text-dim)">' + escapeHtml(lpAuthor) + '<br>' + lpTime + '</span>';
                     }
-                    html += '<li class="row ' + bgClass + '" onclick="loadForumCategory(\'' + cat.id + '\', \'' + escapeHtml(cat.name) + '\')" style="cursor:pointer">';
+                    html += '<li class="row ' + bgClass + '" onclick="loadForumCategory(\'' + cat.id + '\', \'' + escapeHtml(cat.name).replace(/'/g, "\\'") + '\')" style="cursor:pointer">';
                     html += '<dl class="row-item">';
                     html += '<dt>';
                     html += '<span class="status-icon" style="width:28px;height:28px;font-size:0.6rem;flex-shrink:0;background:color-mix(in srgb, ' + (cat.color || 'var(--text-dim)') + ' 15%, transparent);color:' + (cat.color || 'var(--text-dim)') + ';border:1px solid color-mix(in srgb, ' + (cat.color || 'var(--text-dim)') + ' 25%, transparent)">' + (cat.icon || '??') + '</span>';
@@ -4739,15 +4760,15 @@
                     html += '<a class="topictitle" style="color:var(--link)">' + escapeHtml(cat.name) + '</a>';
                     html += '<br><span style="font-size:0.75rem;color:var(--text-dim)">' + escapeHtml(cat.description) + '</span>';
                     html += '</div></dt>';
-                    html += '<dd class="posts">' + c.thread_count + ' <dfn>threads</dfn></dd>';
-                    html += '<dd class="posts">' + c.post_count + ' <dfn>posts</dfn></dd>';
+                    html += '<dd class="posts">' + c.thread_count + '</dd>';
+                    html += '<dd class="posts">' + c.post_count + '</dd>';
                     html += '<dd class="lastpost">' + lastInfo + '</dd>';
                     html += '</dl></li>';
                 }
                 html += '</ul></div></div>';
             });
             // Add "New Thread" button at bottom
-            html += '<div style="padding:4px 16px 8px"><button class="recall-btn" style="font-size:0.78rem;padding:3px 10px" onclick="showNewThreadForm()">+ New Thread</button></div>';
+            html += '<div style="padding:6px 16px"><button class="recall-btn" style="font-size:0.78rem;padding:3px 10px" onclick="showNewThreadForm()">+ New Thread</button></div>';
             container.innerHTML = html;
         } catch (e) { console.error('Failed to load forum index:', e); }
     }
