@@ -42,18 +42,42 @@ type HeuristicConfig struct {
 // scoringOrDefault returns the scoring config with defaults for any zero values.
 func (s ScoringConfig) withDefaults() ScoringConfig {
 	d := s
-	if d.BaseFilesystem <= 0 { d.BaseFilesystem = 0.3 }
-	if d.BaseTerminal <= 0 { d.BaseTerminal = 0.3 }
-	if d.BaseClipboard <= 0 { d.BaseClipboard = 0.3 }
-	if d.BaseMCP <= 0 { d.BaseMCP = 0.6 }
-	if d.BoostErrorLog <= 0 { d.BoostErrorLog = 0.2 }
-	if d.BoostConfig <= 0 { d.BoostConfig = 0.15 }
-	if d.BoostSourceCode <= 0 { d.BoostSourceCode = 0.1 }
-	if d.BoostCommand <= 0 { d.BoostCommand = 0.25 }
-	if d.BoostCodeSnippet <= 0 { d.BoostCodeSnippet = 0.2 }
-	if d.KeywordHigh <= 0 { d.KeywordHigh = 0.15 }
-	if d.KeywordMedium <= 0 { d.KeywordMedium = 0.10 }
-	if d.KeywordLow <= 0 { d.KeywordLow = 0.05 }
+	if d.BaseFilesystem <= 0 {
+		d.BaseFilesystem = 0.3
+	}
+	if d.BaseTerminal <= 0 {
+		d.BaseTerminal = 0.3
+	}
+	if d.BaseClipboard <= 0 {
+		d.BaseClipboard = 0.3
+	}
+	if d.BaseMCP <= 0 {
+		d.BaseMCP = 0.6
+	}
+	if d.BoostErrorLog <= 0 {
+		d.BoostErrorLog = 0.2
+	}
+	if d.BoostConfig <= 0 {
+		d.BoostConfig = 0.15
+	}
+	if d.BoostSourceCode <= 0 {
+		d.BoostSourceCode = 0.1
+	}
+	if d.BoostCommand <= 0 {
+		d.BoostCommand = 0.25
+	}
+	if d.BoostCodeSnippet <= 0 {
+		d.BoostCodeSnippet = 0.2
+	}
+	if d.KeywordHigh <= 0 {
+		d.KeywordHigh = 0.15
+	}
+	if d.KeywordMedium <= 0 {
+		d.KeywordMedium = 0.10
+	}
+	if d.KeywordLow <= 0 {
+		d.KeywordLow = 0.05
+	}
 	return d
 }
 
@@ -72,9 +96,9 @@ type frequencyEntry struct {
 
 // HeuristicFilter implements the pre-filter logic for watcher events.
 type HeuristicFilter struct {
-	cfg     HeuristicConfig
-	scoring ScoringConfig // resolved scoring with defaults applied
-	log     *slog.Logger
+	cfg       HeuristicConfig
+	scoring   ScoringConfig // resolved scoring with defaults applied
+	log       *slog.Logger
 	mu        sync.RWMutex
 	frequency map[string][]frequencyEntry // hash -> list of timestamps
 

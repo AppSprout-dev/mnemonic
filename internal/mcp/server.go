@@ -50,12 +50,12 @@ type ProjectResolver interface {
 
 // MemoryDefaults holds shared salience and feedback tuning values.
 type MemoryDefaults struct {
-	SalienceGeneral  float32
-	SalienceDecision float32
-	SalienceError    float32
-	SalienceInsight  float32
-	SalienceLearning float32
-	SalienceHandoff  float32
+	SalienceGeneral       float32
+	SalienceDecision      float32
+	SalienceError         float32
+	SalienceInsight       float32
+	SalienceLearning      float32
+	SalienceHandoff       float32
 	FeedbackStrengthDelta float32
 	FeedbackSalienceBoost float32
 }
