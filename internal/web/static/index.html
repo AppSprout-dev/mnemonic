@@ -2996,6 +2996,278 @@
         setTimeout(function() { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 3000);
     }
 
+    // ── Lightweight D3 Shim (replaces CDN dependency) ──
+    // Provides only the subset of D3 API that our charts actually use.
+    var d3 = (function() {
+        var SVG_NS = 'http://www.w3.org/2000/svg';
+
+        function select(selector) {
+            var el = typeof selector === 'string' ? document.querySelector(selector) : selector;
+            return wrap(el);
+        }
+
+        function wrap(el) {
+            if (!el) return { append: function() { return wrap(null); }, attr: function() { return wrap(null); }, text: function() { return wrap(null); }, style: function() { return wrap(null); }, on: function() { return wrap(null); }, node: function() { return null; }, selectAll: function() { return wrapAll([]); } };
+            var obj = {
+                _el: el,
+                append: function(tag) {
+                    var child = tag === 'svg' || ['g','rect','line','circle','path','text','clipPath','defs'].indexOf(tag) >= 0
+                        ? document.createElementNS(SVG_NS, tag) : document.createElement(tag);
+                    el.appendChild(child);
+                    return wrap(child);
+                },
+                attr: function(name, val) { if (val === undefined) return el.getAttribute(name); el.setAttribute(name, val); return obj; },
+                style: function(name, val) { if (val === undefined) return el.style[name]; el.style[name] = val; return obj; },
+                text: function(val) { if (val === undefined) return el.textContent; el.textContent = val; return obj; },
+                html: function(val) { if (val === undefined) return el.innerHTML; el.innerHTML = val; return obj; },
+                on: function(evt, fn) { el.addEventListener(evt, fn); return obj; },
+                node: function() { return el; },
+                remove: function() { if (el.parentNode) el.parentNode.removeChild(el); return obj; },
+                selectAll: function(sel) { return wrapAll(el.querySelectorAll(sel)); },
+                select: function(sel) { return wrap(el.querySelector(sel)); },
+                classed: function(cls, val) { if (val) el.classList.add(cls); else el.classList.remove(cls); return obj; },
+                datum: function() { return obj; },
+                call: function(fn) { fn(obj); return obj; },
+                empty: function() { return false; }
+            };
+            return obj;
+        }
+
+        function wrapAll(nodeList) {
+            var arr = Array.from(nodeList);
+            return {
+                data: function(data) {
+                    return { enter: function() { return { append: function(tag) {
+                        var parent = arr.length > 0 ? arr[0].parentNode : null;
+                        var results = data.map(function(d) {
+                            var child = ['g','rect','line','circle','path','text'].indexOf(tag) >= 0
+                                ? document.createElementNS(SVG_NS, tag) : document.createElement(tag);
+                            if (parent) parent.appendChild(child);
+                            child.__data__ = d;
+                            return wrap(child);
+                        });
+                        return {
+                            attr: function(name, fn) { results.forEach(function(w, i) { w.attr(name, typeof fn === 'function' ? fn(data[i], i) : fn); }); return this; },
+                            style: function(name, fn) { results.forEach(function(w, i) { w.style(name, typeof fn === 'function' ? fn(data[i], i) : fn); }); return this; },
+                            text: function(fn) { results.forEach(function(w, i) { w.text(typeof fn === 'function' ? fn(data[i], i) : fn); }); return this; },
+                            on: function(evt, fn) { results.forEach(function(w, i) { w.on(evt, function(e) { fn.call(this, e, data[i]); }); }); return this; },
+                        };
+                    }};},
+                    exit: function() { return { remove: function() { arr.forEach(function(n) { if (n.parentNode) n.parentNode.removeChild(n); }); } }; }
+                    };
+                },
+                remove: function() { arr.forEach(function(n) { if (n.parentNode) n.parentNode.removeChild(n); }); },
+                attr: function(name, fn) { arr.forEach(function(n, i) { n.setAttribute(name, typeof fn === 'function' ? fn(n.__data__, i) : fn); }); return this; },
+            };
+        }
+
+        function scaleLinear() {
+            var _domain = [0, 1], _range = [0, 1];
+            function scale(val) {
+                var d0 = _domain[0], d1 = _domain[1], r0 = _range[0], r1 = _range[1];
+                if (d1 === d0) return r0;
+                return r0 + (val - d0) / (d1 - d0) * (r1 - r0);
+            }
+            scale.domain = function(d) { if (!d) return _domain; _domain = d; return scale; };
+            scale.range = function(r) { if (!r) return _range; _range = r; return scale; };
+            scale.nice = function() { return scale; };
+            scale.ticks = function(n) {
+                n = n || 5;
+                var step = (_domain[1] - _domain[0]) / n;
+                var ticks = [];
+                for (var i = 0; i <= n; i++) ticks.push(_domain[0] + i * step);
+                return ticks;
+            };
+            return scale;
+        }
+
+        function scaleBand() {
+            var _domain = [], _range = [0, 1], _padding = 0;
+            function scale(val) {
+                var idx = _domain.indexOf(val);
+                if (idx < 0) return 0;
+                var step = (_range[1] - _range[0]) / _domain.length;
+                return _range[0] + idx * step + step * _padding / 2;
+            }
+            scale.domain = function(d) { if (!d) return _domain; _domain = d; return scale; };
+            scale.range = function(r) { if (!r) return _range; _range = r; return scale; };
+            scale.padding = function(p) { _padding = p; return scale; };
+            scale.paddingInner = function(p) { _padding = p; return scale; };
+            scale.paddingOuter = function() { return scale; };
+            scale.bandwidth = function() {
+                if (_domain.length === 0) return 0;
+                var step = (_range[1] - _range[0]) / _domain.length;
+                return step * (1 - _padding);
+            };
+            scale.step = function() {
+                if (_domain.length === 0) return 0;
+                return (_range[1] - _range[0]) / _domain.length;
+            };
+            return scale;
+        }
+
+        function scalePoint() {
+            var _domain = [], _range = [0, 1], _padding = 0;
+            function scale(val) {
+                var idx = _domain.indexOf(val);
+                if (idx < 0) return 0;
+                var usable = _range[1] - _range[0];
+                if (_domain.length <= 1) return _range[0] + usable / 2;
+                var step = usable / (_domain.length - 1 + _padding * 2);
+                return _range[0] + (_padding + idx) * step;
+            }
+            scale.domain = function(d) { if (!d) return _domain; _domain = d; return scale; };
+            scale.range = function(r) { if (!r) return _range; _range = r; return scale; };
+            scale.padding = function(p) { _padding = p; return scale; };
+            return scale;
+        }
+
+        function axisBottom(scale) {
+            return function(g) {
+                var ticks = scale.domain ? scale.domain() : [];
+                if (typeof scale.ticks === 'function') ticks = scale.ticks(5);
+                var gNode = g._el || g;
+                ticks.forEach(function(t) {
+                    var x = scale(t);
+                    var tick = document.createElementNS(SVG_NS, 'g');
+                    tick.setAttribute('transform', 'translate(' + x + ',0)');
+                    var line = document.createElementNS(SVG_NS, 'line');
+                    line.setAttribute('y2', '4');
+                    line.setAttribute('stroke', 'currentColor');
+                    line.setAttribute('opacity', '0.3');
+                    tick.appendChild(line);
+                    var text = document.createElementNS(SVG_NS, 'text');
+                    text.setAttribute('y', '12');
+                    text.setAttribute('text-anchor', 'middle');
+                    text.setAttribute('fill', 'currentColor');
+                    text.setAttribute('font-size', '9');
+                    text.textContent = typeof t === 'number' ? (t >= 1000 ? (t/1000).toFixed(0) + 'k' : t.toFixed(0)) : t;
+                    tick.appendChild(text);
+                    gNode.appendChild(tick);
+                });
+            };
+        }
+
+        function axisLeft(scale) {
+            return function(g) {
+                var ticks = scale.ticks ? scale.ticks(5) : scale.domain();
+                var gNode = g._el || g;
+                ticks.forEach(function(t) {
+                    var y = scale(t);
+                    var tick = document.createElementNS(SVG_NS, 'g');
+                    tick.setAttribute('transform', 'translate(0,' + y + ')');
+                    var line = document.createElementNS(SVG_NS, 'line');
+                    line.setAttribute('x2', '-4');
+                    line.setAttribute('stroke', 'currentColor');
+                    line.setAttribute('opacity', '0.3');
+                    tick.appendChild(line);
+                    var text = document.createElementNS(SVG_NS, 'text');
+                    text.setAttribute('x', '-8');
+                    text.setAttribute('dy', '0.32em');
+                    text.setAttribute('text-anchor', 'end');
+                    text.setAttribute('fill', 'currentColor');
+                    text.setAttribute('font-size', '9');
+                    text.textContent = typeof t === 'number' ? (t >= 1000000 ? (t/1000000).toFixed(1) + 'M' : t >= 1000 ? (t/1000).toFixed(0) + 'k' : t.toFixed(0)) : t;
+                    tick.appendChild(text);
+                    gNode.appendChild(tick);
+                });
+            };
+        }
+
+        function max(arr, fn) {
+            if (!arr || arr.length === 0) return 0;
+            return Math.max.apply(null, arr.map(fn || function(d) { return d; }));
+        }
+
+        function stack() {
+            var _keys = [];
+            function s(data) {
+                var result = _keys.map(function(key) {
+                    var series = data.map(function(d, i) {
+                        var y0 = 0;
+                        _keys.forEach(function(k) { if (k === key) return; if (_keys.indexOf(k) < _keys.indexOf(key)) y0 += (d[k] || 0); });
+                        return [y0, y0 + (d[key] || 0)];
+                    });
+                    series.key = key;
+                    return series;
+                });
+                return result;
+            }
+            s.keys = function(k) { _keys = k; return s; };
+            return s;
+        }
+
+        function area() {
+            var _x = function(d) { return d[0]; };
+            var _y0 = function(d) { return d[0]; };
+            var _y1 = function(d) { return d[1]; };
+            var _curve = null;
+            function a(data) {
+                // Build SVG path for the area
+                var pts = data.map(function(d, i) { return { x: _x(d, i), y0: _y0(d, i), y1: _y1(d, i) }; });
+                if (pts.length === 0) return '';
+                var path = 'M' + pts[0].x + ',' + pts[0].y1;
+                for (var i = 1; i < pts.length; i++) path += 'L' + pts[i].x + ',' + pts[i].y1;
+                for (var j = pts.length - 1; j >= 0; j--) path += 'L' + pts[j].x + ',' + pts[j].y0;
+                path += 'Z';
+                return path;
+            }
+            a.x = function(fn) { _x = fn; return a; };
+            a.y0 = function(fn) { _y0 = fn; return a; };
+            a.y1 = function(fn) { _y1 = fn; return a; };
+            a.curve = function(c) { _curve = c; return a; };
+            return a;
+        }
+
+        function line() {
+            var _x = function(d) { return d[0]; };
+            var _y = function(d) { return d[1]; };
+            function l(data) {
+                var pts = data.map(function(d, i) { return _x(d, i) + ',' + _y(d, i); });
+                return 'M' + pts.join('L');
+            }
+            l.x = function(fn) { _x = fn; return l; };
+            l.y = function(fn) { _y = fn; return l; };
+            l.curve = function() { return l; };
+            return l;
+        }
+
+        // Stub for curveMonotoneX — we just use straight lines
+        var curveMonotoneX = {};
+
+        function extent(arr, fn) {
+            fn = fn || function(d) { return d; };
+            var vals = arr.map(fn);
+            return [Math.min.apply(null, vals), Math.max.apply(null, vals)];
+        }
+
+        function format(spec) {
+            return function(n) {
+                if (spec === '.2s' || spec === '.1s') {
+                    if (n >= 1000000) return (n/1000000).toFixed(1) + 'M';
+                    if (n >= 1000) return (n/1000).toFixed(0) + 'k';
+                    return n.toFixed(0);
+                }
+                if (spec === '.0f') return Math.round(n).toString();
+                if (spec === '.1f') return n.toFixed(1);
+                if (spec === '.2f') return n.toFixed(2);
+                if (spec === ',.0f') return Math.round(n).toLocaleString();
+                return n.toString();
+            };
+        }
+
+        function pointer(event, node) {
+            var rect = (node || event.target).getBoundingClientRect();
+            return [event.clientX - rect.left, event.clientY - rect.top];
+        }
+
+        return {
+            select: select, scaleLinear: scaleLinear, scaleBand: scaleBand, scalePoint: scalePoint,
+            axisBottom: axisBottom, axisLeft: axisLeft, max: max, stack: stack, area: area, line: line,
+            curveMonotoneX: curveMonotoneX, extent: extent, format: format, pointer: pointer
+        };
+    })();
+
     // ── LLM Usage ──
     var _llmRange = '24h';
 
