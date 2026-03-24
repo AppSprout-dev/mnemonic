@@ -4781,7 +4781,7 @@
             for (var mi = 0; mi < memSections.length; mi++) {
                 var ms = memSections[mi];
                 var bgClass = mi % 2 === 0 ? 'bg1' : 'bg2';
-                html += '<li class="row ' + bgClass + '" onclick="loadMemorySection(\'' + ms.id + '\', \'' + ms.name + '\')" style="cursor:pointer">';
+                html += '<li class="row ' + bgClass + '" data-section="' + ms.id + '" data-section-name="' + escapeHtml(ms.name) + '" onclick="loadMemorySection(this.getAttribute(\'data-section\'), this.getAttribute(\'data-section-name\'))" style="cursor:pointer">';
                 html += '<dl class="row-item"><dt>';
                 html += '<span class="status-icon" style="width:28px;height:28px;font-size:0.6rem;flex-shrink:0;background:color-mix(in srgb, ' + ms.color + ' 15%, transparent);color:' + ms.color + ';border:1px solid color-mix(in srgb, ' + ms.color + ' 25%, transparent)">' + ms.icon + '</span>';
                 html += '<div class="list-inner">';
