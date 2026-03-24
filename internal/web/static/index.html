@@ -4751,9 +4751,9 @@
         window.location.hash = 'forum-thread/' + threadId;
         var bc = document.getElementById('breadcrumbs');
         if (bc) bc.innerHTML = '<a href="#" onclick="switchView(\'explore\')">mnemonic</a><span class="sep"> › </span><a href="#" onclick="switchView(\'explore\')">Forum</a><span class="sep"> › </span>Thread';
-        // Show compose box
+        // Show compose box and init autocomplete
         var compose = document.getElementById('threadCompose');
-        if (compose) compose.style.display = '';
+        if (compose) { compose.style.display = ''; ensureMentionAutocomplete('threadReplyContent'); }
         try {
             var resp = await fetch('/api/v1/forum/threads/' + threadId);
             var data = await resp.json();
@@ -4776,38 +4776,45 @@
         } catch (e) { console.error('Failed to load forum thread:', e); }
     }
 
+    var _forumAgentProfiles = {
+        consolidation: { tag: '@consolidation', title: 'Memory Maintainer', icon: 'CA', color: 'var(--accent-yellow)' },
+        dreaming: { tag: '@dreaming', title: 'Memory Replay', icon: 'DA', color: 'var(--accent-violet)' },
+        episoding: { tag: '@episoding', title: 'Episode Clustering', icon: 'EP', color: 'var(--accent-violet)' },
+        abstraction: { tag: '@abstraction', title: 'Pattern Discovery', icon: 'AA', color: 'var(--accent-orange)' },
+        metacognition: { tag: '@metacognition', title: 'Self-Reflection', icon: 'MA', color: 'var(--accent-blue)' },
+        encoding: { tag: '@encoding', title: 'Memory Encoder', icon: 'EA', color: 'var(--accent-blue)' },
+        perception: { tag: '@perception', title: 'Filesystem Watcher', icon: 'PA', color: 'var(--accent-green)' },
+        retrieval: { tag: '@retrieval', title: 'Spread Activation', icon: 'RA', color: 'var(--accent-cyan)' },
+    };
+
     function renderForumPost(post, index) {
         var bgClass = index % 2 === 0 ? 'bg1' : 'bg2';
         var isAgent = post.author_type === 'agent';
         var agentKey = post.author_key || '';
-        var profiles = {
-            consolidation: { name: 'Consolidation Agent', title: 'Memory Maintainer', icon: 'CA', color: 'var(--accent-yellow)' },
-            dreaming: { name: 'Dreaming Agent', title: 'Memory Replay', icon: 'DA', color: 'var(--accent-violet)' },
-            episoding: { name: 'Episoding Agent', title: 'Episode Clustering', icon: 'EP', color: 'var(--accent-violet)' },
-            abstraction: { name: 'Abstraction Agent', title: 'Pattern Discovery', icon: 'AA', color: 'var(--accent-orange)' },
-            metacognition: { name: 'Metacognition Agent', title: 'Self-Reflection', icon: 'MA', color: 'var(--accent-blue)' },
-            encoding: { name: 'Encoding Agent', title: 'Memory Encoder', icon: 'EA', color: 'var(--accent-blue)' },
-            perception: { name: 'Perception Agent', title: 'Filesystem Watcher', icon: 'PA', color: 'var(--accent-green)' },
-            retrieval: { name: 'Retrieval Agent', title: 'Spread Activation', icon: 'RA', color: 'var(--accent-cyan)' },
-        };
-        var prof = profiles[agentKey] || { name: post.author_name || 'Human', title: isAgent ? 'Agent' : 'User', icon: isAgent ? agentKey.slice(0,2).toUpperCase() : 'HU', color: isAgent ? 'var(--text-dim)' : 'var(--accent-cyan)' };
+        var prof = _forumAgentProfiles[agentKey] || { tag: post.author_name || 'Human', title: isAgent ? 'Agent' : 'User', icon: isAgent ? agentKey.slice(0,2).toUpperCase() : 'HU', color: isAgent ? 'var(--text-dim)' : 'var(--accent-cyan)' };
+        var displayName = isAgent ? prof.tag : (post.author_name || 'Human');
         var time = new Date(post.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
         // Highlight @mentions in content
         var contentHtml = escapeHtml(post.content || '').replace(/@(retrieval|metacognition|encoding|episoding|consolidation|dreaming|abstraction|perception)/g, '<strong style="color:var(--accent-cyan)">@$1</strong>');
+        var quotedContent = (post.content || '').replace(/\n/g, '\n> ');
         var html = '<div class="post ' + bgClass + '" id="forum-post-' + post.id + '">';
         html += '<div class="inner"><dl class="postprofile">';
         html += '<dt><div class="avatar-container" style="background:color-mix(in srgb, ' + prof.color + ' 15%, transparent);color:' + prof.color + ';border:1px solid color-mix(in srgb, ' + prof.color + ' 25%, transparent)">' + prof.icon + '</div>';
-        html += '<strong style="color:' + prof.color + '">' + escapeHtml(prof.name) + '</strong></dt>';
+        html += '<strong style="color:' + prof.color + '">' + escapeHtml(displayName) + '</strong></dt>';
         html += '<dd class="profile-rank"><span class="rank-' + (isAgent ? 'insight' : 'general') + '">' + escapeHtml(prof.title) + '</span></dd>';
         if (post.event_ref) html += '<dd style="font-size:0.7rem;color:var(--text-dim)">via ' + escapeHtml(post.event_ref) + '</dd>';
         html += '</dl><div class="postbody">';
-        html += '<p class="post-meta"><span>Posted by <strong style="color:' + prof.color + '">' + escapeHtml(prof.name) + '</strong> · ' + time + '</span><span style="color:var(--text-dim)">#' + (index + 1) + '</span></p>';
+        html += '<p class="post-meta"><span>Posted by <strong style="color:' + prof.color + '">' + escapeHtml(displayName) + '</strong> · ' + time + '</span><span style="color:var(--text-dim)">#' + (index + 1) + '</span></p>';
         html += '<div class="content">' + contentHtml + '</div>';
+        // Action buttons
+        html += '<div style="margin-top:6px;display:flex;gap:6px;align-items:center">';
+        html += '<button onclick="quotePost(\'' + escapeHtml(displayName).replace(/'/g, "\\'") + '\', ' + JSON.stringify(quotedContent).replace(/'/g, "\\'") + ')" style="font-size:0.7rem;padding:1px 8px;background:transparent;border:1px solid var(--border-subtle);color:var(--text-dim);border-radius:3px;cursor:pointer">quote</button>';
         if (post.state === 'internalized') {
-            html += '<div style="margin-top:4px"><span style="font-size:0.7rem;padding:1px 6px;background:color-mix(in srgb, var(--accent-green) 15%, transparent);color:var(--accent-green);border-radius:3px">internalized</span></div>';
+            html += '<span style="font-size:0.7rem;padding:1px 6px;background:color-mix(in srgb, var(--accent-green) 15%, transparent);color:var(--accent-green);border-radius:3px">internalized</span>';
         } else {
-            html += '<div style="margin-top:6px"><button onclick="internalizePost(\'' + post.id + '\', this)" style="font-size:0.7rem;padding:1px 8px;background:transparent;border:1px solid var(--border-subtle);color:var(--text-dim);border-radius:3px;cursor:pointer">internalize</button></div>';
+            html += '<button onclick="internalizePost(\'' + post.id + '\', this)" style="font-size:0.7rem;padding:1px 8px;background:transparent;border:1px solid var(--border-subtle);color:var(--text-dim);border-radius:3px;cursor:pointer">internalize</button>';
         }
+        html += '</div>';
         html += '</div></div></div>';
         return html;
     }
@@ -4835,7 +4842,7 @@
 
     function showNewThreadForm() {
         var form = document.getElementById('newThreadForm');
-        if (form) { form.style.display = ''; document.getElementById('newThreadContent').focus(); }
+        if (form) { form.style.display = ''; document.getElementById('newThreadContent').focus(); ensureMentionAutocomplete('newThreadContent'); }
     }
 
     async function submitNewThread() {
@@ -4883,6 +4890,100 @@
             textarea.disabled = false;
             showToast('Failed to post reply', 'error');
         }
+    }
+
+    function quotePost(authorName, content) {
+        var textarea = document.getElementById('threadReplyContent');
+        if (!textarea) return;
+        var quote = '> ' + authorName + ' wrote:\n> ' + content + '\n\n';
+        textarea.value = quote + textarea.value;
+        textarea.focus();
+        textarea.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    // ── @mention autocomplete ──
+    var _mentionAgents = [
+        { key: 'retrieval', label: '@retrieval', desc: 'Search memories' },
+        { key: 'metacognition', label: '@metacognition', desc: 'System health' },
+        { key: 'encoding', label: '@encoding', desc: 'Memory encoder' },
+        { key: 'episoding', label: '@episoding', desc: 'Episodes & timeline' },
+        { key: 'consolidation', label: '@consolidation', desc: 'Memory maintenance' },
+        { key: 'dreaming', label: '@dreaming', desc: 'Dream cycle insights' },
+        { key: 'abstraction', label: '@abstraction', desc: 'Patterns & principles' },
+        { key: 'perception', label: '@perception', desc: 'File watcher' },
+    ];
+
+    function setupMentionAutocomplete(textarea) {
+        var dropdown = document.createElement('div');
+        dropdown.className = 'mention-dropdown';
+        dropdown.style.cssText = 'display:none;position:absolute;z-index:100;background:var(--bg-elevated);border:1px solid var(--border-accent);border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,0.3);max-height:200px;overflow-y:auto;font-size:0.82rem;min-width:200px';
+        textarea.parentNode.style.position = 'relative';
+        textarea.parentNode.appendChild(dropdown);
+
+        textarea.addEventListener('input', function() {
+            var val = textarea.value;
+            var cursor = textarea.selectionStart;
+            // Find @ before cursor
+            var before = val.substring(0, cursor);
+            var atMatch = before.match(/@(\w*)$/);
+            if (!atMatch) { dropdown.style.display = 'none'; return; }
+            var filter = atMatch[1].toLowerCase();
+            var filtered = _mentionAgents.filter(function(a) { return a.key.startsWith(filter); });
+            if (filtered.length === 0) { dropdown.style.display = 'none'; return; }
+            var html = '';
+            for (var i = 0; i < filtered.length; i++) {
+                var a = filtered[i];
+                var prof = _forumAgentProfiles[a.key] || {};
+                html += '<div class="mention-option" data-key="' + a.key + '" style="padding:6px 10px;cursor:pointer;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border-subtle)"';
+                html += ' onmousedown="insertMention(\'' + textarea.id + '\', \'' + a.key + '\')"';
+                html += ' onmouseenter="this.style.background=\'var(--bg-row-hover)\'" onmouseleave="this.style.background=\'none\'">';
+                html += '<span style="width:20px;height:20px;font-size:0.55rem;display:flex;align-items:center;justify-content:center;border-radius:3px;background:color-mix(in srgb, ' + (prof.color || 'var(--text-dim)') + ' 15%, transparent);color:' + (prof.color || 'var(--text-dim)') + '">' + (prof.icon || '') + '</span>';
+                html += '<span><strong style="color:' + (prof.color || 'var(--link)') + '">' + a.label + '</strong> <span style="color:var(--text-dim)">' + a.desc + '</span></span>';
+                html += '</div>';
+            }
+            dropdown.innerHTML = html;
+            dropdown.style.display = 'block';
+            dropdown.style.bottom = (textarea.offsetHeight + 4) + 'px';
+            dropdown.style.left = '0';
+        });
+
+        textarea.addEventListener('blur', function() {
+            setTimeout(function() { dropdown.style.display = 'none'; }, 150);
+        });
+
+        textarea.addEventListener('keydown', function(e) {
+            if (dropdown.style.display === 'none') return;
+            if (e.key === 'Escape') { dropdown.style.display = 'none'; e.preventDefault(); }
+            if (e.key === 'Tab' || e.key === 'Enter') {
+                var first = dropdown.querySelector('.mention-option');
+                if (first) { insertMention(textarea.id, first.getAttribute('data-key')); e.preventDefault(); }
+            }
+        });
+    }
+
+    function insertMention(textareaId, agentKey) {
+        var textarea = document.getElementById(textareaId);
+        if (!textarea) return;
+        var val = textarea.value;
+        var cursor = textarea.selectionStart;
+        var before = val.substring(0, cursor);
+        var after = val.substring(cursor);
+        // Replace the @partial with @agentKey
+        var newBefore = before.replace(/@\w*$/, '@' + agentKey + ' ');
+        textarea.value = newBefore + after;
+        textarea.selectionStart = textarea.selectionEnd = newBefore.length;
+        textarea.focus();
+        // Hide dropdown
+        var dropdown = textarea.parentNode.querySelector('.mention-dropdown');
+        if (dropdown) dropdown.style.display = 'none';
+    }
+
+    // Initialize autocomplete on compose textareas when they become visible
+    var _mentionInitialized = {};
+    function ensureMentionAutocomplete(textareaId) {
+        if (_mentionInitialized[textareaId]) return;
+        var el = document.getElementById(textareaId);
+        if (el) { setupMentionAutocomplete(el); _mentionInitialized[textareaId] = true; }
     }
 
     async function internalizePost(postId, btn) {

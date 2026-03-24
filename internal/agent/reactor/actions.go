@@ -241,7 +241,10 @@ func (a *RespondToMentionAction) Execute(ctx context.Context, trigger events.Eve
 				a.Log.Warn("mention LLM call failed", "agent", mention.AgentKey, "error", err)
 			}
 		} else {
-			content = resp.Content
+			content = strings.TrimSpace(resp.Content)
+			if content == "" {
+				content = fmt.Sprintf("%s processed your mention but had nothing to add right now.", personality.Name)
+			}
 		}
 	}
 
