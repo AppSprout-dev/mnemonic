@@ -230,7 +230,7 @@ func (a *RespondToMentionAction) Execute(ctx context.Context, trigger events.Eve
 				{Role: "system", Content: systemPrompt.String()},
 				{Role: "user", Content: mention.Content},
 			},
-			MaxTokens:   200,
+			MaxTokens:   512,
 			Temperature: 0.7,
 		})
 		if err != nil {
