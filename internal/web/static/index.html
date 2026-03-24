@@ -3094,6 +3094,23 @@
                 var d = new Date(stats.last_consolidation);
                 fc.textContent = 'consolidation: ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
             }
+            // Update welcome panel
+            var wa = document.getElementById('welcomeActive');
+            var wf = document.getElementById('welcomeFading');
+            var war = document.getElementById('welcomeArchived');
+            var wv = document.getElementById('welcomeVisit');
+            if (wa) wa.textContent = stats.store ? stats.store.active_memories : total;
+            if (wf) wf.textContent = stats.store ? stats.store.fading_memories : 0;
+            if (war) war.textContent = stats.store ? stats.store.archived_memories : 0;
+            if (wv) {
+                var lastVisit = localStorage.getItem('mnemonic-last-visit');
+                if (lastVisit) {
+                    wv.textContent = 'Last visit: ' + new Date(parseInt(lastVisit)).toLocaleString([], {hour:'2-digit',minute:'2-digit',month:'short',day:'numeric'});
+                } else {
+                    wv.textContent = 'Welcome to mnemonic';
+                }
+                localStorage.setItem('mnemonic-last-visit', Date.now().toString());
+            }
             // Update healthDot (forum nav uses different ID)
             var hd = document.getElementById('healthDot');
             if (hd) {
