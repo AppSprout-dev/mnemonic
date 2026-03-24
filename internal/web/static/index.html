@@ -1974,7 +1974,9 @@
 
         try {
             var ep = await fetchJSON('/episodes/' + episodeId);
-            var memIds = ep.raw_memory_ids || ep.memory_ids || [];
+            // Fetch memories belonging to this episode
+            var memData = await fetchJSON('/memories?episode_id=' + episodeId + '&limit=50');
+            var memories = memData.memories || [];
 
             // Build thread header
             var html = '<div class="thread-wrap">';
@@ -1985,19 +1987,13 @@
             if (ep.start_time && ep.end_time) {
                 html += '<span><b>Duration:</b> ' + new Date(ep.start_time).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) + ' – ' + new Date(ep.end_time).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) + '</span>';
             }
-            html += '<span><b>Memories:</b> ' + memIds.length + '</span>';
+            html += '<span><b>Memories:</b> ' + memories.length + '</span>';
             if (ep.files_modified && ep.files_modified.length > 0) {
                 html += '<span><b>Files:</b> ' + ep.files_modified.slice(0, 5).map(function(f) { return escapeHtml(f.split('/').pop()); }).join(', ') + '</span>';
             }
             html += '</div></div>';
 
-            // Load each memory as a post
-            if (memIds.length > 0) {
-                var memPromises = memIds.slice(0, 20).map(function(id) {
-                    return fetchJSON('/memories/' + id).catch(function() { return null; });
-                });
-                var memories = await Promise.all(memPromises);
-                memories = memories.filter(function(m) { return m; });
+            if (memories.length > 0) {
 
                 memories.forEach(function(m, idx) {
                     var type = (m.type || m.memory_type || 'general').toLowerCase();
