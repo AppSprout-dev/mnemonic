@@ -568,6 +568,10 @@ blockquote.quote .quote-body {
     from { opacity: 0; transform: translateX(20px); }
     to { opacity: 1; transform: translateX(0); }
 }
+@keyframes fadeIn {
+    from { opacity: 0; background: color-mix(in srgb, var(--accent-cyan) 8%, transparent); }
+    to { opacity: 1; background: transparent; }
+}
 
 /* ══════════════════════════════════════════════
    RESPONSIVE
