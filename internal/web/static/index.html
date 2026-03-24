@@ -1896,31 +1896,31 @@
                     var salPct = safeSalience(m.salience);
                     var linkCount = m.association_count || 0;
                     var source = m.source || 'mcp';
+                    var agent = agentProfile(source);
                     var time = m.created_at ? new Date(m.created_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '';
                     var joinDate = m.created_at ? new Date(m.created_at).toLocaleDateString() : '';
                     var concepts = m.concepts || [];
                     var bgClass = idx % 2 === 0 ? 'bg1' : 'bg2';
-                    var iconClass = memoryTypeIcon(type);
 
-                    // phpBB-style post with profile sidebar
+                    // phpBB-style post with agent profile sidebar
                     html += '<div class="post ' + bgClass + '"><div class="inner">';
 
-                    // Profile sidebar (like phpBB postprofile)
+                    // Agent profile sidebar
                     html += '<dl class="postprofile">';
-                    html += '<dt><div class="avatar-container status-icon ' + iconClass + '" style="width:48px;height:48px;font-size:1.1rem">' + memoryTypeAbbr(type) + '</div>';
-                    html += '<strong>' + escapeHtml(source) + '</strong></dt>';
+                    html += '<dt><div class="avatar-container" style="width:48px;height:48px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:1.1rem;font-weight:bold;font-family:var(--mono);background:color-mix(in srgb, ' + agent.color + ' 15%, transparent);color:' + agent.color + ';border:1px solid color-mix(in srgb, ' + agent.color + ' 25%, transparent)">' + agent.icon + '</div>';
+                    html += '<strong style="color:' + agent.color + '">' + escapeHtml(agent.name) + '</strong></dt>';
                     html += '<dd class="profile-rank"><span class="' + rankClass + '">' + escapeHtml(type) + '</span></dd>';
                     html += '<dd><strong>Salience:</strong> ' + salPct + '%</dd>';
                     html += '<dd><strong>Links:</strong> ' + linkCount + '</dd>';
                     if (m.project) html += '<dd><strong>Project:</strong> ' + escapeHtml(m.project) + '</dd>';
-                    html += '<dd><strong>Joined:</strong> ' + joinDate + '</dd>';
+                    html += '<dd><strong>Observed:</strong> ' + joinDate + '</dd>';
                     html += '</dl>';
 
                     // Post body
                     html += '<div class="postbody">';
                     html += '<h3>' + escapeHtml(m.summary || 'Memory') + '</h3>';
-                    html += '<p class="post-meta"><span>Memory #' + (idx + 1) + ' of ' + memories.length + ' &middot; ' + time + '</span>';
-                    html += '<span style="cursor:pointer;color:var(--link)" onclick="navigator.clipboard.writeText(\'' + escapeHtml(m.id || '') + '\');showToast(\'ID copied\')">Copy ID</span></p>';
+                    html += '<p class="post-meta"><span>Posted by <strong style="color:' + agent.color + '">' + escapeHtml(agent.name) + '</strong> &middot; ' + escapeHtml(agent.title) + ' &middot; ' + time + '</span>';
+                    html += '<span style="cursor:pointer;color:var(--link)" onclick="navigator.clipboard.writeText(\'' + escapeHtml(m.id || '') + '\');showToast(\'ID copied\')">#' + (idx + 1) + '</span></p>';
 
                     // Content
                     if (m.content && m.content !== m.summary) {
@@ -2098,7 +2098,8 @@
             row += '</div></dt>';
             row += '<dd>' + salPct + '% <dfn>salience</dfn></dd>';
             row += '<dd>' + linkCount + ' <dfn>links</dfn></dd>';
-            row += '<dd class="lastpost"><span class="lastpost-time">' + dateStr + '</span><br><span class="lastpost-by">' + escapeHtml(source) + '</span></dd>';
+            var agent = agentProfile(source);
+            row += '<dd class="lastpost"><span class="lastpost-time">' + dateStr + '</span><br><span class="lastpost-by" style="color:' + agent.color + '">' + escapeHtml(agent.name) + '</span></dd>';
             row += '</dl></li>';
 
             // Expandable detail
@@ -4542,6 +4543,21 @@
     function memoryTypeAbbr(type) { return type === 'insight' ? 'IN' : type === 'decision' ? 'DE' : type === 'learning' ? 'LE' : type === 'error' ? 'ER' : 'GN'; }
     function memoryTypeIcon(type) { return type === 'insight' ? 'icon-in' : type === 'decision' ? 'icon-de' : type === 'learning' ? 'icon-le' : type === 'error' ? 'icon-er' : 'icon-ep'; }
     function safeSalience(s) { return Math.min(100, Math.round((s || 0) * 100)); }
+
+    // Agent identity system — maps memory sources to forum "users"
+    var _agentProfiles = {
+        mcp: { name: 'Claude Session', title: 'MCP Client', icon: 'CS', color: 'var(--accent-cyan)' },
+        filesystem: { name: 'Perception Agent', title: 'Filesystem Watcher', icon: 'PA', color: 'var(--accent-green)' },
+        git: { name: 'Git Observer', title: 'Repository Watcher', icon: 'GO', color: 'var(--accent-orange)' },
+        terminal: { name: 'Terminal Agent', title: 'Command Observer', icon: 'TA', color: 'var(--accent-yellow)' },
+        clipboard: { name: 'Clipboard Agent', title: 'Clipboard Monitor', icon: 'CB', color: 'var(--accent-pink)' },
+        ingest: { name: 'Ingest Engine', title: 'Bulk Importer', icon: 'IE', color: 'var(--text-dim)' },
+        system: { name: 'Daemon', title: 'System Process', icon: 'SY', color: 'var(--accent-violet)' },
+        benchmark: { name: 'Benchmark', title: 'Quality Tester', icon: 'BM', color: 'var(--accent-blue)' },
+    };
+    function agentProfile(source) {
+        return _agentProfiles[(source || 'mcp').toLowerCase()] || { name: source || 'Unknown', title: 'Agent', icon: '??', color: 'var(--text-dim)' };
+    }
     function simpleMarkdown(str) {
         if (!str) return '';
         var lines = str.split('\n');
