@@ -1748,11 +1748,9 @@
     }
 
     function switchExploreTab(tab) {
+        // Forum view shows all blocks simultaneously (no tabs)
+        // This function now just triggers a lazy load if needed
         state.currentExploreTab = tab;
-        document.querySelectorAll('.explore-tab').forEach(t => t.classList.remove('active'));
-        document.querySelector('.explore-tab[data-tab="' + tab + '"]').classList.add('active');
-        document.querySelectorAll('.explore-section').forEach(s => s.classList.remove('active'));
-        document.getElementById('section-' + tab).classList.add('active');
         if (!state.exploreLoaded[tab]) loadExploreTab(tab);
     }
 
@@ -1858,7 +1856,8 @@
         state.currentView = 'thread';
         document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
         document.querySelectorAll('.ntab').forEach(t => t.classList.remove('active'));
-        document.getElementById('view-thread').classList.add('active');
+        var threadView = document.getElementById('view-thread');
+        if (threadView) threadView.classList.add('active');
         window.location.hash = 'thread/' + episodeId;
 
         // Update breadcrumbs
