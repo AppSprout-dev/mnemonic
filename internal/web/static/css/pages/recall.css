@@ -1,0 +1,199 @@
+/* Auto-extracted from index.html — recall */
+
+/* ── Recall View ── */
+        .recall-hero {
+            max-width: 720px; margin: 0 auto;
+            padding: 60px 24px 24px;
+            text-align: center;
+        }
+        .recall-hero h2 {
+            font-size: 1.5rem; font-weight: 400; color: var(--text-muted);
+            margin-bottom: 28px; letter-spacing: -0.3px;
+        }
+        .recall-search-box {
+            display: flex; gap: 0;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        .recall-search-box:focus-within {
+            border-color: var(--accent-cyan);
+            box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-cyan) 15%, transparent);
+        }
+        .recall-search-box input {
+            flex: 1; padding: 16px 20px;
+            background: none; border: none; outline: none;
+            color: var(--text-primary); font-size: 1.05rem;
+        }
+        .recall-search-box input::placeholder { color: var(--text-dim); }
+        .recall-btn {
+            padding: 12px 24px; margin: 6px;
+            background: linear-gradient(135deg, var(--accent-cyan), var(--accent-teal));
+            border: none; border-radius: var(--radius-md);
+            color: white; font-weight: 600; font-size: 0.9rem;
+            cursor: pointer; transition: opacity 0.2s, transform 0.1s;
+            white-space: nowrap;
+        }
+        .recall-btn:hover { opacity: 0.9; }
+        .recall-btn:active { transform: scale(0.97); }
+        .recall-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .recall-options {
+            display: flex; align-items: center; justify-content: center;
+            gap: 16px; margin-top: 12px;
+        }
+        .recall-options label {
+            display: flex; align-items: center; gap: 6px;
+            color: var(--text-muted); font-size: 0.85rem; cursor: pointer;
+        }
+        .recall-options input[type="checkbox"] { accent-color: var(--accent-cyan); }
+        .recall-shortcut {
+            font-size: 0.75rem; color: var(--text-dim);
+            padding: 2px 6px; border: 1px solid var(--border-color);
+            border-radius: 4px; font-family: 'SF Mono', Monaco, monospace;
+        }
+
+        /* Results */
+        .recall-results {
+            max-width: 720px; margin: 0 auto;
+            padding: 0 24px 24px;
+        }
+        .results-header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 12px 0; margin-bottom: 8px;
+        }
+        .results-header h3 {
+            font-size: 0.85rem; font-weight: 600; color: var(--text-muted);
+            text-transform: uppercase; letter-spacing: 0.05em;
+        }
+        .results-meta { font-size: 0.8rem; color: var(--text-dim); }
+
+        .result-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            padding: 16px; margin-bottom: 8px;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s;
+        }
+        .result-card:hover {
+            border-color: var(--border-color);
+            background: var(--bg-tertiary);
+        }
+        .result-card-header { display: flex; align-items: flex-start; gap: 10px; }
+        .result-score {
+            flex-shrink: 0; padding: 2px 8px;
+            border-radius: 4px; font-size: 0.75rem; font-weight: 700;
+            font-family: 'SF Mono', Monaco, monospace;
+        }
+        .score-high { background: color-mix(in srgb, var(--accent-green) 15%, transparent); color: var(--accent-green); }
+        .score-mid { background: color-mix(in srgb, var(--accent-cyan) 15%, transparent); color: var(--accent-cyan); }
+        .score-low { background: color-mix(in srgb, var(--text-muted) 15%, transparent); color: var(--text-muted); }
+        .result-summary { font-size: 0.95rem; line-height: 1.5; color: var(--text-secondary); }
+        .result-meta { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+        .concept-tag {
+            padding: 2px 8px; border-radius: 10px;
+            font-size: 0.7rem; font-weight: 500;
+            background: color-mix(in srgb, var(--accent-violet) 12%, transparent); color: var(--accent-violet);
+        }
+        .result-date { font-size: 0.75rem; color: var(--text-dim); margin-left: auto; }
+        .result-expanded {
+            display: none; margin-top: 12px; padding-top: 12px;
+            border-top: 1px solid var(--border-subtle);
+        }
+        .result-expanded.open { display: block; }
+        .result-content {
+            font-size: 0.85rem; line-height: 1.6; color: var(--text-muted);
+            white-space: pre-wrap; max-height: 200px; overflow-y: auto;
+        }
+
+        /* Feedback */
+        .feedback-bar {
+            display: flex; gap: 6px; margin-top: 16px;
+            padding-top: 12px; border-top: 1px solid var(--border-subtle);
+            align-items: center;
+        }
+        .feedback-btn {
+            padding: 6px 14px; border-radius: var(--radius-sm);
+            font-size: 0.8rem; font-weight: 500;
+            border: 1px solid var(--border-color); cursor: pointer;
+            transition: all 0.2s; background: var(--bg-secondary);
+            color: var(--text-muted);
+        }
+        .feedback-btn:hover { border-color: var(--text-muted); color: var(--text-primary); }
+        .feedback-btn.helpful:hover { border-color: var(--accent-green); color: var(--accent-green); background: color-mix(in srgb, var(--accent-green) 10%, transparent); }
+        .feedback-btn.partial:hover { border-color: var(--accent-yellow); color: var(--accent-yellow); background: color-mix(in srgb, var(--accent-yellow) 10%, transparent); }
+        .feedback-btn.irrelevant:hover { border-color: var(--accent-red); color: var(--accent-red); background: color-mix(in srgb, var(--accent-red) 10%, transparent); }
+        .feedback-btn.selected { opacity: 1; font-weight: 600; }
+        .feedback-btn.helpful.selected { border-color: var(--accent-green); color: var(--accent-green); background: color-mix(in srgb, var(--accent-green) 15%, transparent); }
+        .feedback-btn.partial.selected { border-color: var(--accent-yellow); color: var(--accent-yellow); background: color-mix(in srgb, var(--accent-yellow) 15%, transparent); }
+        .feedback-btn.irrelevant.selected { border-color: var(--accent-red); color: var(--accent-red); background: color-mix(in srgb, var(--accent-red) 15%, transparent); }
+        .feedback-label { font-size: 0.8rem; color: var(--text-dim); margin-right: 6px; }
+
+        /* Synthesis */
+        .synthesis-block {
+            background: var(--bg-card);
+            border: 1px solid color-mix(in srgb, var(--accent-violet) 20%, transparent);
+            border-left: 3px solid var(--accent-violet);
+            border-radius: var(--radius-md);
+            padding: 16px; margin-top: 12px;
+        }
+        .synthesis-label {
+            font-size: 0.75rem; font-weight: 600; color: var(--accent-violet);
+            text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px;
+        }
+        .synthesis-text { font-size: 0.9rem; line-height: 1.7; color: var(--text-secondary); }
+
+        /* Remember Panel */
+        .remember-panel { max-width: 720px; margin: 24px auto 40px; padding: 0 24px; }
+        .remember-toggle {
+            display: flex; align-items: center; gap: 8px;
+            padding: 12px 16px; background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            cursor: pointer; color: var(--text-muted);
+            font-size: 0.9rem; transition: all 0.2s; width: 100%; text-align: left;
+        }
+        .remember-toggle:hover { border-color: var(--border-color); color: var(--text-primary); }
+        .remember-toggle svg { width: 16px; height: 16px; transition: transform 0.2s; }
+        .remember-toggle.open svg { transform: rotate(45deg); }
+        .remember-form {
+            display: none; padding: 16px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle); border-top: none;
+            border-radius: 0 0 var(--radius-md) var(--radius-md);
+        }
+        .remember-form.open { display: block; }
+        .remember-row { display: flex; gap: 10px; margin-bottom: 12px; }
+        .remember-field { display: flex; flex-direction: column; gap: 4px; flex: 1; }
+        .remember-field label {
+            font-size: 0.75rem; font-weight: 600; color: var(--text-dim);
+            text-transform: uppercase; letter-spacing: 0.03em;
+        }
+        .remember-field select, .remember-field input {
+            padding: 8px 12px; background: var(--bg-secondary);
+            border: 1px solid var(--border-color); border-radius: var(--radius-sm);
+            color: var(--text-primary); font-size: 0.85rem; outline: none;
+        }
+        .remember-field select:focus, .remember-field input:focus { border-color: var(--accent-cyan); }
+        .remember-textarea {
+            width: 100%; min-height: 80px; padding: 12px;
+            background: var(--bg-secondary); border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm); color: var(--text-primary);
+            font-size: 0.9rem; line-height: 1.5; resize: vertical;
+            font-family: inherit; outline: none; margin-bottom: 12px;
+        }
+        .remember-textarea:focus { border-color: var(--accent-cyan); }
+        .remember-actions { display: flex; justify-content: flex-end; }
+        .remember-submit {
+            padding: 8px 20px;
+            background: linear-gradient(135deg, var(--accent-teal), var(--accent-green));
+            border: none; border-radius: var(--radius-sm);
+            color: white; font-weight: 600; font-size: 0.85rem;
+            cursor: pointer; transition: opacity 0.2s;
+        }
+        .remember-submit:hover { opacity: 0.9; }
+        .remember-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        

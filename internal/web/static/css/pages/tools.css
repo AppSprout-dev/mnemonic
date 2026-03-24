@@ -1,0 +1,27 @@
+/* Auto-extracted from index.html — tools */
+
+/* ── Research Analytics Brief ── */
+        .ra-brief {
+            font-size: 0.82rem; line-height: 1.6; color: var(--text-muted); margin-bottom: 14px;
+            padding: 12px 16px; background: var(--bg-card); border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md); border-left: 3px solid var(--accent-cyan);
+        }
+        .ra-brief strong { color: var(--text-primary); font-weight: 600; }
+        .ra-brief .ra-warn { color: var(--accent-orange); }
+        .ra-brief .ra-good { color: var(--accent-green); }
+        .ra-brief .ra-bad { color: var(--accent-red); }
+        
+
+/* ── Research Analytics KPI cards ── */
+        .ra-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+        .ra-kpi { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 14px 16px; }
+        .ra-kpi-label { font-size: 0.68rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
+        .ra-kpi-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; }
+        .ra-kpi-value { font-size: 1.5rem; font-weight: 700; font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace; line-height: 1; }
+        .ra-kpi-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; }
+        .ra-kpi-delta { font-size: 0.66rem; font-weight: 600; }
+        .ra-kpi-delta.positive { color: var(--accent-green); }
+        .ra-kpi-delta.negative { color: var(--accent-red); }
+        .ra-kpi-delta.neutral { color: var(--text-dim); }
+        .ra-kpi-target { font-size: 0.62rem; color: var(--text-dim); }
+        

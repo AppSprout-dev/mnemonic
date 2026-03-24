@@ -1,0 +1,518 @@
+<div id="app">
+        <!-- Nav -->
+        <nav class="nav">
+            <div class="nav-brand"><img src="/logo.png" alt="mnemonic" style="height:22px;width:22px;vertical-align:middle;margin-right:6px"> mnemonic <a id="navVersion" href="https://github.com/AppSprout-dev/mnemonic/releases" target="_blank" rel="noopener" style="font-size:0.7rem;color:var(--text-dim);font-weight:400;text-decoration:none" title="View changelog"></a><span id="navUpdateBadge" class="update-badge" style="display:none" onclick="triggerUpdate()" title="Click to update"></span><a id="navChangelogLink" class="update-changelog" style="display:none" target="_blank" rel="noopener">What's new?</a></div>
+            <div class="nav-tabs">
+                <button class="nav-tab active" data-view="recall" onclick="switchView('recall')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    <span>Recall</span>
+                </button>
+                <button class="nav-tab" data-view="explore" onclick="switchView('explore')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h16a2 2 0 002-2V8a2 2 0 00-2-2h-7.93a2 2 0 01-1.66-.9l-.82-1.2A2 2 0 007.93 3H4a2 2 0 00-2 2v13c0 1.1.9 2 2 2z"/></svg>
+                    <span>Explore</span>
+                </button>
+                <button class="nav-tab" data-view="timeline" onclick="switchView('timeline')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="2" x2="12" y2="22"/><circle cx="12" cy="6" r="2.5"/><circle cx="12" cy="12" r="2.5"/><circle cx="12" cy="18" r="2.5"/><line x1="14.5" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="9.5" y2="12"/><line x1="14.5" y1="18" x2="20" y2="18"/></svg>
+                    <span>Timeline</span>
+                </button>
+                <button class="nav-tab" data-view="mind" onclick="switchView('mind')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="18" r="2"/><circle cx="12" cy="12" r="3"/><line x1="7" y1="7" x2="10" y2="10"/><line x1="14" y1="10" x2="17" y2="7"/><line x1="7" y1="17" x2="10" y2="14"/><line x1="14" y1="14" x2="17" y2="17"/></svg>
+                    <span>Mind</span>
+                </button>
+                <button class="nav-tab" data-view="agent" onclick="switchView('agent')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="4"/><circle cx="9" cy="16" r="1.5"/><circle cx="15" cy="16" r="1.5"/></svg>
+                    <span>SDK</span>
+                </button>
+                <button class="nav-tab" data-view="llm" onclick="switchView('llm')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+                    <span>LLM</span>
+                </button>
+                <button class="nav-tab" data-view="tools" onclick="switchView('tools')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
+                    <span>Tools</span>
+                </button>
+            </div>
+            <div class="nav-spacer"></div>
+            <div class="nav-stats">
+                <span style="cursor:pointer" onclick="switchView('explore');switchExploreTab('memories')"><span class="stat-val" id="navMemoryCount">-</span> memories</span>
+                <span><span class="stat-val" id="navTokenCount">-</span> tokens</span>
+                <div class="nav-health" id="navHealth" title="System healthy"></div>
+            </div>
+            <select class="nav-theme-select" id="themeSelect" onchange="setTheme(this.value)">
+                <option value="midnight">Midnight</option>
+                <option value="ember">Ember</option>
+                <option value="nord">Nord</option>
+                <option value="slate">Slate</option>
+                <option value="parchment">Parchment</option>
+            </select>
+            <button class="nav-activity-btn" onclick="toggleDrawer()" title="Activity & Events">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+                <div class="nav-badge" id="activityBadge">0</div>
+            </button>
+        </nav>
+
+        <!-- View Container -->
+        <div class="view-container">
+            <!-- Recall View -->
+            <section class="view active" id="view-recall">
+                <div class="recall-hero">
+                    <h2>What do you remember?</h2>
+                    <div class="recall-search-box">
+                        <input type="text" id="recallInput" placeholder="Search your memories..." autofocus
+                               onkeydown="if(event.key==='Enter')performRecall()">
+                        <button class="recall-btn" id="recallBtn" onclick="performRecall()">Recall</button>
+                    </div>
+                    <div class="recall-options">
+                        <label><input type="checkbox" id="synthesizeToggle"> Synthesize</label>
+                        <span class="recall-shortcut">/</span>
+                    </div>
+                </div>
+                <div class="recall-results" id="recallResults"></div>
+                <div class="remember-panel">
+                    <button class="remember-toggle" id="rememberToggle" onclick="toggleRemember()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        Add a memory
+                    </button>
+                    <div class="remember-form" id="rememberForm">
+                        <div class="remember-row">
+                            <div class="remember-field">
+                                <label>Type</label>
+                                <select id="rememberType">
+                                    <option value="general">General</option>
+                                    <option value="decision">Decision</option>
+                                    <option value="error">Error</option>
+                                    <option value="insight">Insight</option>
+                                    <option value="learning">Learning</option>
+                                </select>
+                            </div>
+                            <div class="remember-field">
+                                <label>Project</label>
+                                <select id="rememberProject"><option value="">Auto-detect</option></select>
+                            </div>
+                        </div>
+                        <textarea class="remember-textarea" id="rememberContent" placeholder="What would you like to remember?"></textarea>
+                        <div class="remember-actions">
+                            <button class="remember-submit" onclick="submitRemember()">Remember</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Explore View -->
+            <section class="view" id="view-explore">
+                <div class="explore-view">
+                    <div class="explore-header">
+                        <div class="explore-tabs">
+                            <button class="explore-tab active" data-tab="episodes" onclick="switchExploreTab('episodes')">Episodes</button>
+                            <button class="explore-tab" data-tab="memories" onclick="switchExploreTab('memories')">Memories</button>
+                            <button class="explore-tab" data-tab="patterns" onclick="switchExploreTab('patterns')">Patterns</button>
+                            <button class="explore-tab" data-tab="abstractions" onclick="switchExploreTab('abstractions')">Abstractions</button>
+                        </div>
+                        <input type="text" class="explore-search" id="exploreSearch" placeholder="Filter..." oninput="filterExplore()">
+                    </div>
+                    <div class="explore-content">
+                        <div class="explore-section active" id="section-episodes"></div>
+                        <div class="explore-section" id="section-memories"></div>
+                        <div class="explore-section" id="section-patterns"></div>
+                        <div class="explore-section" id="section-abstractions"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Timeline View -->
+            <section class="view timeline-view" id="view-timeline">
+                <div class="timeline-header">
+                    <div class="timeline-spark" id="timelineSpark"></div>
+                    <div class="timeline-filters">
+                        <div class="timeline-range-tabs" id="timelineRangeTabs">
+                            <button class="timeline-range-tab" data-range="today" onclick="setTimelineRange('today')">Today</button>
+                            <button class="timeline-range-tab" data-range="week" onclick="setTimelineRange('week')">Week</button>
+                            <button class="timeline-range-tab" data-range="month" onclick="setTimelineRange('month')">Month</button>
+                            <button class="timeline-range-tab active" data-range="all" onclick="setTimelineRange('all')">All</button>
+                        </div>
+                        <div class="timeline-type-filters" id="timelineTypeFilters">
+                            <button class="timeline-type-btn active" data-type="episode" onclick="toggleTimelineType(this)">episodes</button>
+                            <button class="timeline-type-btn active" data-type="decision" onclick="toggleTimelineType(this)">decisions</button>
+                            <button class="timeline-type-btn active" data-type="error" onclick="toggleTimelineType(this)">errors</button>
+                            <button class="timeline-type-btn active" data-type="insight" onclick="toggleTimelineType(this)">insights</button>
+                            <button class="timeline-type-btn active" data-type="learning" onclick="toggleTimelineType(this)">learnings</button>
+                            <button class="timeline-type-btn active" data-type="general" onclick="toggleTimelineType(this)">general</button>
+                        </div>
+                        <div class="timeline-project-filters" id="timelineProjectFilters"></div>
+                        <div class="timeline-search-wrap" id="timelineSearchWrap">
+                            <input type="text" class="timeline-search" id="timelineSearch" placeholder="Filter timeline..." oninput="filterTimeline()">
+                            <button class="timeline-search-clear" onclick="clearTimelineSearch()" title="Clear search">&times;</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="timeline-body" id="timelineBody">
+                    <div class="timeline-loading">Loading timeline...</div>
+                </div>
+            </section>
+
+            <!-- Mind View -->
+            <section class="view mind-view" id="view-mind">
+                <div class="mind-controls">
+                    <div class="mind-toggle-group">
+                        <button class="mind-toggle" data-mind-view="episodes" onclick="setMindView('episodes')">Episodes</button>
+                        <button class="mind-toggle active" data-mind-view="memories" onclick="setMindView('memories')">Memories</button>
+                    </div>
+                    <label class="mind-label">Color by
+                        <select class="mind-select" id="mindColorBy" onchange="updateMindColors()">
+                            <option value="source">Source</option>
+                            <option value="emotional_tone">Tone</option>
+                            <option value="significance">Significance</option>
+                            <option value="state">State</option>
+                        </select>
+                    </label>
+                    <label class="mind-label">Nodes
+                        <input type="number" class="mind-input" id="mindLimit" value="150" min="10" max="500" step="10" onchange="onMindFilterChange()">
+                    </label>
+                    <label class="mind-label">Salience &ge; <span class="mind-val" id="mindSalienceVal">0.00</span>
+                        <input type="range" class="mind-slider" id="mindSalience" min="0" max="1" step="0.05" value="0" oninput="onMindFilterChange()">
+                    </label>
+                    <label class="mind-label">Strength &ge; <span class="mind-val" id="mindStrengthVal">0.00</span>
+                        <input type="range" class="mind-slider" id="mindStrength" min="0" max="1" step="0.05" value="0" oninput="onMindFilterChange()">
+                    </label>
+                </div>
+                <div class="mind-stats" id="mindStats"></div>
+                <div class="mind-canvas" id="mindCanvas">
+                    <div class="mind-search">
+                        <svg class="mind-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
+                        <input type="text" class="mind-search-input" id="mindSearch" placeholder="Search nodes..." oninput="onMindSearch()">
+                        <button class="mind-search-clear" id="mindSearchClear" onclick="clearMindSearch()" style="display:none">&times;</button>
+                    </div>
+                    <div class="mind-legend" id="mindLegend"></div>
+                    <div class="mind-detail" id="mindDetail" style="display:none"></div>
+                    <div class="mind-tooltip" id="mindTooltip"></div>
+                </div>
+            </section>
+
+            <!-- Agent View -->
+            <section class="view" id="view-agent">
+                <div class="agent-view">
+                    <div class="agent-header">
+                        <div class="agent-header-title">SDK Agent Sessions</div>
+                        <div class="llm-header-sub">Claude.ai &middot; OAuth &middot; self-evolving</div>
+                        <div class="agent-header-meta">
+                            <span class="agent-updated" id="agentUpdated"></span>
+                            <button class="agent-refresh-btn" id="agentRefreshBtn" onclick="refreshAgentData()">
+                                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 005.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 013.51 15"/></svg>
+                                Refresh
+                            </button>
+                        </div>
+                    </div>
+                    <div id="agentStatsRow"></div>
+                    <div class="llm-panel" style="margin-bottom:16px">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+                            <div class="llm-panel-title" style="margin-bottom:0">Task Activity (30d)</div>
+                        </div>
+                        <div class="sdk-cost-chart-wrap">
+                            <div id="sdkCostChart" style="height:140px"></div>
+                            <div class="sdk-cost-tooltip" id="sdkCostTooltip"></div>
+                        </div>
+                    </div>
+                    <div class="sdk-section">
+                        <div class="sdk-section-label">Memory System &middot; daemon</div>
+                        <div class="agent-memory-bar" id="agentMemoryBar"></div>
+                    </div>
+                    <div class="agent-grid">
+                        <div class="agent-panel" id="agentTimeline">
+                            <div class="agent-panel-header">
+                                <div class="agent-panel-title">Evolution Timeline</div>
+                                <span class="agent-panel-count" id="agentTimelineCount"></span>
+                            </div>
+                            <div id="agentTimelineContent"><div class="agent-empty">Loading...</div></div>
+                        </div>
+                        <div class="agent-panel" id="agentSessions">
+                            <div class="agent-panel-header">
+                                <div class="agent-panel-title">Session Activity</div>
+                                <span class="agent-panel-count" id="agentSessionsCount"></span>
+                            </div>
+                            <div id="agentSessionsContent"><div class="agent-empty">Loading...</div></div>
+                        </div>
+                        <div class="agent-panel" id="agentPrinciples">
+                            <div class="agent-panel-header">
+                                <div class="agent-panel-title">Learned Principles</div>
+                                <span class="agent-panel-count" id="agentPrinciplesCount"></span>
+                            </div>
+                            <div id="agentPrinciplesContent"><div class="agent-empty">Loading...</div></div>
+                        </div>
+                        <div class="agent-panel" id="agentStrategies">
+                            <div class="agent-panel-header">
+                                <div class="agent-panel-title">Task Strategies</div>
+                                <span class="agent-panel-count" id="agentStrategiesCount"></span>
+                            </div>
+                            <div id="agentStrategiesContent"><div class="agent-empty">Loading...</div></div>
+                        </div>
+                    </div>
+                    <div class="agent-panel" id="agentPatches" style="display:none">
+                        <div class="agent-panel-header">
+                            <div class="agent-panel-title">Prompt Patches</div>
+                            <span class="agent-panel-count" id="agentPatchesCount"></span>
+                        </div>
+                        <div id="agentPatchesContent"></div>
+                    </div>
+                    <!-- Chat Panel -->
+                    <div class="agent-chat-panel" id="agentChatPanel">
+                        <div class="agent-chat-header">
+                            <div class="agent-chat-header-left">
+                                <button class="chat-header-btn" onclick="toggleChatHistory()" title="Chat history">
+                                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                                </button>
+                                <div class="agent-chat-title" id="chatTitle">New conversation</div>
+                            </div>
+                            <div class="agent-chat-header-right">
+                                <select class="chat-model-select" id="chatModelSelect" onchange="onModelChange(this.value)" title="Model">
+                                    <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
+                                    <option value="claude-opus-4-6">Claude Opus 4.6</option>
+                                    <option value="claude-haiku-3-5">Claude Haiku 3.5</option>
+                                </select>
+                                <div class="agent-chat-status">
+                                    <div class="agent-chat-dot" id="chatDot"></div>
+                                    <span id="chatStatusText">Disconnected</span>
+                                </div>
+                                <button class="chat-header-btn" onclick="startNewConversation()" title="New chat">
+                                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="chat-history-panel" id="chatHistoryPanel" style="display:none">
+                            <div id="chatHistoryList"><div class="chat-history-empty">No conversations yet</div></div>
+                        </div>
+                        <div class="agent-chat-messages" id="chatMessages">
+                            <div id="chatSetupHint" style="text-align:center;padding:24px 16px;color:var(--text-dim);font-size:0.8rem;line-height:1.6;">
+                                <div style="font-size:1.2rem;margin-bottom:8px;opacity:0.5;">&#9670;</div>
+                                Agent chat requires the Python SDK.<br>
+                                Enable <code style="background:var(--bg-tertiary);padding:1px 5px;border-radius:3px;font-size:0.75rem;">agent_sdk.enabled: true</code> in config.yaml<br>
+                                and run the agent on port 9998.
+                            </div>
+                        </div>
+                        <div class="agent-chat-input-row">
+                            <textarea class="agent-chat-input" id="chatInput" rows="1" placeholder="Ask the agent anything..." disabled
+                                onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage();}"
+                                oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,100)+'px';"
+                            ></textarea>
+                            <button class="agent-chat-send" id="chatSendBtn" onclick="sendChatMessage()" disabled>Send</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- LLM Usage View -->
+            <section class="view" id="view-llm">
+                <div class="llm-view">
+                    <div class="llm-header">
+                        <div class="llm-header-title">LLM Usage</div>
+                        <div class="llm-header-sub">Memory engine &middot; local model</div>
+                        <div class="llm-header-meta">
+                            <div class="llm-range-tabs" id="llmRangeTabs">
+                                <button class="llm-range-tab" data-range="1h" onclick="setLLMRange('1h')">1h</button>
+                                <button class="llm-range-tab" data-range="6h" onclick="setLLMRange('6h')">6h</button>
+                                <button class="llm-range-tab active" data-range="24h" onclick="setLLMRange('24h')">24h</button>
+                                <button class="llm-range-tab" data-range="168h" onclick="setLLMRange('168h')">7d</button>
+                            </div>
+                            <span class="llm-updated" id="llmUpdated"></span>
+                            <button class="agent-refresh-btn" onclick="loadLLMUsage()">
+                                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 005.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 013.51 15"/></svg>
+                                Refresh
+                            </button>
+                        </div>
+                    </div>
+                    <div class="llm-cards" id="llmCards">
+                        <div class="llm-card"><div class="llm-card-label">Requests</div><div class="llm-card-value" id="llmRequests">-</div></div>
+                        <div class="llm-card"><div class="llm-card-label">Tokens</div><div class="llm-card-value" id="llmTokens">-</div><div class="llm-card-sub" id="llmTokenSplit"></div></div>
+                        <div class="llm-card"><div class="llm-card-label">Est. Cost</div><div class="llm-card-value" id="llmCost">-</div></div>
+                        <div class="llm-card"><div class="llm-card-label">Avg Latency</div><div class="llm-card-value" id="llmLatency">-</div></div>
+                        <div class="llm-card"><div class="llm-card-label">Errors</div><div class="llm-card-value" id="llmErrors">-</div></div>
+                        <div class="llm-card"><div class="llm-card-label">Completion %</div><div class="llm-card-value llm-completion-val" id="llmCompletionPct">-</div><div class="llm-card-sub">out&nbsp;/&nbsp;total tokens</div></div>
+                    </div>
+                    <div class="llm-panel" style="margin-bottom:16px">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+                            <div class="llm-panel-title" style="margin-bottom:0" id="llmChartTitle">Token Usage (24h)</div>
+                            <div class="llm-chart-legend">
+                                <div class="llm-legend-item"><div class="llm-legend-dot" style="background:var(--accent-cyan)"></div>Prompt</div>
+                                <div class="llm-legend-item"><div class="llm-legend-dot" style="background:var(--accent-violet)"></div>Completion</div>
+                            </div>
+                        </div>
+                        <div class="llm-chart-wrap">
+                            <div id="llmChart" style="height:200px"></div>
+                            <div class="llm-chart-tooltip" id="llmChartTooltip"></div>
+                        </div>
+                    </div>
+                    <div class="llm-grid" style="margin-bottom:16px">
+                        <div class="llm-panel">
+                            <div class="llm-panel-title">Usage by Agent</div>
+                            <table class="llm-table" id="llmAgentTable">
+                                <thead><tr><th>Agent</th><th>Requests</th><th>Tokens</th><th>Errors</th><th>Cost</th><th>Avg Latency</th></tr></thead>
+                                <tbody id="llmAgentBody"><tr><td colspan="6" class="llm-empty">No data yet</td></tr></tbody>
+                            </table>
+                        </div>
+                        <div class="llm-panel">
+                            <div class="llm-panel-title">By Operation</div>
+                            <table class="llm-table" id="llmOpsTable">
+                                <thead><tr><th>Operation</th><th>Calls</th><th>Tokens</th><th>p50</th><th>p95</th></tr></thead>
+                                <tbody id="llmOpsBody"><tr><td colspan="5" class="llm-empty">No data yet</td></tr></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="llm-panel">
+                        <div class="llm-panel-title">Recent Requests</div>
+                        <div class="llm-log-scroll">
+                            <table class="llm-table" id="llmLogTable">
+                                <thead><tr><th>Time</th><th>Agent</th><th>Operation</th><th>Model</th><th>In / Out</th><th>Latency</th><th>Status</th></tr></thead>
+                                <tbody id="llmLogBody"><tr><td colspan="7" class="llm-empty">No data yet</td></tr></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Tool Usage View -->
+            <section class="view" id="view-tools">
+                <div class="llm-view">
+                    <div class="llm-header">
+                        <div class="llm-header-title">MCP Tool Usage</div>
+                        <div class="llm-header-sub" id="toolHeaderSub">recall &middot; remember &middot; get_context &middot; &hellip; tools</div>
+                        <div class="llm-header-meta">
+                            <div class="llm-range-tabs" id="toolRangeTabs">
+                                <button class="llm-range-tab" data-range="1h" onclick="setToolRange('1h')">1h</button>
+                                <button class="llm-range-tab" data-range="6h" onclick="setToolRange('6h')">6h</button>
+                                <button class="llm-range-tab active" data-range="24h" onclick="setToolRange('24h')">24h</button>
+                                <button class="llm-range-tab" data-range="168h" onclick="setToolRange('168h')">7d</button>
+                            </div>
+                            <span class="llm-updated" id="toolUpdated"></span>
+                            <button class="agent-refresh-btn" onclick="loadToolUsage()">
+                                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 005.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 013.51 15"/></svg>
+                                Refresh
+                            </button>
+                        </div>
+                    </div>
+                    <div class="llm-cards" id="toolCards">
+                        <div class="llm-card"><div class="llm-card-label">Tool Calls</div><div class="llm-card-value" id="toolCalls">-</div></div>
+                        <div class="llm-card"><div class="llm-card-label">Avg Latency</div><div class="llm-card-value" id="toolLatency">-</div></div>
+                        <div class="llm-card"><div class="llm-card-label">Errors</div><div class="llm-card-value" id="toolErrors">-</div></div>
+                        <div class="llm-card"><div class="llm-card-label">Top Tool</div><div class="llm-card-value" id="toolTopTool">-</div></div>
+                        <div class="llm-card"><div class="llm-card-label">Projects</div><div class="llm-card-value" id="toolProjects">-</div></div>
+                        <div class="llm-card"><div class="llm-card-label">Success Rate</div><div class="llm-card-value" id="toolSuccessRate">-</div></div>
+                    </div>
+                    <div class="llm-panel" style="margin-bottom:16px">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+                            <div class="llm-panel-title" style="margin-bottom:0" id="toolChartTitle">Tool Calls (24h)</div>
+                            <div class="llm-chart-legend">
+                                <div class="llm-legend-item"><div class="llm-legend-dot" style="background:var(--accent-cyan)"></div>Calls</div>
+                                <div class="llm-legend-item"><div class="llm-legend-dot" style="background:var(--accent-red)"></div>Errors</div>
+                            </div>
+                        </div>
+                        <div class="llm-chart-wrap">
+                            <div id="toolChart" style="height:200px"></div>
+                            <div class="llm-chart-tooltip" id="toolChartTooltip"></div>
+                        </div>
+                    </div>
+                    <div class="llm-grid" style="margin-bottom:16px">
+                        <div class="llm-panel">
+                            <div class="llm-panel-title">Memory Types Stored</div>
+                            <div id="memTypeChart" style="display:flex;gap:8px;flex-wrap:wrap;padding:8px 0"></div>
+                        </div>
+                        <div class="llm-panel">
+                            <div class="llm-panel-title">Feedback Quality</div>
+                            <div id="feedbackChart" style="display:flex;gap:8px;flex-wrap:wrap;padding:8px 0"></div>
+                        </div>
+                    </div>
+                    <div class="llm-panel" style="margin-bottom:16px">
+                        <div class="llm-panel-title">Tool Performance</div>
+                        <table class="llm-table" id="toolByToolTable">
+                            <thead><tr><th>Tool</th><th>Calls</th><th>p50</th><th>p95</th><th>Max</th><th>Avg Size</th></tr></thead>
+                            <tbody id="toolByToolBody"><tr><td colspan="6" class="llm-empty">No data yet</td></tr></tbody>
+                        </table>
+                    </div>
+                    <div class="llm-grid" style="margin-bottom:16px">
+                        <div class="llm-panel">
+                            <div class="llm-panel-title">Sessions</div>
+                            <table class="llm-table" id="toolSessionTable">
+                                <thead><tr><th>Session</th><th>Calls</th><th>Tools Used</th><th>Duration</th></tr></thead>
+                                <tbody id="toolSessionBody"><tr><td colspan="4" class="llm-empty">No session data</td></tr></tbody>
+                            </table>
+                        </div>
+                        <div class="llm-panel">
+                            <div class="llm-panel-title">Calls by Project</div>
+                            <table class="llm-table" id="toolByProjectTable">
+                                <thead><tr><th>Project</th><th>Calls</th></tr></thead>
+                                <tbody id="toolByProjectBody"><tr><td colspan="2" class="llm-empty">No data yet</td></tr></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="llm-panel">
+                        <div class="llm-panel-title">Recent Tool Calls</div>
+                        <div class="llm-log-scroll">
+                            <table class="llm-table" id="toolLogTable">
+                                <thead><tr><th>Time</th><th>Tool</th><th>Project</th><th>Query / Context</th><th>Latency</th><th>Size</th><th>Status</th></tr></thead>
+                                <tbody id="toolLogBody"><tr><td colspan="7" class="llm-empty">No tool calls recorded yet</td></tr></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border-subtle)">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+                            <div>
+                                <div style="font-size:0.85rem;font-weight:600;color:var(--text-primary);margin-bottom:2px">Research Analytics</div>
+                                <div style="font-size:0.68rem;color:var(--text-muted)">Is the memory system getting smarter?</div>
+                            </div>
+                            <div class="llm-range-tabs" id="analyticsRangeTabs">
+                                <button class="llm-range-tab" data-range="7" onclick="setAnalyticsRange(7)">7d</button>
+                                <button class="llm-range-tab active" data-range="14" onclick="setAnalyticsRange(14)">14d</button>
+                                <button class="llm-range-tab" data-range="30" onclick="setAnalyticsRange(30)">30d</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="ra-brief" id="raBrief"></div>
+                    <div class="ra-kpis" id="raKpis"></div>
+                    <div class="cognitive-grid" id="cognitiveGrid"></div>
+                    <div class="llm-panel" style="margin-bottom:16px">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                            <div class="llm-panel-title" style="margin-bottom:0" id="lifecycleTitle">Memory Lifecycle (14d)</div>
+                            <div id="lifecycleLegend" style="display:flex;gap:12px;font-size:0.65rem;color:var(--text-dim)"></div>
+                        </div>
+                        <div id="lifecycleChart" style="height:220px;position:relative"></div>
+                        <div id="lifecycleTooltip" class="llm-chart-tooltip"></div>
+                    </div>
+                    <div class="llm-grid" style="margin-bottom:16px">
+                        <div class="llm-panel">
+                            <div class="llm-panel-title">Signal Quality by Source</div>
+                            <div id="signalNoiseChart" style="padding:8px 0"></div>
+                        </div>
+                        <div class="llm-panel">
+                            <div class="llm-panel-title">Recall Learning Curve</div>
+                            <div id="recallChart" style="padding:8px 0"></div>
+                        </div>
+                    </div>
+                    <div class="llm-panel" style="margin-bottom:16px">
+                        <div class="llm-panel-title">Session Activity</div>
+                        <div id="sessionTimeline" style="padding:4px 0"></div>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- Activity Drawer -->
+        <div class="activity-backdrop" id="activityBackdrop" onclick="toggleDrawer()"></div>
+        <div class="activity-drawer" id="activityDrawer">
+            <div class="drawer-header">
+                <h3>Activity</h3>
+                <button class="drawer-close" onclick="toggleDrawer()">&times;</button>
+            </div>
+            <div class="drawer-body">
+                <div class="drawer-section-title">Active Concepts</div>
+                <div id="conceptsContainer" style="margin-bottom:12px"></div>
+                <div class="drawer-section-title">Insights</div>
+                <div id="insightsContainer"></div>
+                <div class="drawer-section-title" style="margin-top:16px">Live Events</div>
+                <div id="eventsContainer"></div>
+            </div>
+            <div class="drawer-footer">
+                <button class="drawer-action" onclick="triggerConsolidation()">Run Consolidation</button>
+                <button class="drawer-action" onclick="clearEvents()">Clear Events</button>
+            </div>
+        </div>
+
+        <div class="toast-container" id="toastContainer"></div>
+    </div>
