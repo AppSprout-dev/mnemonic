@@ -1698,6 +1698,13 @@ func serveCommand(configPath string) {
 		}
 	}
 
+	// --- Sync project forum categories ---
+	if n, err := memStore.SyncProjectCategories(rootCtx); err != nil {
+		log.Warn("failed to sync project categories", "error", err)
+	} else if n > 0 {
+		log.Info("created forum categories for projects", "count", n)
+	}
+
 	// --- Start API server ---
 	if cfg.API.Port > 0 {
 		apiDeps := api.ServerDeps{

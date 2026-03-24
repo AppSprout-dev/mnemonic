@@ -1104,7 +1104,7 @@
             <div class="navbar" id="forumNav">
                 <div class="navbar-tabs">
                     <button class="ntab active" data-view="recall" onclick="switchView('recall')">Search</button>
-                    <button class="ntab" data-view="explore" onclick="switchView('explore')">Forum</button>
+                    <button class="ntab" data-view="explore" onclick="switchView('explore')">Forum <span id="forumNotifBadge" style="display:none;min-width:14px;height:14px;padding:0 4px;border-radius:7px;background:var(--accent-red);color:#fff;font-size:0.6rem;font-weight:bold;align-items:center;justify-content:center;margin-left:3px"></span></button>
                     <button class="ntab" data-view="timeline" onclick="switchView('timeline')">Timeline</button>
                     <button class="ntab" data-view="agent" onclick="switchView('agent')">SDK</button>
                     <button class="ntab" data-view="llm" onclick="switchView('llm')">LLM</button>
@@ -3036,6 +3036,8 @@
                     if (!state.exploreLoaded[tab]) loadExploreTab(tab);
                     if (!state.forumLoaded) loadForumIndex();
                 }
+                // Track forum notifications
+                if (type === 'forum_post_created') onForumPostWebSocket(payload);
                 // Live-insert forum post into current thread view
                 if (type === 'forum_post_created' && state.currentView === 'thread' && state.currentForumThread === payload.thread_id) {
                     appendForumPostToThread(payload);
@@ -4951,6 +4953,7 @@
     async function loadForumThread(threadId) {
         state.currentForumThread = threadId;
         state.currentView = 'thread';
+        markThreadRead(threadId);
         // Show thread view
         document.querySelectorAll('.view').forEach(function(v) { v.classList.remove('active'); });
         document.querySelectorAll('.ntab').forEach(function(t) { t.classList.remove('active'); });
@@ -5116,6 +5119,7 @@
             textarea.disabled = false;
             document.getElementById('newThreadForm').style.display = 'none';
             showToast('Thread created');
+            subscribeToThread(data.thread_id);
             state.forumLoaded = false;
             loadForumIndex();
             // Navigate to the new thread
@@ -5140,6 +5144,7 @@
             textarea.value = '';
             textarea.disabled = false;
             showToast('Reply posted');
+            subscribeToThread(state.currentForumThread);
             // The WebSocket event will handle live-inserting the post
         } catch (e) {
             textarea.disabled = false;
@@ -5252,6 +5257,53 @@
         if (_mentionInitialized[textareaId]) return;
         var el = document.getElementById(textareaId);
         if (el) { setupMentionAutocomplete(el); _mentionInitialized[textareaId] = true; }
+    }
+
+    // ── Thread subscriptions ──
+    var _subscriptions = JSON.parse(localStorage.getItem('mnemonic_forum_subs') || '{}');
+    // { threadId: { unread: 0, lastSeen: timestamp } }
+
+    function subscribeToThread(threadId) {
+        if (!_subscriptions[threadId]) {
+            _subscriptions[threadId] = { unread: 0, lastSeen: Date.now() };
+            localStorage.setItem('mnemonic_forum_subs', JSON.stringify(_subscriptions));
+        }
+    }
+
+    function markThreadRead(threadId) {
+        if (_subscriptions[threadId]) {
+            _subscriptions[threadId].unread = 0;
+            _subscriptions[threadId].lastSeen = Date.now();
+            localStorage.setItem('mnemonic_forum_subs', JSON.stringify(_subscriptions));
+            updateNotificationBadge();
+        }
+    }
+
+    function onForumPostWebSocket(payload) {
+        var threadId = payload.thread_id;
+        // If we're subscribed and not currently viewing this thread, increment unread
+        if (_subscriptions[threadId] && state.currentForumThread !== threadId) {
+            _subscriptions[threadId].unread = (_subscriptions[threadId].unread || 0) + 1;
+            localStorage.setItem('mnemonic_forum_subs', JSON.stringify(_subscriptions));
+            updateNotificationBadge();
+            // Show toast for agent replies
+            if (payload.author_type === 'agent') {
+                var agentName = payload.author_key ? ('@' + payload.author_key) : payload.author_name;
+                showToast(agentName + ' replied to your thread');
+            }
+        }
+    }
+
+    function updateNotificationBadge() {
+        var total = 0;
+        for (var tid in _subscriptions) {
+            total += (_subscriptions[tid].unread || 0);
+        }
+        var badge = document.getElementById('forumNotifBadge');
+        if (badge) {
+            badge.textContent = total > 0 ? total : '';
+            badge.style.display = total > 0 ? 'inline-flex' : 'none';
+        }
     }
 
     async function internalizePost(postId, btn) {
@@ -6105,6 +6157,7 @@
         loadInsights();
         loadProjects();
         connectWebSocket();
+        updateNotificationBadge();
         checkForUpdate();
         setInterval(loadStats, CONFIG.STATS_POLL);
         setInterval(loadInsights, CONFIG.INSIGHTS_POLL);

@@ -9,6 +9,42 @@ import (
 	store "github.com/appsprout-dev/mnemonic/internal/store"
 )
 
+// SyncProjectCategories creates forum categories for any projects that don't have one yet.
+func (s *SQLiteStore) SyncProjectCategories(ctx context.Context) (int, error) {
+	// Get all known projects
+	projects, err := s.ListProjects(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("listing projects: %w", err)
+	}
+
+	created := 0
+	for _, project := range projects {
+		catID := "project-" + project
+		// Check if category already exists
+		_, err := s.GetForumCategory(ctx, catID)
+		if err == nil {
+			continue // already exists
+		}
+
+		cat := store.ForumCategory{
+			ID:          catID,
+			Name:        project,
+			Slug:        "project-" + project,
+			Description: "Threads about the " + project + " project",
+			Icon:        "PJ",
+			Color:       "var(--accent-green)",
+			Type:        "project",
+			SortOrder:   200,
+			CreatedAt:   time.Now(),
+		}
+		if err := s.WriteForumCategory(ctx, cat); err != nil {
+			continue
+		}
+		created++
+	}
+	return created, nil
+}
+
 // forumCategoryColumns is the standard column list for forum category queries.
 const forumCategoryColumns = `id, name, slug, description, icon, color, type, sort_order, created_at`
 

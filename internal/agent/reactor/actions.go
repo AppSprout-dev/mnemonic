@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"time"
 
@@ -13,6 +14,8 @@ import (
 	"github.com/appsprout-dev/mnemonic/internal/store"
 	"github.com/google/uuid"
 )
+
+var agentMentionRe = regexp.MustCompile(`@(retrieval|metacognition|encoding|episoding|consolidation|dreaming|abstraction|perception)`)
 
 // PublishEventAction publishes an event to the bus.
 type PublishEventAction struct {
@@ -173,6 +176,147 @@ func (a *CreateForumPostAction) Execute(ctx context.Context, trigger events.Even
 	return nil
 }
 
+// buildAgentContext pulls real data from the store for the mentioned agent.
+// Returns a string to append to the LLM system prompt, or empty if no data available.
+func buildAgentContext(ctx context.Context, agentKey string, query string, s store.Store, querier ForumQuerier) string {
+	switch agentKey {
+	case "retrieval":
+		if querier == nil {
+			return ""
+		}
+		results := querySimple(ctx, querier, query, 5)
+		if len(results) == 0 {
+			return "No relevant memories found for this query."
+		}
+		var b strings.Builder
+		b.WriteString("Relevant memories from search:\n")
+		for i, r := range results {
+			fmt.Fprintf(&b, "%d. [score:%.2f, salience:%.2f] %s\n", i+1, r.Score, r.Memory.Salience, r.Memory.Summary)
+		}
+		return b.String()
+
+	case "metacognition":
+		stats, err := s.GetStatistics(ctx)
+		if err != nil {
+			return ""
+		}
+		obs, _ := s.ListMetaObservations(ctx, "", 5)
+		var b strings.Builder
+		fmt.Fprintf(&b, "Current system statistics:\n")
+		fmt.Fprintf(&b, "- Total memories: %d (active: %d, fading: %d, archived: %d, merged: %d)\n",
+			stats.TotalMemories, stats.ActiveMemories, stats.FadingMemories, stats.ArchivedMemories, stats.MergedMemories)
+		fmt.Fprintf(&b, "- Episodes: %d, Associations: %d (avg %.1f per memory)\n",
+			stats.TotalEpisodes, stats.TotalAssociations, stats.AvgAssociationsPerMem)
+		fmt.Fprintf(&b, "- Storage: %.1f MB\n", float64(stats.StorageSizeBytes)/(1024*1024))
+		if len(obs) > 0 {
+			b.WriteString("Recent observations:\n")
+			for _, o := range obs {
+				fmt.Fprintf(&b, "- [%s] %s: %v\n", o.Severity, o.ObservationType, o.Details)
+			}
+		}
+		return b.String()
+
+	case "consolidation":
+		last, err := s.GetLastConsolidation(ctx)
+		if err != nil {
+			return "No consolidation history available."
+		}
+		stats, _ := s.GetStatistics(ctx)
+		var b strings.Builder
+		fmt.Fprintf(&b, "Last consolidation run:\n")
+		fmt.Fprintf(&b, "- Processed: %d memories, Decayed: %d, Merged: %d clusters, Pruned: %d associations\n",
+			last.MemoriesProcessed, last.MemoriesDecayed, last.MergedClusters, last.AssociationsPruned)
+		fmt.Fprintf(&b, "- Duration: %dms, Time: %s\n", last.DurationMs, last.EndTime.Format("Jan 2 15:04"))
+		fmt.Fprintf(&b, "Current state: %d fading, %d archived out of %d total\n",
+			stats.FadingMemories, stats.ArchivedMemories, stats.TotalMemories)
+		return b.String()
+
+	case "episoding":
+		episodes, _ := s.ListEpisodes(ctx, "", 5, 0)
+		if len(episodes) == 0 {
+			return "No episodes available."
+		}
+		var b strings.Builder
+		b.WriteString("Recent episodes:\n")
+		for i, ep := range episodes {
+			dur := ""
+			if ep.DurationSec > 0 {
+				dur = fmt.Sprintf(" (%dm)", ep.DurationSec/60)
+			}
+			fmt.Fprintf(&b, "%d. [%s] %s%s — %d memories, mood: %s\n",
+				i+1, ep.State, ep.Title, dur, len(ep.MemoryIDs), ep.EmotionalTone)
+		}
+		return b.String()
+
+	case "abstraction":
+		patterns, _ := s.ListPatterns(ctx, "", 5)
+		abstractions, _ := s.ListAbstractions(ctx, 0, 5)
+		if len(patterns) == 0 && len(abstractions) == 0 {
+			return "No patterns or abstractions discovered yet."
+		}
+		var b strings.Builder
+		if len(patterns) > 0 {
+			b.WriteString("Active patterns:\n")
+			for i, p := range patterns {
+				fmt.Fprintf(&b, "%d. [strength:%.2f] %s — %s\n", i+1, p.Strength, p.Title, p.Description)
+			}
+		}
+		if len(abstractions) > 0 {
+			b.WriteString("Abstractions:\n")
+			for i, a := range abstractions {
+				level := "principle"
+				if a.Level == 3 {
+					level = "axiom"
+				}
+				fmt.Fprintf(&b, "%d. [%s, confidence:%.2f] %s\n", i+1, level, a.Confidence, a.Title)
+			}
+		}
+		return b.String()
+
+	case "dreaming":
+		// Pull recent dream-related insights from meta observations
+		obs, _ := s.ListMetaObservations(ctx, "autonomous_action", 5)
+		stats, _ := s.GetStatistics(ctx)
+		var b strings.Builder
+		fmt.Fprintf(&b, "Memory system state: %d total, %d associations (avg %.1f per memory)\n",
+			stats.TotalMemories, stats.TotalAssociations, stats.AvgAssociationsPerMem)
+		if len(obs) > 0 {
+			b.WriteString("Recent autonomous actions:\n")
+			for _, o := range obs {
+				fmt.Fprintf(&b, "- %s at %s\n", o.Details, o.CreatedAt.Format("Jan 2 15:04"))
+			}
+		}
+		return b.String()
+
+	case "encoding":
+		sourceDist, _ := s.GetSourceDistribution(ctx)
+		stats, _ := s.GetStatistics(ctx)
+		var b strings.Builder
+		fmt.Fprintf(&b, "Encoding statistics:\n")
+		fmt.Fprintf(&b, "- Total encoded: %d memories from %d raw observations\n", stats.TotalMemories, stats.TotalMemories+stats.ArchivedMemories)
+		if len(sourceDist) > 0 {
+			b.WriteString("By source: ")
+			for src, count := range sourceDist {
+				fmt.Fprintf(&b, "%s=%d ", src, count)
+			}
+			b.WriteString("\n")
+		}
+		return b.String()
+
+	case "perception":
+		sourceDist, _ := s.GetSourceDistribution(ctx)
+		var b strings.Builder
+		b.WriteString("Perception sources:\n")
+		for src, count := range sourceDist {
+			fmt.Fprintf(&b, "- %s: %d observations\n", src, count)
+		}
+		return b.String()
+
+	default:
+		return ""
+	}
+}
+
 // ForumQuerier is the interface for running recall queries in forum context.
 type ForumQuerier interface {
 	ForumQuery(ctx context.Context, query string, limit int) ([]store.RetrievalResult, error)
@@ -224,15 +368,10 @@ func (a *RespondToMentionAction) Execute(ctx context.Context, trigger events.Eve
 		systemPrompt.WriteString("A human has @mentioned you in a forum thread. Respond helpfully and concisely (2-4 sentences max) based on your role. ")
 		systemPrompt.WriteString("Do not use markdown formatting. Be direct and informative.")
 
-		// If this is the retrieval agent, run a search first
-		if mention.AgentKey == "retrieval" && a.ForumQuerier != nil {
-			results := querySimple(ctx, a.ForumQuerier, mention.Content, 5)
-			if len(results) > 0 {
-				systemPrompt.WriteString("\n\nRelevant memories from search:\n")
-				for i, r := range results {
-					systemPrompt.WriteString(fmt.Sprintf("%d. [%.2f] %s\n", i+1, r.Score, r.Memory.Summary))
-				}
-			}
+		// Inject real data based on which agent is being mentioned
+		agentData := buildAgentContext(ctx, mention.AgentKey, mention.Content, state.Store, a.ForumQuerier)
+		if agentData != "" {
+			systemPrompt.WriteString("\n\n" + agentData)
 		}
 
 		resp, err := a.LLM.Complete(ctx, llm.CompletionRequest{
@@ -295,6 +434,29 @@ func (a *RespondToMentionAction) Execute(ctx context.Context, trigger events.Eve
 			"agent", mention.AgentKey,
 			"post_id", postID,
 			"thread_id", mention.ThreadID)
+	}
+
+	// Agent-to-agent: if the response @mentions another agent, trigger it.
+	// Guard: an agent can't mention itself (prevents infinite loops).
+	// The chain-level cooldown (10s) also gates rapid back-and-forth.
+	mentionPattern := agentMentionRe
+	matches := mentionPattern.FindAllStringSubmatch(content, -1)
+	for _, m := range matches {
+		if len(m) > 1 && m[1] != mention.AgentKey { // don't self-mention
+			_ = state.Bus.Publish(ctx, events.ForumMentionDetected{
+				PostID:   postID,
+				ThreadID: mention.ThreadID,
+				AgentKey: m[1],
+				Content:  content,
+				Ts:       now,
+			})
+			if a.Log != nil {
+				a.Log.Info("agent-to-agent mention detected",
+					"from", mention.AgentKey,
+					"to", m[1],
+					"thread", mention.ThreadID)
+			}
+		}
 	}
 
 	return nil
