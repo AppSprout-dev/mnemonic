@@ -9,6 +9,55 @@ import (
 	store "github.com/appsprout-dev/mnemonic/internal/store"
 )
 
+// BackfillEpisodeMemoryLinks fixes the race condition where memories were encoded
+// before their raw observations were assigned to episodes. Iterates episodes (small set)
+// and links any encoded memories found via raw_id lookup.
+func (s *SQLiteStore) BackfillEpisodeMemoryLinks(ctx context.Context) (int, error) {
+	episodes, err := s.ListEpisodes(ctx, "", 500, 0)
+	if err != nil {
+		return 0, fmt.Errorf("listing episodes: %w", err)
+	}
+
+	linked := 0
+	for _, ep := range episodes {
+		for _, rawID := range ep.RawMemoryIDs {
+			if rawID == "" {
+				continue
+			}
+			// Check if the encoded memory exists and needs linking
+			mem, err := s.GetMemoryByRawID(ctx, rawID)
+			if err != nil {
+				continue
+			}
+			if mem.EpisodeID == ep.ID {
+				continue
+			}
+			// Update the memory's episode_id
+			_, err = s.db.ExecContext(ctx,
+				`UPDATE memories SET episode_id = ? WHERE id = ? AND (episode_id IS NULL OR episode_id = '')`,
+				ep.ID, mem.ID)
+			if err == nil {
+				linked++
+			}
+		}
+		// Update episode.memory_ids
+		var memIDs []string
+		for _, rawID := range ep.RawMemoryIDs {
+			mem, err := s.GetMemoryByRawID(ctx, rawID)
+			if err != nil {
+				continue
+			}
+			memIDs = append(memIDs, mem.ID)
+		}
+		if len(memIDs) > 0 {
+			encoded, _ := encodeStringSlice(memIDs)
+			_, _ = s.db.ExecContext(ctx,
+				`UPDATE episodes SET memory_ids = ? WHERE id = ?`, encoded, ep.ID)
+		}
+	}
+	return linked, nil
+}
+
 // SyncProjectCategories creates forum categories for any projects that don't have one yet.
 func (s *SQLiteStore) SyncProjectCategories(ctx context.Context) (int, error) {
 	// Get all known projects

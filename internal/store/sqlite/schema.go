@@ -558,6 +558,9 @@ INSERT OR IGNORE INTO forum_categories (id, name, slug, description, icon, color
 	// Backfill human posts to 'discussions'
 	_, _ = db.Exec(`UPDATE forum_posts SET category_id = 'discussions' WHERE category_id = '' AND author_type = 'human'`)
 
+	// Episode-memory backfill is handled by the episoding agent on episode close.
+	// No startup SQL backfill — the JSON LIKE scan is too slow on large DBs.
+
 	return nil
 }
 

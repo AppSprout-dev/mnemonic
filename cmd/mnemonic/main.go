@@ -1705,6 +1705,15 @@ func serveCommand(configPath string) {
 		log.Info("created forum categories for projects", "count", n)
 	}
 
+	// --- Backfill episode-memory links (fixes encoding/episoding race condition) ---
+	go func() {
+		if n, err := memStore.BackfillEpisodeMemoryLinks(rootCtx); err != nil {
+			log.Warn("failed to backfill episode memory links", "error", err)
+		} else if n > 0 {
+			log.Info("backfilled episode-memory links", "linked", n)
+		}
+	}()
+
 	// --- Start API server ---
 	if cfg.API.Port > 0 {
 		apiDeps := api.ServerDeps{
