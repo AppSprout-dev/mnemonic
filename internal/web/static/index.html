@@ -1913,28 +1913,32 @@
         }
         var hops = data.hops || 0;
         var html = '<div class="recall-info">' + memories.length + ' result' + (memories.length !== 1 ? 's' : '') + ' &middot; ' + (data.took_ms || 0) + 'ms' + (hops ? ' &middot; spread activation: ' + hops + ' hops' : '') + '</div>';
-        html += '<div class="rcolh"><span>Score</span><span></span><span>Memory</span><span>Sal</span><span>Links</span><span>Created</span></div>';
-        memories.forEach(function(mem) {
+        html += '<div class="forabg" style="margin:0 0 8px"><div class="inner">';
+        html += '<ul class="topiclist"><li class="header"><dl class="row-item"><dt><div class="list-inner">Memory</div></dt><dd>Score</dd><dd>Sal</dd><dd class="lastpost">Created</dd></dl></li></ul>';
+        html += '<ul class="topiclist forums">';
+        memories.forEach(function(mem, idx) {
             var score = mem.score || 0;
-            var scoreClass = score > 0.7 ? 'rr-score-hi' : score > 0.4 ? 'rr-score-mid' : 'rr-score-lo';
+            var scoreColor = score > 0.7 ? 'var(--link)' : score > 0.4 ? 'var(--text-secondary)' : 'var(--text-dim)';
             var m = mem.memory;
             var type = memoryType(m);
             var typeAbbr = memoryTypeAbbr(type);
             var iconClass = memoryTypeIcon(type);
             var salPct = safeSalience(m.salience);
-            var linkCount = m.association_count || 0;
             var dateStr = m.created_at ? new Date(m.created_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '';
             var summary = m.summary || (m.content || '').slice(0, 150);
+            var bgClass = idx % 2 === 0 ? 'bg1' : 'bg2';
 
-            html += '<div class="rr" onclick="toggleExpand(this)">';
-            html += '<div class="rr-score ' + scoreClass + '">' + score.toFixed(2) + '</div>';
-            html += '<div class="frow-icon icon-sm ' + iconClass + '">' + typeAbbr + '</div>';
-            html += '<div class="rr-title">' + escapeHtml(summary) + '</div>';
-            html += '<div class="frow-stat">' + salPct + '%</div>';
-            html += '<div class="frow-stat">' + linkCount + '</div>';
-            html += '<div class="frow-last"><div class="frow-last-time">' + dateStr + '</div></div>';
-            html += '</div>';
+            html += '<li class="row ' + bgClass + '" onclick="toggleExpand(this)">';
+            html += '<dl class="row-item"><dt>';
+            html += '<a class="row-item-link"><span class="status-icon ' + iconClass + '">' + typeAbbr + '</span></a>';
+            html += '<div class="list-inner"><a class="forumtitle">' + escapeHtml(summary) + '</a></div>';
+            html += '</dt>';
+            html += '<dd style="color:' + scoreColor + ';font-weight:bold">' + score.toFixed(2) + '</dd>';
+            html += '<dd>' + salPct + '%</dd>';
+            html += '<dd class="lastpost"><span class="lastpost-time">' + dateStr + '</span></dd>';
+            html += '</dl></li>';
         });
+        html += '</ul></div></div>';
         html += '<div class="feedback-bar">';
         html += '<span class="feedback-label">Rate these results:</span>';
         html += '<button class="feedback-btn helpful" onclick="submitFeedback(\'helpful\', event)">Helpful</button>';
@@ -1995,38 +1999,53 @@
             html += '</div></div>';
 
             if (memories.length > 0) {
-
                 memories.forEach(function(m, idx) {
                     var type = memoryType(m);
-                    var typeBadgeClass = 'post-type-badge--' + type;
+                    var rankClass = 'rank-' + type;
                     var salPct = safeSalience(m.salience);
                     var linkCount = m.association_count || 0;
                     var source = m.source || 'mcp';
                     var time = m.created_at ? new Date(m.created_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '';
+                    var joinDate = m.created_at ? new Date(m.created_at).toLocaleDateString() : '';
                     var concepts = m.concepts || [];
+                    var bgClass = idx % 2 === 0 ? 'bg1' : 'bg2';
+                    var iconClass = memoryTypeIcon(type);
 
-                    html += '<div class="post">';
-                    // Left sidebar
-                    html += '<div class="post-left">';
-                    html += '<div class="post-type-badge ' + typeBadgeClass + '">' + escapeHtml(type) + '</div>';
-                    html += '<div class="post-stat-row">Salience: <b>' + salPct + '%</b></div>';
-                    html += '<div class="post-stat-row">Links: <b>' + linkCount + '</b></div>';
-                    html += '<div class="post-stat-row">Source: <b>' + escapeHtml(source) + '</b></div>';
-                    html += '<div class="post-stat-row" style="margin-top:6px;color:var(--text-faint)">' + time + '</div>';
-                    html += '</div>';
-                    // Right content
-                    html += '<div class="post-right">';
-                    html += '<div class="post-head"><span>Memory #' + (idx + 1) + ' of ' + memories.length + '</span><span style="cursor:pointer;color:var(--link)" onclick="navigator.clipboard.writeText(\'' + escapeHtml(m.id || '') + '\');showToast(\'ID copied\')">Copy ID</span></div>';
-                    html += '<div class="post-body-text">' + escapeHtml(m.summary || m.content || '') + '</div>';
+                    // phpBB-style post with profile sidebar
+                    html += '<div class="post ' + bgClass + '"><div class="inner">';
+
+                    // Profile sidebar (like phpBB postprofile)
+                    html += '<dl class="postprofile">';
+                    html += '<dt><div class="avatar-container status-icon ' + iconClass + '" style="width:48px;height:48px;font-size:1.1rem">' + memoryTypeAbbr(type) + '</div>';
+                    html += '<strong>' + escapeHtml(source) + '</strong></dt>';
+                    html += '<dd class="profile-rank"><span class="' + rankClass + '">' + escapeHtml(type) + '</span></dd>';
+                    html += '<dd><strong>Salience:</strong> ' + salPct + '%</dd>';
+                    html += '<dd><strong>Links:</strong> ' + linkCount + '</dd>';
+                    if (m.project) html += '<dd><strong>Project:</strong> ' + escapeHtml(m.project) + '</dd>';
+                    html += '<dd><strong>Joined:</strong> ' + joinDate + '</dd>';
+                    html += '</dl>';
+
+                    // Post body
+                    html += '<div class="postbody">';
+                    html += '<h3>' + escapeHtml(m.summary || 'Memory') + '</h3>';
+                    html += '<p class="post-meta"><span>Memory #' + (idx + 1) + ' of ' + memories.length + ' &middot; ' + time + '</span>';
+                    html += '<span style="cursor:pointer;color:var(--link)" onclick="navigator.clipboard.writeText(\'' + escapeHtml(m.id || '') + '\');showToast(\'ID copied\')">Copy ID</span></p>';
+
+                    // Content
                     if (m.content && m.content !== m.summary) {
-                        html += '<div style="font-size:0.85rem;color:var(--text-dim);margin-bottom:8px">' + escapeHtml(m.content) + '</div>';
+                        html += '<div class="content">' + escapeHtml(m.content) + '</div>';
+                    } else if (m.summary) {
+                        html += '<div class="content">' + escapeHtml(m.summary) + '</div>';
                     }
+
+                    // Concept tags
                     if (concepts.length > 0) {
                         html += '<div class="post-tags">';
-                        concepts.forEach(function(c) { html += '<span class="post-tag">' + escapeHtml(c) + '</span>'; });
+                        concepts.forEach(function(c) { html += '<span class="forum-tag">' + escapeHtml(c) + '</span>'; });
                         html += '</div>';
                     }
-                    html += '</div></div>';
+
+                    html += '</div></div></div>'; // close postbody, inner, post
                 });
             }
 
@@ -2118,7 +2137,9 @@
         var data = await fetchJSON('/episodes?limit=50');
         var episodes = data.episodes || [];
         if (episodes.length === 0) { section.innerHTML = '<div class="empty-state"><div class="empty-state-icon">&#128218;</div><div class="empty-state-text">No episodes yet</div><div class="empty-state-sub">Episodes are created as memories accumulate</div></div>'; return; }
-        var html = '<div class="colh colh-ep"><span></span><span>Episode</span><span>Mem</span><span>Files</span><span>Last Activity</span></div>';
+        // phpBB-style header + row list
+        var html = '<ul class="topiclist"><li class="header"><dl class="row-item"><dt><div class="list-inner">Episode</div></dt><dd>Mem</dd><dd>Files</dd><dd class="lastpost">Last Activity</dd></dl></li></ul>';
+        html += '<ul class="topiclist forums">';
         html += episodes.map(function(ep, idx) {
             var concepts = (ep.concepts || []).slice(0, 4);
             var memCount = (ep.raw_memory_ids || []).length;
@@ -2127,28 +2148,33 @@
             var epTitle = ep.title || (ep.state === 'open' ? 'Episode in progress\u2026' : 'Untitled Episode');
             var isNew = ep.state === 'open';
             var tone = ep.emotional_tone || ep.outcome || '';
-            var tags = concepts.map(function(c) { return '<span class="frow-tag">' + escapeHtml(c) + '</span>'; }).join('');
-            var sub = ep.summary ? escapeHtml(ep.summary).substring(0, 80) : '';
-            if (tags) sub += ' ' + tags;
+            var tags = concepts.map(function(c) { return '<span class="forum-tag">' + escapeHtml(c) + '</span>'; }).join('');
+            var sub = ep.summary ? escapeHtml(ep.summary).substring(0, 100) : '';
             var expandId = 'exp-ep-' + idx;
+            var bgClass = idx % 2 === 0 ? 'bg1' : 'bg2';
 
-            var row = '<div class="frow frow-ep" onclick="toggle(\'' + expandId + '\')">';
-            row += '<div class="frow-icon icon-ep' + (isNew ? ' icon-new' : '') + '">EP</div>';
-            row += '<div class="frow-content"><span class="frow-title">' + escapeHtml(epTitle) + '</span><div class="frow-sub">' + sub + '</div></div>';
-            row += '<div class="frow-stat">' + memCount + '</div>';
-            row += '<div class="frow-stat">' + fileCount + '</div>';
-            row += '<div class="frow-last"><div class="frow-last-time">' + dateStr + '</div><div class="frow-last-via">' + escapeHtml(tone) + '</div></div>';
-            row += '</div>';
+            var row = '<li class="row ' + bgClass + '" onclick="toggle(\'' + expandId + '\')">';
+            row += '<dl class="row-item"><dt>';
+            row += '<a class="row-item-link"><span class="status-icon icon-ep' + (isNew ? ' unread' : '') + '">EP</span></a>';
+            row += '<div class="list-inner">';
+            row += '<a class="forumtitle">' + escapeHtml(epTitle) + '</a>';
+            row += '<span class="forum-desc">' + sub + ' ' + tags + '</span>';
+            row += '</div></dt>';
+            row += '<dd>' + memCount + ' <dfn>memories</dfn></dd>';
+            row += '<dd>' + fileCount + ' <dfn>files</dfn></dd>';
+            row += '<dd class="lastpost"><span class="lastpost-time">' + dateStr + '</span><br><span class="lastpost-by">' + escapeHtml(tone) + '</span></dd>';
+            row += '</dl></li>';
 
-            // Expandable zone with nested memories
+            // Expandable zone
             row += '<div class="expand-zone" id="' + expandId + '">';
-            row += '<div class="expand-header"><span>' + memCount + ' memories in this episode</span><a href="#" onclick="event.preventDefault();event.stopPropagation();loadThread(\'' + escapeHtml(ep.id) + '\')">View full thread &rarr;</a></div>';
+            row += '<div class="expand-header"><span>' + memCount + ' observations in this episode</span><a href="#" onclick="event.preventDefault();event.stopPropagation();loadThread(\'' + escapeHtml(ep.id) + '\')">View full thread &rarr;</a></div>';
             if (ep.narrative) {
-                row += '<div style="padding:6px 10px 6px 46px;font-size:0.85rem;color:var(--text-secondary);border-bottom:1px solid var(--border-subtle)">' + escapeHtml(ep.narrative) + '</div>';
+                row += '<div style="padding:6px 10px 6px 42px;font-size:0.82rem;color:var(--text-secondary);border-bottom:1px solid var(--border-subtle)">' + escapeHtml(ep.narrative) + '</div>';
             }
             row += '</div>';
             return row;
         }).join('');
+        html += '</ul>';
         section.innerHTML = html;
     }
 
@@ -2156,8 +2182,9 @@
         var data = await fetchJSON('/memories?limit=50&state=active');
         var memories = data.memories || [];
         if (memories.length === 0) { section.innerHTML = '<div class="empty-state"><div class="empty-state-icon">&#129504;</div><div class="empty-state-text">No memories yet</div><div class="empty-state-sub">Use the Remember panel to add your first memory</div></div>'; return; }
-        var html = '<div class="colh colh-mem"><span></span><span>Memory</span><span>Sal</span><span>Links</span><span>Created</span></div>';
-        html += memories.map(function(m) {
+        var html = '<ul class="topiclist"><li class="header"><dl class="row-item"><dt><div class="list-inner">Memory</div></dt><dd>Sal</dd><dd>Links</dd><dd class="lastpost">Created</dd></dl></li></ul>';
+        html += '<ul class="topiclist forums">';
+        html += memories.map(function(m, idx) {
             var type = memoryType(m);
             var typeAbbr = memoryTypeAbbr(type);
             var iconClass = memoryTypeIcon(type);
@@ -2165,34 +2192,38 @@
             var salClass = salPct >= 60 ? 'sal-hi' : salPct >= 30 ? 'sal-mid' : 'sal-lo';
             var linkCount = m.association_count || 0;
             var dateStr = m.created_at ? new Date(m.created_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '';
-            var dateDay = m.created_at ? relativeTime(new Date(m.created_at)) : '';
             var summary = m.summary || m.content || '';
             var concepts = (m.concepts || []).slice(0, 4);
-            var tags = concepts.map(function(c) { return '<span class="frow-tag">' + escapeHtml(c) + '</span>'; }).join('');
+            var tags = concepts.map(function(c) { return '<span class="forum-tag">' + escapeHtml(c) + '</span>'; }).join('');
             var source = m.source || 'mcp';
+            var bgClass = idx % 2 === 0 ? 'bg1' : 'bg2';
 
-            var row = '<div class="frow frow-mem ' + salClass + '" onclick="toggleExpand(this)">';
-            row += '<div class="frow-icon ' + iconClass + '">' + typeAbbr + '</div>';
-            row += '<div class="frow-content"><span class="frow-title">' + escapeHtml(summary) + '</span>';
-            row += '<div class="frow-sub">' + tags + '</div></div>';
-            row += '<div class="frow-stat">' + salPct + '%</div>';
-            row += '<div class="frow-stat">' + linkCount + '</div>';
-            row += '<div class="frow-last"><div class="frow-last-time">' + dateStr + '</div><div class="frow-last-via">' + escapeHtml(source) + '</div></div>';
-            row += '</div>';
+            var row = '<li class="row ' + bgClass + ' ' + salClass + '" onclick="toggleExpand(this)">';
+            row += '<dl class="row-item"><dt>';
+            row += '<a class="row-item-link"><span class="status-icon ' + iconClass + '">' + typeAbbr + '</span></a>';
+            row += '<div class="list-inner">';
+            row += '<a class="forumtitle">' + escapeHtml(summary) + '</a>';
+            row += '<span class="forum-desc"><span class="forum-tags">' + tags + '</span></span>';
+            row += '</div></dt>';
+            row += '<dd>' + salPct + '% <dfn>salience</dfn></dd>';
+            row += '<dd>' + linkCount + ' <dfn>links</dfn></dd>';
+            row += '<dd class="lastpost"><span class="lastpost-time">' + dateStr + '</span><br><span class="lastpost-by">' + escapeHtml(source) + '</span></dd>';
+            row += '</dl></li>';
 
             // Expandable detail
             row += '<div class="expand-zone">';
             if (m.content && m.content !== summary) {
-                row += '<div style="padding:6px 10px 6px 46px;font-size:0.85rem;color:var(--text-secondary);border-bottom:1px solid var(--border-subtle)">' + escapeHtml(m.content) + '</div>';
+                row += '<div style="padding:6px 10px 6px 42px;font-size:0.82rem;color:var(--text-secondary);border-bottom:1px solid var(--border-subtle)">' + escapeHtml(m.content) + '</div>';
             }
-            row += '<div style="padding:4px 10px 4px 46px;font-size:0.75rem;color:var(--text-dim)">';
+            row += '<div style="padding:4px 10px 4px 42px;font-size:0.72rem;color:var(--text-dim)">';
             row += 'ID: <span style="cursor:pointer" onclick="event.stopPropagation();navigator.clipboard.writeText(\'' + escapeHtml(m.id || '') + '\');showToast(\'ID copied\')">' + escapeHtml((m.id || '').substring(0, 8)) + '...</span>';
-            if (m.project) row += ' · Project: ' + escapeHtml(m.project);
-            if (m.access_count > 0) row += ' · Recalled ' + m.access_count + 'x';
-            row += ' · ' + escapeHtml(m.state || 'active');
+            if (m.project) row += ' &middot; Project: ' + escapeHtml(m.project);
+            if (m.access_count > 0) row += ' &middot; Recalled ' + m.access_count + 'x';
+            row += ' &middot; ' + escapeHtml(m.state || 'active');
             row += '</div></div>';
             return row;
         }).join('');
+        html += '</ul>';
         section.innerHTML = html;
     }
 
