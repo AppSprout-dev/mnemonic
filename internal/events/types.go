@@ -248,11 +248,12 @@ func (e ForumPostCreated) EventTimestamp() time.Time { return e.Ts }
 const TypeForumMentionDetected = "forum_mention_detected"
 
 type ForumMentionDetected struct {
-	PostID   string    `json:"post_id"`
-	ThreadID string    `json:"thread_id"`
-	AgentKey string    `json:"agent_key"` // "retrieval", "metacognition", etc.
-	Content  string    `json:"content"`   // the post text for context
-	Ts       time.Time `json:"timestamp"`
+	PostID    string    `json:"post_id"`
+	ThreadID  string    `json:"thread_id"`
+	AgentKey  string    `json:"agent_key"`            // "retrieval", "metacognition", etc.
+	Content   string    `json:"content"`              // the post text for context
+	EpisodeID string    `json:"episode_id,omitempty"` // if the mention is from an episode thread
+	Ts        time.Time `json:"timestamp"`
 }
 
 func (e ForumMentionDetected) EventType() string         { return TypeForumMentionDetected }

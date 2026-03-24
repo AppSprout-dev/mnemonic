@@ -180,7 +180,52 @@ func (a *CreateForumPostAction) Execute(ctx context.Context, trigger events.Even
 
 // buildAgentContext pulls real data from the store for the mentioned agent.
 // Returns a string to append to the LLM system prompt, or empty if no data available.
-func buildAgentContext(ctx context.Context, agentKey string, query string, s store.Store, querier ForumQuerier) string {
+func buildAgentContext(ctx context.Context, agentKey string, query string, s store.Store, querier ForumQuerier, episodeID ...string) string {
+	// If we have an episode ID, prepend episode context for ALL agents
+	if len(episodeID) > 0 && episodeID[0] != "" {
+		ep, err := s.GetEpisode(ctx, episodeID[0])
+		if err == nil {
+			var eb strings.Builder
+			fmt.Fprintf(&eb, "The user is asking about this specific episode:\n")
+			fmt.Fprintf(&eb, "Title: %s\n", ep.Title)
+			fmt.Fprintf(&eb, "State: %s, Mood: %s, Project: %s\n", ep.State, ep.EmotionalTone, ep.Project)
+			fmt.Fprintf(&eb, "Duration: %ds, Raw observations: %d, Encoded memories: %d\n", ep.DurationSec, len(ep.RawMemoryIDs), len(ep.MemoryIDs))
+			if ep.Summary != "" {
+				fmt.Fprintf(&eb, "Summary: %s\n", ep.Summary)
+			}
+			if ep.Narrative != "" {
+				fmt.Fprintf(&eb, "Narrative: %s\n", ep.Narrative)
+			}
+			if len(ep.Concepts) > 0 {
+				fmt.Fprintf(&eb, "Concepts: %s\n", strings.Join(ep.Concepts, ", "))
+			}
+			if len(ep.FilesModified) > 0 {
+				fmt.Fprintf(&eb, "Files: %s\n", strings.Join(ep.FilesModified, ", "))
+			}
+			// Also fetch the encoded memories linked to this episode
+			mems, _ := s.ListMemories(ctx, "active", 50, 0)
+			var epMems []store.Memory
+			for _, m := range mems {
+				if m.EpisodeID == episodeID[0] {
+					epMems = append(epMems, m)
+				}
+			}
+			if len(epMems) > 0 {
+				eb.WriteString("Encoded memories in this episode:\n")
+				for i, m := range epMems {
+					fmt.Fprintf(&eb, "%d. [%s, salience:%.2f] %s\n", i+1, m.Type, m.Salience, m.Summary)
+				}
+			}
+			eb.WriteString("\n")
+			// Prepend episode context to whatever agent-specific context follows
+			agentSpecific := buildAgentSpecificContext(ctx, agentKey, query, s, querier)
+			return eb.String() + agentSpecific
+		}
+	}
+	return buildAgentSpecificContext(ctx, agentKey, query, s, querier)
+}
+
+func buildAgentSpecificContext(ctx context.Context, agentKey string, query string, s store.Store, querier ForumQuerier) string {
 	switch agentKey {
 	case "retrieval":
 		if querier == nil {
@@ -234,7 +279,7 @@ func buildAgentContext(ctx context.Context, agentKey string, query string, s sto
 		return b.String()
 
 	case "episoding":
-		episodes, _ := s.ListEpisodes(ctx, "", 5, 0)
+		episodes, _ := s.ListEpisodes(ctx, "", 10, 0)
 		if len(episodes) == 0 {
 			return "No episodes available."
 		}
@@ -245,8 +290,11 @@ func buildAgentContext(ctx context.Context, agentKey string, query string, s sto
 			if ep.DurationSec > 0 {
 				dur = fmt.Sprintf(" (%dm)", ep.DurationSec/60)
 			}
-			fmt.Fprintf(&b, "%d. [%s] %s%s — %d memories, mood: %s\n",
-				i+1, ep.State, ep.Title, dur, len(ep.MemoryIDs), ep.EmotionalTone)
+			fmt.Fprintf(&b, "%d. [%s] %s%s — %d raw obs, %d memories, mood: %s, project: %s\n",
+				i+1, ep.State, ep.Title, dur, len(ep.RawMemoryIDs), len(ep.MemoryIDs), ep.EmotionalTone, ep.Project)
+			if ep.Summary != "" {
+				fmt.Fprintf(&b, "   Summary: %s\n", ep.Summary)
+			}
 		}
 		return b.String()
 
@@ -371,7 +419,7 @@ func (a *RespondToMentionAction) Execute(ctx context.Context, trigger events.Eve
 		systemPrompt.WriteString("Do not use markdown formatting. Be direct and informative.")
 
 		// Inject real data based on which agent is being mentioned
-		agentData := buildAgentContext(ctx, mention.AgentKey, mention.Content, state.Store, a.ForumQuerier)
+		agentData := buildAgentContext(ctx, mention.AgentKey, mention.Content, state.Store, a.ForumQuerier, mention.EpisodeID)
 		if agentData != "" {
 			systemPrompt.WriteString("\n\n" + agentData)
 		}

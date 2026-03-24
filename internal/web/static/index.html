@@ -1832,6 +1832,7 @@
     // ── Thread View (episode detail as forum posts) ──
     async function loadThread(episodeId) {
         state.currentView = 'thread';
+        state.currentEpisodeId = episodeId;
         document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
         document.querySelectorAll('.ntab').forEach(t => t.classList.remove('active'));
         var threadView = document.getElementById('view-thread');
@@ -1840,7 +1841,13 @@
 
         // Update breadcrumbs
         var crumbs = document.getElementById('breadcrumbs');
-        if (crumbs) crumbs.innerHTML = '<a href="#" onclick="switchView(\'explore\')">mnemonic</a><span class="sep">›</span> <a href="#" onclick="switchView(\'explore\')">Forum</a><span class="sep">›</span> Episode';
+        if (crumbs) crumbs.innerHTML = '<a href="#" onclick="switchView(\'explore\')">mnemonic</a><span class="sep">›</span> <a href="#" onclick="window._loadMemSec(\'episodes\')">Episodes</a><span class="sep">›</span> Episode';
+
+        // Show compose box and set up a forum thread for this episode
+        var compose = document.getElementById('threadCompose');
+        if (compose) { compose.style.display = ''; ensureMentionAutocomplete('threadReplyContent'); }
+        // Use episode ID as the forum thread ID so replies and @mentions work
+        state.currentForumThread = 'episode-' + episodeId;
 
         var container = document.getElementById('threadContent');
         container.innerHTML = '<div style="padding:16px;color:var(--text-dim)">Loading thread...</div>';
@@ -5078,6 +5085,7 @@
 
     async function loadForumThread(threadId) {
         state.currentForumThread = threadId;
+        state.currentEpisodeId = ''; // clear — this is a forum thread, not an episode
         state.currentView = 'thread';
         markThreadRead(threadId);
         // Show thread view
@@ -5265,7 +5273,7 @@
             await fetch('/api/v1/forum/posts', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ content: content, thread_id: state.currentForumThread })
+                body: JSON.stringify({ content: content, thread_id: state.currentForumThread, episode_id: state.currentEpisodeId || '' })
             });
             textarea.value = '';
             textarea.disabled = false;

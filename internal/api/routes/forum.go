@@ -39,6 +39,7 @@ type CreateForumPostRequest struct {
 	ThreadID   string `json:"thread_id,omitempty"`   // empty = new thread
 	ParentID   string `json:"parent_id,omitempty"`   // empty = reply to thread root
 	CategoryID string `json:"category_id,omitempty"` // sub-forum for new threads (default: "discussions")
+	EpisodeID  string `json:"episode_id,omitempty"`  // if posting from an episode thread view
 }
 
 // HandleListForumCategories returns the forum index with category summaries.
@@ -214,11 +215,12 @@ func HandleCreateForumPost(s store.Store, bus events.Bus, log *slog.Logger) http
 		// Publish mention events for each @agent
 		for _, agentKey := range mentions {
 			_ = bus.Publish(ctx, events.ForumMentionDetected{
-				PostID:   postID,
-				ThreadID: threadID,
-				AgentKey: agentKey,
-				Content:  content,
-				Ts:       now,
+				PostID:    postID,
+				ThreadID:  threadID,
+				AgentKey:  agentKey,
+				Content:   content,
+				EpisodeID: req.EpisodeID,
+				Ts:        now,
 			})
 		}
 
