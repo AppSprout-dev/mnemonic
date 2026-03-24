@@ -29,6 +29,7 @@ type Config struct {
 	Abstraction    AbstractionConfig    `yaml:"abstraction"`
 	Orchestrator   OrchestratorConfig   `yaml:"orchestrator"`
 	Reactor        ReactorConfig        `yaml:"reactor"`
+	Forum          ForumConfig          `yaml:"forum"`
 	MemoryDefaults MemoryDefaultsConfig `yaml:"memory_defaults"`
 	MCP            MCPConfig            `yaml:"mcp"`
 	AgentSDK       AgentSDKConfig       `yaml:"agent_sdk"`
@@ -362,6 +363,14 @@ type OrchestratorConfig struct {
 // ReactorConfig configures the event-driven reactor engine.
 type ReactorConfig struct {
 	Cooldowns map[string]string `yaml:"cooldowns"` // chain ID -> duration string (e.g., "30m", "1h")
+}
+
+// ForumConfig holds settings for the forum communication layer.
+type ForumConfig struct {
+	AgentPosting     bool    `yaml:"agent_posting"`       // agents auto-post on events (default: true)
+	MentionResponses bool    `yaml:"mention_responses"`   // @mention triggers LLM response (default: true)
+	MentionMaxTokens int     `yaml:"mention_max_tokens"`  // max tokens for @mention LLM responses (default: 512)
+	MentionTemp      float64 `yaml:"mention_temperature"` // temperature for @mention LLM responses (default: 0.7)
 }
 
 // MemoryDefaultsConfig holds shared defaults used by both MCP and API.
@@ -766,6 +775,12 @@ func Default() *Config {
 			HealthReportInterval:    5 * time.Minute,
 		},
 		Reactor: ReactorConfig{},
+		Forum: ForumConfig{
+			AgentPosting:     true,
+			MentionResponses: true,
+			MentionMaxTokens: 512,
+			MentionTemp:      0.7,
+		},
 		MemoryDefaults: MemoryDefaultsConfig{
 			InitialSalienceGeneral:  0.7,
 			InitialSalienceDecision: 0.85,

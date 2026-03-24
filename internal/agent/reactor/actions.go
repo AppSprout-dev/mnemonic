@@ -184,6 +184,8 @@ func querySimple(ctx context.Context, q ForumQuerier, query string, limit int) [
 type RespondToMentionAction struct {
 	LLM          llm.Provider
 	ForumQuerier ForumQuerier // can be nil
+	MaxTokens    int          // from config (default: 512)
+	Temperature  float64      // from config (default: 0.7)
 	Log          *slog.Logger
 }
 
@@ -230,8 +232,8 @@ func (a *RespondToMentionAction) Execute(ctx context.Context, trigger events.Eve
 				{Role: "system", Content: systemPrompt.String()},
 				{Role: "user", Content: mention.Content},
 			},
-			MaxTokens:   512,
-			Temperature: 0.7,
+			MaxTokens:   a.MaxTokens,
+			Temperature: float32(a.Temperature),
 		})
 		if err != nil {
 			content = fmt.Sprintf("%s encountered an error processing your mention. Try again later.", personality.Name)

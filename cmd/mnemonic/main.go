@@ -1679,6 +1679,10 @@ func serveCommand(configPath string) {
 		if orch != nil {
 			deps.IncrementAutonomous = orch.IncrementAutonomousCount
 		}
+		deps.ForumAgentPosting = cfg.Forum.AgentPosting
+		deps.ForumMentionResponses = cfg.Forum.MentionResponses
+		deps.ForumMentionMaxTokens = cfg.Forum.MentionMaxTokens
+		deps.ForumMentionTemp = cfg.Forum.MentionTemp
 		deps.MentionLLM = llmProvider
 		if retriever != nil {
 			deps.MentionQuery = retriever
