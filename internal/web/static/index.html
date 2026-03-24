@@ -1837,9 +1837,10 @@
     function switchView(name) {
         state.currentView = name;
         document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-        document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.nav-tab, .ntab').forEach(t => t.classList.remove('active'));
         document.getElementById('view-' + name).classList.add('active');
-        document.querySelector('.nav-tab[data-view="' + name + '"]').classList.add('active');
+        var tab = document.querySelector('.ntab[data-view="' + name + '"]') || document.querySelector('.nav-tab[data-view="' + name + '"]');
+        if (tab) tab.classList.add('active');
         window.location.hash = name;
         if (name === 'explore' && !state.exploreLoaded[state.currentExploreTab]) loadExploreTab(state.currentExploreTab);
         if (name === 'timeline' && !state.timelineInitialized) { populateTimelineProjects(); loadTimelineData(false); }
@@ -3352,7 +3353,8 @@
             errEl.style.color = (s.error_count || 0) > 0 ? 'var(--accent-red)' : '';
 
             document.getElementById('llmUpdated').textContent = 'Updated ' + new Date().toLocaleTimeString();
-            document.getElementById('navTokenCount').textContent = (s.total_tokens || 0).toLocaleString();
+            var ntc = document.getElementById('navTokenCount');
+            if (ntc) ntc.textContent = (s.total_tokens || 0).toLocaleString();
 
             var log = data.log || [];
 
@@ -3430,7 +3432,9 @@
 
             renderLLMChart(data.chart_buckets || [], _llmRange);
         } catch (e) {
-            document.getElementById('llmRequests').textContent = 'ERR';
+            console.error('loadLLMUsage error:', e);
+            var el = document.getElementById('llmRequests');
+            if (el) el.textContent = 'ERR';
         }
     }
 
