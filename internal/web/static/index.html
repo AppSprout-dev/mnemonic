@@ -2880,10 +2880,13 @@
             var results = await Promise.all([apiFetch(CONFIG.API_BASE + '/health'), apiFetch(CONFIG.API_BASE + '/stats')]);
             var health = await results[0].json();
             var stats = await results[1].json();
-            document.getElementById('navMemoryCount').textContent = (stats.store && stats.store.active_memories) || health.memory_count || 0;
-            var dot = document.getElementById('navHealth');
-            dot.className = health.status === 'ok' ? 'nav-health' : 'nav-health degraded';
-            dot.title = health.status === 'ok' ? 'System healthy' : 'System degraded';
+            var mc = document.getElementById('navMemoryCount');
+            if (mc) mc.textContent = (stats.store && stats.store.active_memories) || health.memory_count || 0;
+            var dot = document.getElementById('healthDot') || document.getElementById('navHealth');
+            if (dot) {
+                dot.className = health.status === 'ok' ? 'nav-health' : 'nav-health degraded';
+                dot.title = health.status === 'ok' ? 'daemon online' : 'degraded';
+            }
             if (health.version) {
                 var vEl = document.getElementById('navVersion');
                 if (vEl) vEl.textContent = 'v' + health.version;
