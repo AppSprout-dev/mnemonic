@@ -1918,10 +1918,10 @@
             var score = mem.score || 0;
             var scoreClass = score > 0.7 ? 'rr-score-hi' : score > 0.4 ? 'rr-score-mid' : 'rr-score-lo';
             var m = mem.memory;
-            var type = (m.type || 'general').toLowerCase();
-            var typeAbbr = type === 'insight' ? 'IN' : type === 'decision' ? 'DE' : type === 'learning' ? 'LE' : type === 'error' ? 'ER' : 'GN';
-            var iconClass = type === 'insight' ? 'icon-in' : type === 'decision' ? 'icon-de' : type === 'learning' ? 'icon-le' : type === 'error' ? 'icon-er' : 'icon-ep';
-            var salPct = Math.round((m.salience || 0) * 100);
+            var type = memoryType(m);
+            var typeAbbr = memoryTypeAbbr(type);
+            var iconClass = memoryTypeIcon(type);
+            var salPct = safeSalience(m.salience);
             var linkCount = m.association_count || 0;
             var dateStr = m.created_at ? new Date(m.created_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '';
             var summary = m.summary || (m.content || '').slice(0, 150);
@@ -1997,9 +1997,9 @@
             if (memories.length > 0) {
 
                 memories.forEach(function(m, idx) {
-                    var type = (m.type || m.memory_type || 'general').toLowerCase();
+                    var type = memoryType(m);
                     var typeBadgeClass = 'post-type-badge--' + type;
-                    var salPct = Math.round((m.salience || 0) * 100);
+                    var salPct = safeSalience(m.salience);
                     var linkCount = m.association_count || 0;
                     var source = m.source || 'mcp';
                     var time = m.created_at ? new Date(m.created_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '';
@@ -2158,10 +2158,10 @@
         if (memories.length === 0) { section.innerHTML = '<div class="empty-state"><div class="empty-state-icon">&#129504;</div><div class="empty-state-text">No memories yet</div><div class="empty-state-sub">Use the Remember panel to add your first memory</div></div>'; return; }
         var html = '<div class="colh colh-mem"><span></span><span>Memory</span><span>Sal</span><span>Links</span><span>Created</span></div>';
         html += memories.map(function(m) {
-            var type = (m.type || 'general').toLowerCase();
-            var typeAbbr = type === 'insight' ? 'IN' : type === 'decision' ? 'DE' : type === 'learning' ? 'LE' : type === 'error' ? 'ER' : 'GN';
-            var iconClass = type === 'insight' ? 'icon-in' : type === 'decision' ? 'icon-de' : type === 'learning' ? 'icon-le' : type === 'error' ? 'icon-er' : 'icon-ep';
-            var salPct = Math.round((m.salience || 0) * 100);
+            var type = memoryType(m);
+            var typeAbbr = memoryTypeAbbr(type);
+            var iconClass = memoryTypeIcon(type);
+            var salPct = safeSalience(m.salience);
             var salClass = salPct >= 60 ? 'sal-hi' : salPct >= 30 ? 'sal-mid' : 'sal-lo';
             var linkCount = m.association_count || 0;
             var dateStr = m.created_at ? new Date(m.created_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '';
@@ -4585,6 +4585,16 @@
 
     // ── Utilities ──
     function escapeHtml(str) { if (!str) return ''; var div = document.createElement('div'); div.textContent = str; return div.innerHTML; }
+
+    // Map raw source event types to display types
+    var _sourceTypeMap = { file_created: 'general', file_modified: 'general', repo_changed: 'general', clipboard: 'general', command_run: 'general', handoff: 'general' };
+    function memoryType(m) {
+        var raw = (m.type || m.memory_type || 'general').toLowerCase();
+        return _sourceTypeMap[raw] || raw;
+    }
+    function memoryTypeAbbr(type) { return type === 'insight' ? 'IN' : type === 'decision' ? 'DE' : type === 'learning' ? 'LE' : type === 'error' ? 'ER' : 'GN'; }
+    function memoryTypeIcon(type) { return type === 'insight' ? 'icon-in' : type === 'decision' ? 'icon-de' : type === 'learning' ? 'icon-le' : type === 'error' ? 'icon-er' : 'icon-ep'; }
+    function safeSalience(s) { return Math.min(100, Math.round((s || 0) * 100)); }
     function simpleMarkdown(str) {
         if (!str) return '';
         var lines = str.split('\n');
