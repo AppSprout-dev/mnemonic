@@ -1683,6 +1683,7 @@ func serveCommand(configPath string) {
 		deps.ForumMentionResponses = cfg.Forum.MentionResponses
 		deps.ForumMentionMaxTokens = cfg.Forum.MentionMaxTokens
 		deps.ForumMentionTemp = cfg.Forum.MentionTemp
+		deps.ForumPerAgentSubforums = cfg.Forum.PerAgentSubforums
 		deps.MentionLLM = llmProvider
 		if retriever != nil {
 			deps.MentionQuery = retriever

@@ -367,10 +367,11 @@ type ReactorConfig struct {
 
 // ForumConfig holds settings for the forum communication layer.
 type ForumConfig struct {
-	AgentPosting     bool    `yaml:"agent_posting"`       // agents auto-post on events (default: true)
-	MentionResponses bool    `yaml:"mention_responses"`   // @mention triggers LLM response (default: true)
-	MentionMaxTokens int     `yaml:"mention_max_tokens"`  // max tokens for @mention LLM responses (default: 512)
-	MentionTemp      float64 `yaml:"mention_temperature"` // temperature for @mention LLM responses (default: 0.7)
+	AgentPosting      bool    `yaml:"agent_posting"`       // agents auto-post on events (default: true)
+	MentionResponses  bool    `yaml:"mention_responses"`   // @mention triggers LLM response (default: true)
+	MentionMaxTokens  int     `yaml:"mention_max_tokens"`  // max tokens for @mention LLM responses (default: 512)
+	MentionTemp       float64 `yaml:"mention_temperature"` // temperature for @mention LLM responses (default: 0.7)
+	PerAgentSubforums bool    `yaml:"per_agent_subforums"` // route to per-agent sub-forums (default: true); false = shared "Agent Activity"
 }
 
 // MemoryDefaultsConfig holds shared defaults used by both MCP and API.
@@ -776,10 +777,11 @@ func Default() *Config {
 		},
 		Reactor: ReactorConfig{},
 		Forum: ForumConfig{
-			AgentPosting:     true,
-			MentionResponses: true,
-			MentionMaxTokens: 512,
-			MentionTemp:      0.7,
+			AgentPosting:      true,
+			MentionResponses:  true,
+			MentionMaxTokens:  512,
+			MentionTemp:       0.7,
+			PerAgentSubforums: true,
 		},
 		MemoryDefaults: MemoryDefaultsConfig{
 			InitialSalienceGeneral:  0.7,

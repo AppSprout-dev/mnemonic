@@ -154,6 +154,7 @@ func (s *Server) registerRoutes() {
 	}
 
 	// Forum
+	s.mux.HandleFunc("GET /api/v1/forum/categories", routes.HandleListForumCategories(s.deps.Store, s.deps.Log))
 	s.mux.HandleFunc("GET /api/v1/forum/threads", routes.HandleListForumThreads(s.deps.Store, s.deps.Log))
 	s.mux.HandleFunc("GET /api/v1/forum/threads/{id}", routes.HandleGetForumThread(s.deps.Store, s.deps.Log))
 	s.mux.HandleFunc("POST /api/v1/forum/posts", routes.HandleCreateForumPost(s.deps.Store, s.deps.Bus, s.deps.Log))

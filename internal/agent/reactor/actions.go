@@ -109,7 +109,8 @@ func (a *IncrementCounterAction) Execute(_ context.Context, _ events.Event, _ *R
 
 // CreateForumPostAction writes a forum post from an agent personality template.
 type CreateForumPostAction struct {
-	Log *slog.Logger
+	PerAgentSubforums bool // route to per-agent sub-forums; false = shared category
+	Log               *slog.Logger
 }
 
 func (a *CreateForumPostAction) Name() string { return "create_forum_post" }
@@ -128,6 +129,12 @@ func (a *CreateForumPostAction) Execute(ctx context.Context, trigger events.Even
 	postID := uuid.New().String()
 	now := time.Now()
 
+	// Determine category: per-agent sub-forum or shared
+	categoryID := "agent-" + agentKey
+	if !a.PerAgentSubforums {
+		categoryID = "system-reports"
+	}
+
 	post := store.ForumPost{
 		ID:         postID,
 		ThreadID:   postID, // each agent post is a new thread
@@ -136,6 +143,7 @@ func (a *CreateForumPostAction) Execute(ctx context.Context, trigger events.Even
 		AuthorKey:  personality.Key,
 		Content:    content,
 		EventRef:   trigger.EventType(),
+		CategoryID: categoryID,
 		State:      "active",
 		CreatedAt:  now,
 		UpdatedAt:  now,

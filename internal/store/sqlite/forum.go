@@ -9,8 +9,96 @@ import (
 	store "github.com/appsprout-dev/mnemonic/internal/store"
 )
 
+// forumCategoryColumns is the standard column list for forum category queries.
+const forumCategoryColumns = `id, name, slug, description, icon, color, type, sort_order, created_at`
+
+// WriteForumCategory inserts a new forum category.
+func (s *SQLiteStore) WriteForumCategory(ctx context.Context, cat store.ForumCategory) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT OR IGNORE INTO forum_categories (`+forumCategoryColumns+`)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		cat.ID, cat.Name, cat.Slug, cat.Description, cat.Icon, cat.Color, cat.Type, cat.SortOrder,
+		cat.CreatedAt.Format(time.RFC3339),
+	)
+	if err != nil {
+		return fmt.Errorf("writing forum category: %w", err)
+	}
+	return nil
+}
+
+// GetForumCategory retrieves a forum category by ID.
+func (s *SQLiteStore) GetForumCategory(ctx context.Context, id string) (store.ForumCategory, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT `+forumCategoryColumns+` FROM forum_categories WHERE id = ?`, id)
+	var cat store.ForumCategory
+	var createdAtStr string
+	err := row.Scan(&cat.ID, &cat.Name, &cat.Slug, &cat.Description, &cat.Icon, &cat.Color, &cat.Type, &cat.SortOrder, &createdAtStr)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return cat, fmt.Errorf("forum category: %w", store.ErrNotFound)
+		}
+		return cat, fmt.Errorf("scanning forum category: %w", err)
+	}
+	cat.CreatedAt, _ = time.Parse(time.RFC3339, createdAtStr)
+	return cat, nil
+}
+
+// ListForumCategories returns all categories ordered by sort_order.
+func (s *SQLiteStore) ListForumCategories(ctx context.Context) ([]store.ForumCategory, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+forumCategoryColumns+` FROM forum_categories ORDER BY sort_order ASC, name ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("listing forum categories: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var cats []store.ForumCategory
+	for rows.Next() {
+		var cat store.ForumCategory
+		var createdAtStr string
+		if err := rows.Scan(&cat.ID, &cat.Name, &cat.Slug, &cat.Description, &cat.Icon, &cat.Color, &cat.Type, &cat.SortOrder, &createdAtStr); err != nil {
+			return nil, fmt.Errorf("scanning forum category row: %w", err)
+		}
+		cat.CreatedAt, _ = time.Parse(time.RFC3339, createdAtStr)
+		cats = append(cats, cat)
+	}
+	return cats, rows.Err()
+}
+
+// ListForumCategorySummaries returns all categories with thread/post counts and last post.
+func (s *SQLiteStore) ListForumCategorySummaries(ctx context.Context) ([]store.ForumCategorySummary, error) {
+	cats, err := s.ListForumCategories(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var summaries []store.ForumCategorySummary
+	for _, cat := range cats {
+		var threadCount, postCount int
+		_ = s.db.QueryRowContext(ctx,
+			`SELECT COUNT(DISTINCT thread_id), COUNT(*) FROM forum_posts WHERE category_id = ? AND state = 'active'`, cat.ID).Scan(&threadCount, &postCount)
+
+		summary := store.ForumCategorySummary{
+			Category:    cat,
+			ThreadCount: threadCount,
+			PostCount:   postCount,
+		}
+
+		// Get last post in this category
+		row := s.db.QueryRowContext(ctx,
+			`SELECT `+forumPostColumns+` FROM forum_posts WHERE category_id = ? AND state = 'active' ORDER BY created_at DESC LIMIT 1`, cat.ID)
+		lastPost, err := scanForumPostFrom(row)
+		if err == nil {
+			summary.LastPost = &lastPost
+		}
+
+		summaries = append(summaries, summary)
+	}
+	return summaries, nil
+}
+
 // forumPostColumns is the standard column list for forum post queries.
-const forumPostColumns = `id, parent_id, thread_id, author_type, author_name, author_key, content, mentions, memory_ids, event_ref, pinned, state, created_at, updated_at`
+const forumPostColumns = `id, parent_id, thread_id, author_type, author_name, author_key, content, mentions, memory_ids, event_ref, category_id, pinned, state, created_at, updated_at`
 
 // WriteForumPost inserts a new forum post.
 func (s *SQLiteStore) WriteForumPost(ctx context.Context, post store.ForumPost) error {
@@ -23,7 +111,7 @@ func (s *SQLiteStore) WriteForumPost(ctx context.Context, post store.ForumPost) 
 
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO forum_posts (`+forumPostColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		post.ID,
 		nullableString(post.ParentID),
 		post.ThreadID,
@@ -34,6 +122,7 @@ func (s *SQLiteStore) WriteForumPost(ctx context.Context, post store.ForumPost) 
 		mentions,
 		memoryIDs,
 		nullableString(post.EventRef),
+		nullableString(post.CategoryID),
 		pinned,
 		post.State,
 		post.CreatedAt.Format(time.RFC3339),
@@ -75,32 +164,50 @@ func (s *SQLiteStore) ListForumThreads(ctx context.Context, limit, offset int) (
 	}
 	defer func() { _ = rows.Close() }()
 
+	return s.scanForumThreadRows(rows)
+}
+
+// ListForumThreadsByCategory returns threads in a specific category.
+func (s *SQLiteStore) ListForumThreadsByCategory(ctx context.Context, categoryID string, limit, offset int) ([]store.ForumThread, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT fp.`+forumPostColumns+`,
+		       COALESCE(rc.reply_count, 0) AS reply_count,
+		       COALESCE(rc.last_reply, fp.created_at) AS last_reply
+		FROM forum_posts fp
+		LEFT JOIN (
+		    SELECT fp2.thread_id AS rc_thread_id,
+		           COUNT(*) AS reply_count,
+		           MAX(fp2.created_at) AS last_reply
+		    FROM forum_posts fp2
+		    WHERE fp2.id != fp2.thread_id AND fp2.state = 'active'
+		    GROUP BY fp2.thread_id
+		) rc ON rc.rc_thread_id = fp.id
+		WHERE fp.id = fp.thread_id AND fp.state = 'active' AND fp.category_id = ?
+		ORDER BY COALESCE(rc.last_reply, fp.created_at) DESC
+		LIMIT ? OFFSET ?`, categoryID, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("listing forum threads by category: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	return s.scanForumThreadRows(rows)
+}
+
+func (s *SQLiteStore) scanForumThreadRows(rows *sql.Rows) ([]store.ForumThread, error) {
 	var threads []store.ForumThread
 	for rows.Next() {
 		var post store.ForumPost
-		var parentID, authorKey, eventRef, mentionsStr, memoryIDsStr sql.NullString
+		var parentID, authorKey, eventRef, categoryID, mentionsStr, memoryIDsStr sql.NullString
 		var pinned int
 		var createdAtStr, updatedAtStr string
 		var replyCount int
 		var lastReply string
 
 		err := rows.Scan(
-			&post.ID,
-			&parentID,
-			&post.ThreadID,
-			&post.AuthorType,
-			&post.AuthorName,
-			&authorKey,
-			&post.Content,
-			&mentionsStr,
-			&memoryIDsStr,
-			&eventRef,
-			&pinned,
-			&post.State,
-			&createdAtStr,
-			&updatedAtStr,
-			&replyCount,
-			&lastReply,
+			&post.ID, &parentID, &post.ThreadID, &post.AuthorType, &post.AuthorName,
+			&authorKey, &post.Content, &mentionsStr, &memoryIDsStr, &eventRef,
+			&categoryID, &pinned, &post.State, &createdAtStr, &updatedAtStr,
+			&replyCount, &lastReply,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scanning forum thread row: %w", err)
@@ -109,6 +216,7 @@ func (s *SQLiteStore) ListForumThreads(ctx context.Context, limit, offset int) (
 		post.ParentID = parentID.String
 		post.AuthorKey = authorKey.String
 		post.EventRef = eventRef.String
+		post.CategoryID = categoryID.String
 		post.Mentions, _ = decodeStringSlice(mentionsStr.String)
 		post.MemoryIDs, _ = decodeStringSlice(memoryIDsStr.String)
 		post.Pinned = pinned != 0
@@ -173,7 +281,7 @@ func (s *SQLiteStore) CountForumPosts(ctx context.Context) (int, error) {
 // scanForumPostFrom scans a single ForumPost from any scanner.
 func scanForumPostFrom(s scanner) (store.ForumPost, error) {
 	var post store.ForumPost
-	var parentID, authorKey, eventRef, mentionsStr, memoryIDsStr sql.NullString
+	var parentID, authorKey, eventRef, categoryID, mentionsStr, memoryIDsStr sql.NullString
 	var pinned int
 	var createdAtStr, updatedAtStr string
 
@@ -188,6 +296,7 @@ func scanForumPostFrom(s scanner) (store.ForumPost, error) {
 		&mentionsStr,
 		&memoryIDsStr,
 		&eventRef,
+		&categoryID,
 		&pinned,
 		&post.State,
 		&createdAtStr,
@@ -200,6 +309,7 @@ func scanForumPostFrom(s scanner) (store.ForumPost, error) {
 	post.ParentID = parentID.String
 	post.AuthorKey = authorKey.String
 	post.EventRef = eventRef.String
+	post.CategoryID = categoryID.String
 	post.Mentions, _ = decodeStringSlice(mentionsStr.String)
 	post.MemoryIDs, _ = decodeStringSlice(memoryIDsStr.String)
 	post.Pinned = pinned != 0

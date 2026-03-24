@@ -1175,17 +1175,8 @@
                         </div>
                     </div>
                 </div>
-                <div class="forabg" id="forumThreads">
-                    <div class="forabg-head" onclick="this.nextElementSibling.classList.toggle('collapsed')">
-                        <span class="forabg-title">Forum Threads</span>
-                        <span class="forabg-meta" id="forumThreadCount"></span>
-                    </div>
-                    <div class="inner" id="forumThreadsBody">
-                        <div style="padding:10px 16px;color:var(--text-dim);font-size:0.85rem">Loading threads...</div>
-                    </div>
-                    <div style="padding:4px 16px 8px">
-                        <button class="recall-btn" style="font-size:0.78rem;padding:3px 10px" onclick="showNewThreadForm()">+ New Thread</button>
-                    </div>
+                <div id="forumIndex">
+                    <div style="padding:10px 16px;color:var(--text-dim);font-size:0.85rem">Loading forum index...</div>
                 </div>
                 <div class="forabg" id="newThreadForm" style="display:none">
                     <div class="forabg-head">
@@ -1193,6 +1184,7 @@
                         <span class="forabg-meta" style="cursor:pointer" onclick="document.getElementById('newThreadForm').style.display='none'">cancel</span>
                     </div>
                     <div class="inner" style="padding:8px 16px">
+                        <select id="newThreadCategory" style="margin-bottom:6px;width:100%;box-sizing:border-box;background:var(--bg-primary);border:1px solid var(--border-subtle);color:var(--text-primary);font-family:inherit;font-size:0.82rem;padding:4px 8px;border-radius:3px"></select>
                         <textarea id="newThreadContent" rows="3" placeholder="Start a conversation... @agent to mention" style="width:100%;box-sizing:border-box;background:var(--bg-primary);border:1px solid var(--border-subtle);color:var(--text-primary);font-family:inherit;font-size:0.85rem;padding:6px 8px;border-radius:3px;resize:vertical"></textarea>
                         <div style="text-align:right;margin-top:4px">
                             <button class="recall-btn" style="font-size:0.78rem;padding:3px 10px" onclick="submitNewThread()">Post Thread</button>
@@ -1733,12 +1725,12 @@
             loadExploreTab('memories');
             loadExploreTab('patterns');
             loadExploreTab('abstractions');
-            loadForumThreads();
+            loadForumIndex();
             // Populate welcome panel
             var wp = document.getElementById('forumWelcome');
             if (wp) wp.style.display = '';
         }
-        if (name === 'explore' && !state.forumLoaded) loadForumThreads();
+        if (name === 'explore' && !state.forumLoaded) loadForumIndex();
         if (name === 'timeline' && !state.timelineInitialized) { populateTimelineProjects(); loadTimelineData(false); }
         if (name === 'agent' && !state.agentLoaded) loadAgentData();
         if (name === 'llm' && !state.llmLoaded) loadLLMUsage();
@@ -1763,6 +1755,11 @@
         if (hash.startsWith('forum-thread/')) {
             var threadId = hash.substring(13);
             if (threadId) loadForumThread(threadId);
+            return;
+        }
+        if (hash.startsWith('forum-category/')) {
+            var catId = hash.substring(15);
+            if (catId) loadForumCategory(catId, catId);
             return;
         }
         if (['recall', 'explore', 'timeline', 'agent', 'llm', 'tools'].includes(hash)) switchView(hash);
@@ -3060,7 +3057,7 @@
                 if (state.currentView === 'explore') {
                     var tab = state.currentExploreTab;
                     if (!state.exploreLoaded[tab]) loadExploreTab(tab);
-                    if (!state.forumLoaded) loadForumThreads();
+                    if (!state.forumLoaded) loadForumIndex();
                 }
                 // Live-insert forum post into current thread view
                 if (type === 'forum_post_created' && state.currentView === 'thread' && state.currentForumThread === payload.thread_id) {
@@ -4688,56 +4685,120 @@
     }
     // ── Forum Communication Layer ──
 
-    async function loadForumThreads() {
+    async function loadForumIndex() {
         try {
-            var resp = await fetch('/api/v1/forum/threads?limit=20');
+            var resp = await fetch('/api/v1/forum/categories');
             var data = await resp.json();
             state.forumLoaded = true;
-            var body = document.getElementById('forumThreadsBody');
-            var countEl = document.getElementById('forumThreadCount');
-            if (!body) return;
-            var threads = data.threads || [];
-            if (countEl) countEl.textContent = threads.length + ' threads · ' + (data.total_posts || 0) + ' posts';
-            if (threads.length === 0) {
-                body.innerHTML = '<div style="padding:10px 16px;color:var(--text-dim);font-size:0.85rem">No threads yet. Start a conversation!</div>';
+            var container = document.getElementById('forumIndex');
+            if (!container) return;
+            var categories = data.categories || [];
+            if (categories.length === 0) {
+                container.innerHTML = '<div style="padding:10px 16px;color:var(--text-dim)">No categories found.</div>';
                 return;
             }
-            var html = '<ul class="topiclist forums">';
+            // Group categories by type
+            var groups = { system: [], project: [], agent: [], custom: [] };
+            var groupLabels = { system: 'General', project: 'Projects', agent: 'Agents', custom: 'Custom' };
+            categories.forEach(function(c) { (groups[c.category.type] || groups.custom).push(c); });
+            // Populate new thread category selector
+            var select = document.getElementById('newThreadCategory');
+            if (select) {
+                var optHtml = '';
+                categories.filter(function(c) { return c.category.type === 'system' || c.category.type === 'custom'; }).forEach(function(c) {
+                    var sel = c.category.id === 'discussions' ? ' selected' : '';
+                    optHtml += '<option value="' + c.category.id + '"' + sel + '>' + escapeHtml(c.category.name) + '</option>';
+                });
+                select.innerHTML = optHtml;
+            }
+            var html = '';
+            ['system', 'project', 'agent', 'custom'].forEach(function(type) {
+                var cats = groups[type];
+                if (cats.length === 0) return;
+                html += '<div class="forabg">';
+                html += '<div class="forabg-head" onclick="this.nextElementSibling.classList.toggle(\'collapsed\')">';
+                html += '<span class="forabg-title">' + groupLabels[type] + '</span>';
+                html += '<span class="forabg-meta">' + cats.length + ' sub-forums</span>';
+                html += '</div>';
+                html += '<div class="inner"><ul class="topiclist forums">';
+                for (var i = 0; i < cats.length; i++) {
+                    var c = cats[i];
+                    var cat = c.category;
+                    var bgClass = i % 2 === 0 ? 'bg1' : 'bg2';
+                    var lastInfo = '';
+                    if (c.last_post) {
+                        var lp = c.last_post;
+                        var lpTime = new Date(lp.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                        lastInfo = '<span style="font-size:0.75rem;color:var(--text-dim)">' + escapeHtml(lp.author_name || 'Unknown') + '<br>' + lpTime + '</span>';
+                    }
+                    html += '<li class="row ' + bgClass + '" onclick="loadForumCategory(\'' + cat.id + '\', \'' + escapeHtml(cat.name) + '\')" style="cursor:pointer">';
+                    html += '<dl class="row-item">';
+                    html += '<dt>';
+                    html += '<span class="status-icon" style="width:28px;height:28px;font-size:0.6rem;flex-shrink:0;background:color-mix(in srgb, ' + (cat.color || 'var(--text-dim)') + ' 15%, transparent);color:' + (cat.color || 'var(--text-dim)') + ';border:1px solid color-mix(in srgb, ' + (cat.color || 'var(--text-dim)') + ' 25%, transparent)">' + (cat.icon || '??') + '</span>';
+                    html += '<div class="list-inner">';
+                    html += '<a class="topictitle" style="color:var(--link)">' + escapeHtml(cat.name) + '</a>';
+                    html += '<br><span style="font-size:0.75rem;color:var(--text-dim)">' + escapeHtml(cat.description) + '</span>';
+                    html += '</div></dt>';
+                    html += '<dd class="posts">' + c.thread_count + ' <dfn>threads</dfn></dd>';
+                    html += '<dd class="posts">' + c.post_count + ' <dfn>posts</dfn></dd>';
+                    html += '<dd class="lastpost">' + lastInfo + '</dd>';
+                    html += '</dl></li>';
+                }
+                html += '</ul></div></div>';
+            });
+            // Add "New Thread" button at bottom
+            html += '<div style="padding:4px 16px 8px"><button class="recall-btn" style="font-size:0.78rem;padding:3px 10px" onclick="showNewThreadForm()">+ New Thread</button></div>';
+            container.innerHTML = html;
+        } catch (e) { console.error('Failed to load forum index:', e); }
+    }
+
+    async function loadForumCategory(categoryId, categoryName) {
+        state.currentView = 'thread'; // reuse thread view for category listing
+        document.querySelectorAll('.view').forEach(function(v) { v.classList.remove('active'); });
+        document.querySelectorAll('.ntab').forEach(function(t) { t.classList.remove('active'); });
+        var viewEl = document.getElementById('view-thread');
+        if (viewEl) viewEl.classList.add('active');
+        window.location.hash = 'forum-category/' + categoryId;
+        var bc = document.getElementById('breadcrumbs');
+        if (bc) bc.innerHTML = '<a href="#" onclick="switchView(\'explore\')">mnemonic</a><span class="sep"> › </span><a href="#" onclick="switchView(\'explore\')">Forum</a><span class="sep"> › </span>' + escapeHtml(categoryName);
+        // Hide compose box (it's for threads, not category view)
+        var compose = document.getElementById('threadCompose');
+        if (compose) compose.style.display = 'none';
+        try {
+            var resp = await fetch('/api/v1/forum/threads?category=' + categoryId + '&limit=50');
+            var data = await resp.json();
+            var threads = data.threads || [];
+            var container = document.getElementById('threadContent');
+            if (!container) return;
+            if (threads.length === 0) {
+                container.innerHTML = '<div class="thread-wrap"><div class="thread-top"><h2 class="thread-title-big">' + escapeHtml(categoryName) + '</h2><div class="thread-meta">No threads yet</div></div></div>';
+                return;
+            }
+            var html = '<div class="thread-wrap">';
+            html += '<div class="thread-top"><h2 class="thread-title-big">' + escapeHtml(categoryName) + '</h2>';
+            html += '<div class="thread-meta">' + threads.length + ' threads</div></div>';
+            html += '<ul class="topiclist forums" style="margin:8px 0">';
             for (var i = 0; i < threads.length; i++) {
                 var t = threads[i];
                 var rp = t.root_post;
                 var bgClass = i % 2 === 0 ? 'bg1' : 'bg2';
-                var isAgent = rp.author_type === 'agent';
                 var agentKey = rp.author_key || '';
-                var profiles = {
-                    consolidation: { icon: 'CA', color: 'var(--accent-yellow)' },
-                    dreaming: { icon: 'DA', color: 'var(--accent-violet)' },
-                    episoding: { icon: 'EP', color: 'var(--accent-violet)' },
-                    abstraction: { icon: 'AA', color: 'var(--accent-orange)' },
-                    metacognition: { icon: 'MA', color: 'var(--accent-blue)' },
-                    encoding: { icon: 'EA', color: 'var(--accent-blue)' },
-                    perception: { icon: 'PA', color: 'var(--accent-green)' },
-                    retrieval: { icon: 'RA', color: 'var(--accent-cyan)' },
-                };
-                var prof = profiles[agentKey] || { icon: 'HU', color: 'var(--accent-cyan)' };
-                var authorName = rp.author_name || 'Human';
-                var preview = escapeHtml((rp.content || '').slice(0, 100));
+                var prof = _forumAgentProfiles[agentKey] || { tag: rp.author_name || 'Human', icon: 'HU', color: 'var(--accent-cyan)' };
+                var preview = escapeHtml((rp.content || '').slice(0, 120));
                 var lastActive = t.last_reply ? new Date(t.last_reply).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
                 html += '<li class="row ' + bgClass + '" onclick="loadForumThread(\'' + rp.id + '\')" style="cursor:pointer">';
-                html += '<dl class="row-item">';
-                html += '<dt>';
+                html += '<dl class="row-item"><dt>';
                 html += '<span class="status-icon" style="width:26px;height:26px;font-size:0.6rem;flex-shrink:0;background:color-mix(in srgb, ' + prof.color + ' 15%, transparent);color:' + prof.color + ';border:1px solid color-mix(in srgb, ' + prof.color + ' 25%, transparent)">' + prof.icon + '</span>';
-                html += '<div class="list-inner">';
-                html += '<a class="topictitle" style="color:var(--link)">' + preview + '</a>';
-                html += '<br><span class="topic-author" style="font-size:0.75rem;color:var(--text-dim)">by <strong style="color:' + prof.color + '">' + escapeHtml(authorName) + '</strong></span>';
+                html += '<div class="list-inner"><a class="topictitle" style="color:var(--link)">' + preview + '</a>';
+                html += '<br><span style="font-size:0.75rem;color:var(--text-dim)">by <strong style="color:' + prof.color + '">' + escapeHtml(rp.author_type === 'agent' ? prof.tag : (rp.author_name || 'Human')) + '</strong></span>';
                 html += '</div></dt>';
                 html += '<dd class="posts">' + (t.reply_count || 0) + ' <dfn>replies</dfn></dd>';
                 html += '<dd class="lastpost"><span style="font-size:0.75rem;color:var(--text-dim)">' + lastActive + '</span></dd>';
                 html += '</dl></li>';
             }
-            html += '</ul>';
-            body.innerHTML = html;
-        } catch (e) { console.error('Failed to load forum threads:', e); }
+            html += '</ul></div>';
+            container.innerHTML = html;
+        } catch (e) { console.error('Failed to load forum category:', e); }
     }
 
     async function loadForumThread(threadId) {
@@ -4894,12 +4955,14 @@
         var textarea = document.getElementById('newThreadContent');
         var content = (textarea.value || '').trim();
         if (!content) return;
+        var catSelect = document.getElementById('newThreadCategory');
+        var categoryId = catSelect ? catSelect.value : 'discussions';
         textarea.disabled = true;
         try {
             var resp = await fetch('/api/v1/forum/posts', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ content: content })
+                body: JSON.stringify({ content: content, category_id: categoryId })
             });
             var data = await resp.json();
             textarea.value = '';
@@ -4907,7 +4970,7 @@
             document.getElementById('newThreadForm').style.display = 'none';
             showToast('Thread created');
             state.forumLoaded = false;
-            loadForumThreads();
+            loadForumIndex();
             // Navigate to the new thread
             loadForumThread(data.thread_id);
         } catch (e) {

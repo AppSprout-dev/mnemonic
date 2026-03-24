@@ -491,6 +491,20 @@ CREATE INDEX IF NOT EXISTS idx_amendments_memory ON memory_amendments(memory_id)
 
 	// Migration 017: Forum communication layer
 	_, _ = db.Exec(`
+CREATE TABLE IF NOT EXISTS forum_categories (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    slug TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL DEFAULT '',
+    icon TEXT NOT NULL DEFAULT '',
+    color TEXT NOT NULL DEFAULT '',
+    type TEXT NOT NULL DEFAULT 'custom',
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+`)
+
+	_, _ = db.Exec(`
 CREATE TABLE IF NOT EXISTS forum_posts (
     id TEXT PRIMARY KEY,
     parent_id TEXT REFERENCES forum_posts(id),
@@ -502,6 +516,7 @@ CREATE TABLE IF NOT EXISTS forum_posts (
     mentions JSON DEFAULT '[]',
     memory_ids JSON DEFAULT '[]',
     event_ref TEXT DEFAULT '',
+    category_id TEXT DEFAULT '',
     pinned INTEGER NOT NULL DEFAULT 0,
     state TEXT NOT NULL DEFAULT 'active',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -510,7 +525,33 @@ CREATE TABLE IF NOT EXISTS forum_posts (
 CREATE INDEX IF NOT EXISTS idx_forum_thread ON forum_posts(thread_id, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_forum_parent ON forum_posts(parent_id) WHERE parent_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_forum_state ON forum_posts(state, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_forum_category ON forum_posts(category_id) WHERE category_id != '';
 `)
+
+	// Seed default forum categories (idempotent via INSERT OR IGNORE + UNIQUE slug)
+	_, _ = db.Exec(`
+INSERT OR IGNORE INTO forum_categories (id, name, slug, description, icon, color, type, sort_order) VALUES
+    ('discussions', 'Discussions', 'discussions', 'Open conversation', 'DI', 'var(--accent-cyan)', 'system', 10),
+    ('announcements', 'Announcements', 'announcements', 'System updates and releases', 'AN', 'var(--accent-orange)', 'system', 20),
+    ('system-reports', 'System Reports', 'system-reports', 'Health, quality, and performance', 'SR', 'var(--accent-green)', 'system', 30),
+    ('agent-consolidation', '@consolidation', 'agent-consolidation', 'Memory maintenance', 'CA', 'var(--accent-yellow)', 'agent', 100),
+    ('agent-dreaming', '@dreaming', 'agent-dreaming', 'Dream cycle insights', 'DA', 'var(--accent-violet)', 'agent', 101),
+    ('agent-episoding', '@episoding', 'agent-episoding', 'Episode summaries', 'EP', 'var(--accent-violet)', 'agent', 102),
+    ('agent-abstraction', '@abstraction', 'agent-abstraction', 'Patterns and principles', 'AA', 'var(--accent-orange)', 'agent', 103),
+    ('agent-metacognition', '@metacognition', 'agent-metacognition', 'Quality audits', 'MA', 'var(--accent-blue)', 'agent', 104),
+    ('agent-encoding', '@encoding', 'agent-encoding', 'Memory compression', 'EA', 'var(--accent-blue)', 'agent', 105),
+    ('agent-perception', '@perception', 'agent-perception', 'Filesystem activity', 'PA', 'var(--accent-green)', 'agent', 106),
+    ('agent-retrieval', '@retrieval', 'agent-retrieval', 'Search and recall', 'RA', 'var(--accent-cyan)', 'agent', 107);
+`)
+
+	// Migration 017b: Add category_id to existing forum_posts (idempotent)
+	// Note: SQLite ALTER TABLE doesn't support REFERENCES with non-NULL default,
+	// so we add the column without the FK constraint (soft reference).
+	_, err = db.Exec(`ALTER TABLE forum_posts ADD COLUMN category_id TEXT DEFAULT ''`)
+	if err != nil && !isAlterTableDuplicateColumn(err) {
+		return fmt.Errorf("failed to add forum_posts.category_id column: %w", err)
+	}
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_forum_category ON forum_posts(category_id) WHERE category_id != ''`)
 
 	return nil
 }

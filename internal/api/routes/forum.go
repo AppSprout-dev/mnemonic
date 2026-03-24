@@ -35,9 +35,30 @@ func extractMentions(content string) []string {
 
 // CreateForumPostRequest is the JSON body for creating a forum post.
 type CreateForumPostRequest struct {
-	Content  string `json:"content"`
-	ThreadID string `json:"thread_id,omitempty"` // empty = new thread
-	ParentID string `json:"parent_id,omitempty"` // empty = reply to thread root
+	Content    string `json:"content"`
+	ThreadID   string `json:"thread_id,omitempty"`   // empty = new thread
+	ParentID   string `json:"parent_id,omitempty"`   // empty = reply to thread root
+	CategoryID string `json:"category_id,omitempty"` // sub-forum for new threads (default: "discussions")
+}
+
+// HandleListForumCategories returns the forum index with category summaries.
+// GET /api/v1/forum/categories
+func HandleListForumCategories(s store.Store, log *slog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		summaries, err := s.ListForumCategorySummaries(ctx)
+		if err != nil {
+			log.Error("failed to list forum categories", "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to list categories", "STORE_ERROR")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"categories": summaries,
+		})
+	}
 }
 
 // HandleListForumThreads returns all forum threads with reply counts.
@@ -57,10 +78,18 @@ func HandleListForumThreads(s store.Store, log *slog.Logger) http.HandlerFunc {
 			}
 		}
 
+		categoryID := r.URL.Query().Get("category")
+
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 
-		threads, err := s.ListForumThreads(ctx, limit, offset)
+		var threads []store.ForumThread
+		var err error
+		if categoryID != "" {
+			threads, err = s.ListForumThreadsByCategory(ctx, categoryID, limit, offset)
+		} else {
+			threads, err = s.ListForumThreads(ctx, limit, offset)
+		}
 		if err != nil {
 			log.Error("failed to list forum threads", "error", err)
 			writeError(w, http.StatusInternalServerError, "failed to list threads", "STORE_ERROR")
@@ -129,9 +158,13 @@ func HandleCreateForumPost(s store.Store, bus events.Bus, log *slog.Logger) http
 		// Determine thread context
 		threadID := req.ThreadID
 		parentID := req.ParentID
+		categoryID := req.CategoryID
 		if threadID == "" {
 			// New thread: thread_id = post id
 			threadID = postID
+			if categoryID == "" {
+				categoryID = "discussions" // default sub-forum for human posts
+			}
 		}
 		if parentID == "" && threadID != postID {
 			// Reply without explicit parent — parent is thread root
@@ -151,6 +184,7 @@ func HandleCreateForumPost(s store.Store, bus events.Bus, log *slog.Logger) http
 			Content:    content,
 			Mentions:   mentions,
 			MemoryIDs:  []string{},
+			CategoryID: categoryID,
 			State:      "active",
 			CreatedAt:  now,
 			UpdatedAt:  now,

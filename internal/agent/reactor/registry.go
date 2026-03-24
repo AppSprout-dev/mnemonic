@@ -22,12 +22,13 @@ type ChainDeps struct {
 	CooldownOverrides    map[string]time.Duration // chain ID -> cooldown override
 	Logger               *slog.Logger
 	// Forum configuration
-	ForumAgentPosting     bool         // agents auto-post on events
-	ForumMentionResponses bool         // @mention triggers LLM response
-	ForumMentionMaxTokens int          // max tokens for @mention LLM responses
-	ForumMentionTemp      float64      // temperature for @mention LLM responses
-	MentionLLM            llm.Provider // for @mention LLM responses (can be nil)
-	MentionQuery          ForumQuerier // for @retrieval recall queries (can be nil)
+	ForumAgentPosting      bool         // agents auto-post on events
+	ForumMentionResponses  bool         // @mention triggers LLM response
+	ForumMentionMaxTokens  int          // max tokens for @mention LLM responses
+	ForumMentionTemp       float64      // temperature for @mention LLM responses
+	ForumPerAgentSubforums bool         // route to per-agent sub-forums (true) or shared (false)
+	MentionLLM             llm.Provider // for @mention LLM responses (can be nil)
+	MentionQuery           ForumQuerier // for @retrieval recall queries (can be nil)
 }
 
 // cooldown returns the override duration for a chain if set, otherwise the default.
@@ -222,7 +223,7 @@ func NewChainRegistry(deps ChainDeps) []*Chain {
 		log.Info("forum agent posting disabled by config")
 	}
 
-	forumAction := &CreateForumPostAction{Log: log}
+	forumAction := &CreateForumPostAction{PerAgentSubforums: deps.ForumPerAgentSubforums, Log: log}
 
 	if deps.ForumAgentPosting {
 		chains = append(chains, &Chain{
