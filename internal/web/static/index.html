@@ -4796,11 +4796,17 @@
         var time = new Date(post.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
         // Highlight @mentions in content
         var contentHtml = escapeHtml(post.content || '').replace(/@(retrieval|metacognition|encoding|episoding|consolidation|dreaming|abstraction|perception)/g, '<strong style="color:var(--accent-cyan)">@$1</strong>');
-        var quotedContent = (post.content || '').replace(/\n/g, '\n> ');
-        var html = '<div class="post ' + bgClass + '" id="forum-post-' + post.id + '">';
+        // Store post data for quote functionality via data attributes
+        var postDataId = 'forum-post-' + post.id;
+        var html = '<div class="post ' + bgClass + '" id="' + postDataId + '" data-author="' + escapeHtml(displayName) + '" data-content="' + escapeHtml(post.content || '') + '">';
         html += '<div class="inner"><dl class="postprofile">';
         html += '<dt><div class="avatar-container" style="background:color-mix(in srgb, ' + prof.color + ' 15%, transparent);color:' + prof.color + ';border:1px solid color-mix(in srgb, ' + prof.color + ' 25%, transparent)">' + prof.icon + '</div>';
-        html += '<strong style="color:' + prof.color + '">' + escapeHtml(displayName) + '</strong></dt>';
+        // Clickable @tag — clicking it inserts @tag into reply box
+        if (isAgent && agentKey) {
+            html += '<strong style="color:' + prof.color + ';cursor:pointer" onclick="insertTagInReply(\'' + agentKey + '\')">' + escapeHtml(displayName) + '</strong></dt>';
+        } else {
+            html += '<strong style="color:' + prof.color + '">' + escapeHtml(displayName) + '</strong></dt>';
+        }
         html += '<dd class="profile-rank"><span class="rank-' + (isAgent ? 'insight' : 'general') + '">' + escapeHtml(prof.title) + '</span></dd>';
         if (post.event_ref) html += '<dd style="font-size:0.7rem;color:var(--text-dim)">via ' + escapeHtml(post.event_ref) + '</dd>';
         html += '</dl><div class="postbody">';
@@ -4808,7 +4814,7 @@
         html += '<div class="content">' + contentHtml + '</div>';
         // Action buttons
         html += '<div style="margin-top:6px;display:flex;gap:6px;align-items:center">';
-        html += '<button onclick="quotePost(\'' + escapeHtml(displayName).replace(/'/g, "\\'") + '\', ' + JSON.stringify(quotedContent).replace(/'/g, "\\'") + ')" style="font-size:0.7rem;padding:1px 8px;background:transparent;border:1px solid var(--border-subtle);color:var(--text-dim);border-radius:3px;cursor:pointer">quote</button>';
+        html += '<button onclick="quotePostById(\'' + postDataId + '\')" style="font-size:0.7rem;padding:1px 8px;background:transparent;border:1px solid var(--border-subtle);color:var(--text-dim);border-radius:3px;cursor:pointer">quote</button>';
         if (post.state === 'internalized') {
             html += '<span style="font-size:0.7rem;padding:1px 6px;background:color-mix(in srgb, var(--accent-green) 15%, transparent);color:var(--accent-green);border-radius:3px">internalized</span>';
         } else {
@@ -4892,11 +4898,26 @@
         }
     }
 
-    function quotePost(authorName, content) {
+    function quotePostById(postElementId) {
+        var postEl = document.getElementById(postElementId);
+        if (!postEl) return;
+        var authorName = postEl.getAttribute('data-author') || 'Unknown';
+        var content = postEl.getAttribute('data-content') || '';
         var textarea = document.getElementById('threadReplyContent');
         if (!textarea) return;
-        var quote = '> ' + authorName + ' wrote:\n> ' + content + '\n\n';
-        textarea.value = quote + textarea.value;
+        var quotedLines = content.split('\n').map(function(line) { return '> ' + line; }).join('\n');
+        var quote = '> ' + authorName + ' wrote:\n' + quotedLines + '\n\n';
+        textarea.value = quote;
+        textarea.focus();
+        textarea.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    function insertTagInReply(agentKey) {
+        var textarea = document.getElementById('threadReplyContent');
+        if (!textarea) return;
+        var tag = '@' + agentKey + ' ';
+        textarea.value = tag + textarea.value;
+        textarea.selectionStart = textarea.selectionEnd = tag.length;
         textarea.focus();
         textarea.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
@@ -4916,9 +4937,9 @@
     function setupMentionAutocomplete(textarea) {
         var dropdown = document.createElement('div');
         dropdown.className = 'mention-dropdown';
-        dropdown.style.cssText = 'display:none;position:absolute;z-index:100;background:var(--bg-elevated);border:1px solid var(--border-accent);border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,0.3);max-height:200px;overflow-y:auto;font-size:0.82rem;min-width:200px';
+        dropdown.style.cssText = 'display:none;position:absolute;z-index:100;background:var(--bg-primary);border:1px solid var(--border-accent);border-radius:4px;box-shadow:0 4px 16px rgba(0,0,0,0.5);max-height:240px;overflow-y:auto;font-size:0.82rem;width:260px';
         textarea.parentNode.style.position = 'relative';
-        textarea.parentNode.appendChild(dropdown);
+        textarea.parentNode.insertBefore(dropdown, textarea);
 
         textarea.addEventListener('input', function() {
             var val = textarea.value;
@@ -4943,8 +4964,6 @@
             }
             dropdown.innerHTML = html;
             dropdown.style.display = 'block';
-            dropdown.style.bottom = (textarea.offsetHeight + 4) + 'px';
-            dropdown.style.left = '0';
         });
 
         textarea.addEventListener('blur', function() {
