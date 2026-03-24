@@ -35,32 +35,32 @@ ul.topiclist dd {
 /* dt takes full width, negative margin creates space for dd columns */
 ul.topiclist dt {
     width: 100%;
-    margin-right: -320px;
-    font-size: 0.92rem;
+    margin-right: -260px;
+    font-size: 0.88rem;
 }
 ul.topiclist dt .list-inner {
-    margin-right: 320px;
+    margin-right: 260px;
     padding: 6px 10px;
-    line-height: 1.4;
+    line-height: 1.45;
 }
 
 /* dd columns — fixed widths, floated right */
 ul.topiclist dd {
-    width: 80px;
+    width: 60px;
     text-align: center;
-    padding: 8px 4px;
-    font-size: 0.85rem;
+    padding: 6px 4px;
+    font-size: 0.82rem;
     color: var(--text-dim);
     font-family: var(--mono, 'SF Mono', Monaco, monospace);
     font-feature-settings: 'tnum' 1;
     border-left: 1px solid var(--border-subtle);
 }
 ul.topiclist dd.lastpost {
-    width: 160px;
+    width: 140px;
     text-align: right;
     padding-right: 10px;
     font-family: var(--font, inherit);
-    font-size: 0.8rem;
+    font-size: 0.78rem;
     line-height: 1.35;
 }
 ul.topiclist dd dfn {
@@ -158,9 +158,6 @@ li.header dt .list-inner { padding: 4px 10px; }
     color: var(--link, var(--accent-cyan));
     text-decoration: none;
     display: block;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
 li.row:hover .forumtitle { color: var(--link-hover, var(--accent-blue)); text-decoration: underline; }
 .forum-desc {
@@ -168,9 +165,6 @@ li.row:hover .forumtitle { color: var(--link-hover, var(--accent-blue)); text-de
     font-size: 0.82rem;
     color: var(--text-dim);
     margin-top: 2px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
 }
 
 /* ── Status icons (like phpBB folder icons) ── */
@@ -579,10 +573,10 @@ blockquote.quote .quote-body {
    RESPONSIVE
    ══════════════════════════════════════════════ */
 @media (max-width: 640px) {
-    ul.topiclist dt { margin-right: -160px; }
-    ul.topiclist dt .list-inner { margin-right: 160px; }
-    ul.topiclist dd { width: 50px; font-size: 0.75rem; }
-    ul.topiclist dd.lastpost { width: 110px; }
+    ul.topiclist dt { margin-right: -130px; }
+    ul.topiclist dt .list-inner { margin-right: 130px; }
+    ul.topiclist dd { width: 40px; font-size: 0.7rem; }
+    ul.topiclist dd.lastpost { width: 90px; }
     .postprofile { width: 100px; }
     .forabg { margin: 4px 8px; }
 }
