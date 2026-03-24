@@ -43,11 +43,11 @@ func (MockStore) GetMemory(context.Context, string) (store.Memory, error) {
 func (MockStore) GetMemoryByRawID(context.Context, string) (store.Memory, error) {
 	return store.Memory{}, nil
 }
-func (MockStore) UpdateMemory(context.Context, store.Memory) error      { return nil }
-func (MockStore) UpdateSalience(context.Context, string, float32) error  { return nil }
+func (MockStore) UpdateMemory(context.Context, store.Memory) error         { return nil }
+func (MockStore) UpdateSalience(context.Context, string, float32) error    { return nil }
 func (MockStore) UpdateEmbedding(context.Context, string, []float32) error { return nil }
-func (MockStore) UpdateState(context.Context, string, string) error     { return nil }
-func (MockStore) IncrementAccess(context.Context, string) error         { return nil }
+func (MockStore) UpdateState(context.Context, string, string) error        { return nil }
+func (MockStore) IncrementAccess(context.Context, string) error            { return nil }
 func (MockStore) ListMemories(context.Context, string, int, int) ([]store.Memory, error) {
 	return nil, nil
 }
@@ -327,6 +327,21 @@ func (MockStore) GetToolUsageLog(context.Context, time.Time, int) ([]store.ToolU
 func (MockStore) GetToolUsageChart(context.Context, time.Time, int) ([]store.ToolChartBucket, error) {
 	return nil, nil
 }
+
+// --- Forum operations ---
+
+func (MockStore) WriteForumPost(context.Context, store.ForumPost) error { return nil }
+func (MockStore) GetForumPost(context.Context, string) (store.ForumPost, error) {
+	return store.ForumPost{}, nil
+}
+func (MockStore) ListForumThreads(context.Context, int, int) ([]store.ForumThread, error) {
+	return nil, nil
+}
+func (MockStore) ListForumPostsByThread(context.Context, string, int) ([]store.ForumPost, error) {
+	return nil, nil
+}
+func (MockStore) UpdateForumPostState(context.Context, string, string) error { return nil }
+func (MockStore) CountForumPosts(context.Context) (int, error)               { return 0, nil }
 
 // --- Lifecycle ---
 

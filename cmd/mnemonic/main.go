@@ -1679,6 +1679,10 @@ func serveCommand(configPath string) {
 		if orch != nil {
 			deps.IncrementAutonomous = orch.IncrementAutonomousCount
 		}
+		deps.MentionLLM = llmProvider
+		if retriever != nil {
+			deps.MentionQuery = retriever
+		}
 
 		for _, chain := range reactor.NewChainRegistry(deps) {
 			reactorEngine.RegisterChain(chain)

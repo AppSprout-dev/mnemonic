@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
+	"github.com/appsprout-dev/mnemonic/internal/agent/forum"
 	"github.com/appsprout-dev/mnemonic/internal/events"
+	"github.com/appsprout-dev/mnemonic/internal/llm"
 	"github.com/appsprout-dev/mnemonic/internal/store"
 	"github.com/google/uuid"
 )
@@ -101,5 +104,184 @@ func (a *IncrementCounterAction) Execute(_ context.Context, _ events.Event, _ *R
 	if a.Increment != nil {
 		a.Increment()
 	}
+	return nil
+}
+
+// CreateForumPostAction writes a forum post from an agent personality template.
+type CreateForumPostAction struct {
+	Log *slog.Logger
+}
+
+func (a *CreateForumPostAction) Name() string { return "create_forum_post" }
+
+func (a *CreateForumPostAction) Execute(ctx context.Context, trigger events.Event, state *ReactorState) error {
+	content, agentKey := forum.ComposePost(trigger)
+	if content == "" || agentKey == "" {
+		return nil // event type not handled by personality templates
+	}
+
+	personality, ok := forum.Personalities[agentKey]
+	if !ok {
+		return nil
+	}
+
+	postID := uuid.New().String()
+	now := time.Now()
+
+	post := store.ForumPost{
+		ID:         postID,
+		ThreadID:   postID, // each agent post is a new thread
+		AuthorType: "agent",
+		AuthorName: personality.Name,
+		AuthorKey:  personality.Key,
+		Content:    content,
+		EventRef:   trigger.EventType(),
+		State:      "active",
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+
+	if err := state.Store.WriteForumPost(ctx, post); err != nil {
+		return fmt.Errorf("writing forum post: %w", err)
+	}
+
+	_ = state.Bus.Publish(ctx, events.ForumPostCreated{
+		PostID:     postID,
+		ThreadID:   postID,
+		AuthorType: "agent",
+		AuthorName: personality.Name,
+		AuthorKey:  personality.Key,
+		Content:    content,
+		Ts:         now,
+	})
+
+	if a.Log != nil {
+		a.Log.Info("agent forum post created",
+			"agent", agentKey,
+			"post_id", postID,
+			"event", trigger.EventType())
+	}
+
+	return nil
+}
+
+// ForumQuerier is the interface for running recall queries in forum context.
+type ForumQuerier interface {
+	ForumQuery(ctx context.Context, query string, limit int) ([]store.RetrievalResult, error)
+}
+
+// querySimple is a helper that calls ForumQuery on a ForumQuerier.
+// Returns nil results on error.
+func querySimple(ctx context.Context, q ForumQuerier, query string, limit int) []store.RetrievalResult {
+	results, err := q.ForumQuery(ctx, query, limit)
+	if err != nil {
+		return nil
+	}
+	return results
+}
+
+// RespondToMentionAction generates an LLM-powered response from the mentioned agent.
+type RespondToMentionAction struct {
+	LLM          llm.Provider
+	ForumQuerier ForumQuerier // can be nil
+	Log          *slog.Logger
+}
+
+func (a *RespondToMentionAction) Name() string { return "respond_to_mention" }
+
+func (a *RespondToMentionAction) Execute(ctx context.Context, trigger events.Event, state *ReactorState) error {
+	mention, ok := trigger.(events.ForumMentionDetected)
+	if !ok {
+		return nil
+	}
+
+	personality, exists := forum.Personalities[mention.AgentKey]
+	if !exists {
+		return nil
+	}
+
+	// Build the response content
+	var content string
+
+	if a.LLM == nil {
+		// Graceful fallback when LLM is unavailable
+		content = fmt.Sprintf("%s is currently offline. This mention will be picked up when the LLM becomes available.", personality.Name)
+	} else {
+		// Build context for the LLM
+		var systemPrompt strings.Builder
+		systemPrompt.WriteString(fmt.Sprintf("You are the %s (%s) of the Mnemonic cognitive memory system. ", personality.Name, personality.Title))
+		systemPrompt.WriteString(fmt.Sprintf("Your tone is %s. ", personality.Tone))
+		systemPrompt.WriteString("A human has @mentioned you in a forum thread. Respond helpfully and concisely (2-4 sentences max) based on your role. ")
+		systemPrompt.WriteString("Do not use markdown formatting. Be direct and informative.")
+
+		// If this is the retrieval agent, run a search first
+		if mention.AgentKey == "retrieval" && a.ForumQuerier != nil {
+			results := querySimple(ctx, a.ForumQuerier, mention.Content, 5)
+			if len(results) > 0 {
+				systemPrompt.WriteString("\n\nRelevant memories from search:\n")
+				for i, r := range results {
+					systemPrompt.WriteString(fmt.Sprintf("%d. [%.2f] %s\n", i+1, r.Score, r.Memory.Summary))
+				}
+			}
+		}
+
+		resp, err := a.LLM.Complete(ctx, llm.CompletionRequest{
+			Messages: []llm.Message{
+				{Role: "system", Content: systemPrompt.String()},
+				{Role: "user", Content: mention.Content},
+			},
+			MaxTokens:   200,
+			Temperature: 0.7,
+		})
+		if err != nil {
+			content = fmt.Sprintf("%s encountered an error processing your mention. Try again later.", personality.Name)
+			if a.Log != nil {
+				a.Log.Warn("mention LLM call failed", "agent", mention.AgentKey, "error", err)
+			}
+		} else {
+			content = resp.Content
+		}
+	}
+
+	// Write the response as a forum post
+	postID := uuid.New().String()
+	now := time.Now()
+
+	post := store.ForumPost{
+		ID:         postID,
+		ParentID:   mention.PostID,
+		ThreadID:   mention.ThreadID,
+		AuthorType: "agent",
+		AuthorName: personality.Name,
+		AuthorKey:  personality.Key,
+		Content:    content,
+		EventRef:   "mention_response",
+		State:      "active",
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+
+	if err := state.Store.WriteForumPost(ctx, post); err != nil {
+		return fmt.Errorf("writing mention response: %w", err)
+	}
+
+	_ = state.Bus.Publish(ctx, events.ForumPostCreated{
+		PostID:     postID,
+		ThreadID:   mention.ThreadID,
+		ParentID:   mention.PostID,
+		AuthorType: "agent",
+		AuthorName: personality.Name,
+		AuthorKey:  personality.Key,
+		Content:    content,
+		Ts:         now,
+	})
+
+	if a.Log != nil {
+		a.Log.Info("agent mention response posted",
+			"agent", mention.AgentKey,
+			"post_id", postID,
+			"thread_id", mention.ThreadID)
+	}
+
 	return nil
 }

@@ -1224,6 +1224,30 @@
                         </div>
                     </div>
                 </div>
+                <div class="forabg" id="forumThreads">
+                    <div class="forabg-head" onclick="this.nextElementSibling.classList.toggle('collapsed')">
+                        <span class="forabg-title">Forum Threads</span>
+                        <span class="forabg-meta" id="forumThreadCount"></span>
+                    </div>
+                    <div class="inner" id="forumThreadsBody">
+                        <div style="padding:10px 16px;color:var(--text-dim);font-size:0.85rem">Loading threads...</div>
+                    </div>
+                    <div style="padding:4px 16px 8px">
+                        <button class="recall-btn" style="font-size:0.78rem;padding:3px 10px" onclick="showNewThreadForm()">+ New Thread</button>
+                    </div>
+                </div>
+                <div class="forabg" id="newThreadForm" style="display:none">
+                    <div class="forabg-head">
+                        <span class="forabg-title">New Thread</span>
+                        <span class="forabg-meta" style="cursor:pointer" onclick="document.getElementById('newThreadForm').style.display='none'">cancel</span>
+                    </div>
+                    <div class="inner" style="padding:8px 16px">
+                        <textarea id="newThreadContent" rows="3" placeholder="Start a conversation... @agent to mention" style="width:100%;box-sizing:border-box;background:var(--bg-primary);border:1px solid var(--border-subtle);color:var(--text-primary);font-family:inherit;font-size:0.85rem;padding:6px 8px;border-radius:3px;resize:vertical"></textarea>
+                        <div style="text-align:right;margin-top:4px">
+                            <button class="recall-btn" style="font-size:0.78rem;padding:3px 10px" onclick="submitNewThread()">Post Thread</button>
+                        </div>
+                    </div>
+                </div>
                 <div class="forabg" id="forumLiveFeed">
                     <div class="forabg-head">
                         <span class="forabg-title" style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:var(--accent-green);animation:pulse 2s ease-in-out infinite"></span> Live Activity</span>
@@ -1267,6 +1291,17 @@
             <!-- Thread View (episode detail) -->
             <section class="view" id="view-thread">
                 <div id="threadContent"><div style="padding:16px;color:var(--text-dim)">Loading thread...</div></div>
+                <div class="forabg" id="threadCompose" style="display:none">
+                    <div class="forabg-head">
+                        <span class="forabg-title">Post a Reply</span>
+                    </div>
+                    <div class="inner" style="padding:8px 16px">
+                        <textarea id="threadReplyContent" rows="3" placeholder="Write a reply... @agent to mention" style="width:100%;box-sizing:border-box;background:var(--bg-primary);border:1px solid var(--border-subtle);color:var(--text-primary);font-family:inherit;font-size:0.85rem;padding:6px 8px;border-radius:3px;resize:vertical"></textarea>
+                        <div style="text-align:right;margin-top:4px">
+                            <button class="recall-btn" style="font-size:0.78rem;padding:3px 10px" onclick="submitThreadReply()">Post Reply</button>
+                        </div>
+                    </div>
+                </div>
             </section>
 
             <!-- Timeline View -->
@@ -1672,6 +1707,8 @@
         llmLoaded: false,
         toolsLoaded: false,
         dreamSessionTotals: { cycles: 0, replayed: 0, strengthened: 0, newLinks: 0, insights: 0, crossProject: 0, demoted: 0 },
+        forumLoaded: false,
+        currentForumThread: null,
         mindLoaded: false,
         mindSimulation: null,
         mindData: null,
@@ -1745,10 +1782,12 @@
             loadExploreTab('memories');
             loadExploreTab('patterns');
             loadExploreTab('abstractions');
+            loadForumThreads();
             // Populate welcome panel
             var wp = document.getElementById('forumWelcome');
             if (wp) wp.style.display = '';
         }
+        if (name === 'explore' && !state.forumLoaded) loadForumThreads();
         if (name === 'timeline' && !state.timelineInitialized) { populateTimelineProjects(); loadTimelineData(false); }
         if (name === 'agent' && !state.agentLoaded) loadAgentData();
         if (name === 'llm' && !state.llmLoaded) loadLLMUsage();
@@ -1768,6 +1807,11 @@
         if (hash.startsWith('thread/')) {
             var epId = hash.substring(7);
             if (epId) loadThread(epId);
+            return;
+        }
+        if (hash.startsWith('forum-thread/')) {
+            var threadId = hash.substring(13);
+            if (threadId) loadForumThread(threadId);
             return;
         }
         if (['recall', 'explore', 'timeline', 'agent', 'llm', 'tools'].includes(hash)) switchView(hash);
@@ -3052,6 +3096,7 @@
                     case 'pattern_discovered': desc = 'Pattern: ' + (payload.title || '').slice(0, 40); state.exploreLoaded.patterns = false; break;
                     case 'abstraction_created': desc = (payload.level === 3 ? 'Axiom' : 'Principle') + ': ' + (payload.title || '').slice(0, 40); state.exploreLoaded.abstractions = false; break;
                     case 'episode_closed': desc = 'Episode closed: ' + (payload.title || '').slice(0, 40); state.exploreLoaded.episodes = false; break;
+                    case 'forum_post_created': desc = (payload.author_name || 'Someone') + ' posted in forum'; state.forumLoaded = false; break;
                     default: desc = type.replace(/_/g, ' ');
                 }
                 addEvent(type, desc, msg.timestamp || new Date().toISOString(), payload);
@@ -3064,6 +3109,11 @@
                 if (state.currentView === 'explore') {
                     var tab = state.currentExploreTab;
                     if (!state.exploreLoaded[tab]) loadExploreTab(tab);
+                    if (!state.forumLoaded) loadForumThreads();
+                }
+                // Live-insert forum post into current thread view
+                if (type === 'forum_post_created' && state.currentView === 'thread' && state.currentForumThread === payload.thread_id) {
+                    appendForumPostToThread(payload);
                 }
                 // Refresh nav stats on memory-changing events
                 if (['memory_encoded', 'raw_memory_created', 'consolidation_completed'].includes(type)) loadStats();
@@ -4612,6 +4662,21 @@
         abstraction_created: function(p) { return { agent: { name: 'Abstraction Agent', title: 'Principle Synthesis', icon: 'AA', color: 'var(--accent-orange)' }, text: (p.level === 3 ? 'New axiom' : 'New principle') + ': ' + (p.title || ''), action: "switchView('explore')" }; },
         episode_closed: function(p) { return { agent: { name: 'Episoding Agent', title: 'Episode Clustering', icon: 'EP', color: 'var(--accent-violet)' }, text: 'Episode closed: ' + (p.title || ''), action: p.episode_id ? "loadThread('" + p.episode_id + "')" : "switchView('explore')" }; },
         query_executed: function(p) { return { agent: { name: 'Retrieval Agent', title: 'Spread Activation', icon: 'RA', color: 'var(--accent-cyan)' }, text: 'Recall query: "' + (p.query_text || '').slice(0, 60) + '" → ' + (p.results_returned || 0) + ' results', action: "switchView('recall')" }; },
+        forum_post_created: function(p) {
+            var key = p.author_key || '';
+            var profiles = {
+                consolidation: { name: 'Consolidation Agent', icon: 'CA', color: 'var(--accent-yellow)' },
+                dreaming: { name: 'Dreaming Agent', icon: 'DA', color: 'var(--accent-violet)' },
+                episoding: { name: 'Episoding Agent', icon: 'EP', color: 'var(--accent-violet)' },
+                abstraction: { name: 'Abstraction Agent', icon: 'AA', color: 'var(--accent-orange)' },
+                metacognition: { name: 'Metacognition Agent', icon: 'MA', color: 'var(--accent-blue)' },
+                encoding: { name: 'Encoding Agent', icon: 'EA', color: 'var(--accent-blue)' },
+                perception: { name: 'Perception Agent', icon: 'PA', color: 'var(--accent-green)' },
+                retrieval: { name: 'Retrieval Agent', icon: 'RA', color: 'var(--accent-cyan)' },
+            };
+            var agent = profiles[key] || { name: p.author_name || 'Human', icon: 'HU', color: 'var(--accent-cyan)' };
+            return { agent: agent, text: (p.content || '').slice(0, 120), action: "loadForumThread('" + p.thread_id + "')" };
+        },
     };
 
     function addLivePost(wsType, payload, timestamp) {
@@ -4670,6 +4735,231 @@
         if (inList) html += '</ul>';
         return html;
     }
+    // ── Forum Communication Layer ──
+
+    async function loadForumThreads() {
+        try {
+            var resp = await fetch('/api/v1/forum/threads?limit=20');
+            var data = await resp.json();
+            state.forumLoaded = true;
+            var body = document.getElementById('forumThreadsBody');
+            var countEl = document.getElementById('forumThreadCount');
+            if (!body) return;
+            var threads = data.threads || [];
+            if (countEl) countEl.textContent = threads.length + ' threads · ' + (data.total_posts || 0) + ' posts';
+            if (threads.length === 0) {
+                body.innerHTML = '<div style="padding:10px 16px;color:var(--text-dim);font-size:0.85rem">No threads yet. Start a conversation!</div>';
+                return;
+            }
+            var html = '<ul class="topiclist forums">';
+            for (var i = 0; i < threads.length; i++) {
+                var t = threads[i];
+                var rp = t.root_post;
+                var bgClass = i % 2 === 0 ? 'bg1' : 'bg2';
+                var isAgent = rp.author_type === 'agent';
+                var agentKey = rp.author_key || '';
+                var profiles = {
+                    consolidation: { icon: 'CA', color: 'var(--accent-yellow)' },
+                    dreaming: { icon: 'DA', color: 'var(--accent-violet)' },
+                    episoding: { icon: 'EP', color: 'var(--accent-violet)' },
+                    abstraction: { icon: 'AA', color: 'var(--accent-orange)' },
+                    metacognition: { icon: 'MA', color: 'var(--accent-blue)' },
+                    encoding: { icon: 'EA', color: 'var(--accent-blue)' },
+                    perception: { icon: 'PA', color: 'var(--accent-green)' },
+                    retrieval: { icon: 'RA', color: 'var(--accent-cyan)' },
+                };
+                var prof = profiles[agentKey] || { icon: 'HU', color: 'var(--accent-cyan)' };
+                var authorName = rp.author_name || 'Human';
+                var preview = escapeHtml((rp.content || '').slice(0, 100));
+                var lastActive = t.last_reply ? new Date(t.last_reply).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+                html += '<li class="row ' + bgClass + '" onclick="loadForumThread(\'' + rp.id + '\')" style="cursor:pointer">';
+                html += '<dl class="row-item">';
+                html += '<dt>';
+                html += '<span class="status-icon" style="width:26px;height:26px;font-size:0.6rem;flex-shrink:0;background:color-mix(in srgb, ' + prof.color + ' 15%, transparent);color:' + prof.color + ';border:1px solid color-mix(in srgb, ' + prof.color + ' 25%, transparent)">' + prof.icon + '</span>';
+                html += '<div class="list-inner">';
+                html += '<a class="topictitle" style="color:var(--link)">' + preview + '</a>';
+                html += '<br><span class="topic-author" style="font-size:0.75rem;color:var(--text-dim)">by <strong style="color:' + prof.color + '">' + escapeHtml(authorName) + '</strong></span>';
+                html += '</div></dt>';
+                html += '<dd class="posts">' + (t.reply_count || 0) + ' <dfn>replies</dfn></dd>';
+                html += '<dd class="lastpost"><span style="font-size:0.75rem;color:var(--text-dim)">' + lastActive + '</span></dd>';
+                html += '</dl></li>';
+            }
+            html += '</ul>';
+            body.innerHTML = html;
+        } catch (e) { console.error('Failed to load forum threads:', e); }
+    }
+
+    async function loadForumThread(threadId) {
+        state.currentForumThread = threadId;
+        state.currentView = 'thread';
+        // Show thread view
+        document.querySelectorAll('.view').forEach(function(v) { v.classList.remove('active'); });
+        document.querySelectorAll('.ntab').forEach(function(t) { t.classList.remove('active'); });
+        var viewEl = document.getElementById('view-thread');
+        if (viewEl) viewEl.classList.add('active');
+        window.location.hash = 'forum-thread/' + threadId;
+        var bc = document.getElementById('breadcrumbs');
+        if (bc) bc.innerHTML = '<a href="#" onclick="switchView(\'explore\')">mnemonic</a><span class="sep"> › </span><a href="#" onclick="switchView(\'explore\')">Forum</a><span class="sep"> › </span>Thread';
+        // Show compose box
+        var compose = document.getElementById('threadCompose');
+        if (compose) compose.style.display = '';
+        try {
+            var resp = await fetch('/api/v1/forum/threads/' + threadId);
+            var data = await resp.json();
+            var posts = data.posts || [];
+            var container = document.getElementById('threadContent');
+            if (!container) return;
+            if (posts.length === 0) {
+                container.innerHTML = '<div style="padding:16px;color:var(--text-dim)">Empty thread.</div>';
+                return;
+            }
+            var html = '<div class="thread-wrap">';
+            html += '<div class="thread-top"><h2 class="thread-title-big">' + escapeHtml((posts[0].content || '').slice(0, 80)) + '</h2>';
+            html += '<div class="thread-meta">' + posts.length + ' posts · started ' + new Date(posts[0].created_at).toLocaleString() + '</div>';
+            html += '</div>';
+            for (var i = 0; i < posts.length; i++) {
+                html += renderForumPost(posts[i], i);
+            }
+            html += '</div>';
+            container.innerHTML = html;
+        } catch (e) { console.error('Failed to load forum thread:', e); }
+    }
+
+    function renderForumPost(post, index) {
+        var bgClass = index % 2 === 0 ? 'bg1' : 'bg2';
+        var isAgent = post.author_type === 'agent';
+        var agentKey = post.author_key || '';
+        var profiles = {
+            consolidation: { name: 'Consolidation Agent', title: 'Memory Maintainer', icon: 'CA', color: 'var(--accent-yellow)' },
+            dreaming: { name: 'Dreaming Agent', title: 'Memory Replay', icon: 'DA', color: 'var(--accent-violet)' },
+            episoding: { name: 'Episoding Agent', title: 'Episode Clustering', icon: 'EP', color: 'var(--accent-violet)' },
+            abstraction: { name: 'Abstraction Agent', title: 'Pattern Discovery', icon: 'AA', color: 'var(--accent-orange)' },
+            metacognition: { name: 'Metacognition Agent', title: 'Self-Reflection', icon: 'MA', color: 'var(--accent-blue)' },
+            encoding: { name: 'Encoding Agent', title: 'Memory Encoder', icon: 'EA', color: 'var(--accent-blue)' },
+            perception: { name: 'Perception Agent', title: 'Filesystem Watcher', icon: 'PA', color: 'var(--accent-green)' },
+            retrieval: { name: 'Retrieval Agent', title: 'Spread Activation', icon: 'RA', color: 'var(--accent-cyan)' },
+        };
+        var prof = profiles[agentKey] || { name: post.author_name || 'Human', title: isAgent ? 'Agent' : 'User', icon: isAgent ? agentKey.slice(0,2).toUpperCase() : 'HU', color: isAgent ? 'var(--text-dim)' : 'var(--accent-cyan)' };
+        var time = new Date(post.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        // Highlight @mentions in content
+        var contentHtml = escapeHtml(post.content || '').replace(/@(retrieval|metacognition|encoding|episoding|consolidation|dreaming|abstraction|perception)/g, '<strong style="color:var(--accent-cyan)">@$1</strong>');
+        var html = '<div class="post ' + bgClass + '" id="forum-post-' + post.id + '">';
+        html += '<div class="inner"><dl class="postprofile">';
+        html += '<dt><div class="avatar-container" style="background:color-mix(in srgb, ' + prof.color + ' 15%, transparent);color:' + prof.color + ';border:1px solid color-mix(in srgb, ' + prof.color + ' 25%, transparent)">' + prof.icon + '</div>';
+        html += '<strong style="color:' + prof.color + '">' + escapeHtml(prof.name) + '</strong></dt>';
+        html += '<dd class="profile-rank"><span class="rank-' + (isAgent ? 'insight' : 'general') + '">' + escapeHtml(prof.title) + '</span></dd>';
+        if (post.event_ref) html += '<dd style="font-size:0.7rem;color:var(--text-dim)">via ' + escapeHtml(post.event_ref) + '</dd>';
+        html += '</dl><div class="postbody">';
+        html += '<p class="post-meta"><span>Posted by <strong style="color:' + prof.color + '">' + escapeHtml(prof.name) + '</strong> · ' + time + '</span><span style="color:var(--text-dim)">#' + (index + 1) + '</span></p>';
+        html += '<div class="content">' + contentHtml + '</div>';
+        if (post.state === 'internalized') {
+            html += '<div style="margin-top:4px"><span style="font-size:0.7rem;padding:1px 6px;background:color-mix(in srgb, var(--accent-green) 15%, transparent);color:var(--accent-green);border-radius:3px">internalized</span></div>';
+        } else {
+            html += '<div style="margin-top:6px"><button onclick="internalizePost(\'' + post.id + '\', this)" style="font-size:0.7rem;padding:1px 8px;background:transparent;border:1px solid var(--border-subtle);color:var(--text-dim);border-radius:3px;cursor:pointer">internalize</button></div>';
+        }
+        html += '</div></div></div>';
+        return html;
+    }
+
+    function appendForumPostToThread(payload) {
+        var container = document.getElementById('threadContent');
+        if (!container) return;
+        var wrap = container.querySelector('.thread-wrap');
+        if (!wrap) return;
+        var postCount = wrap.querySelectorAll('.post').length;
+        var postObj = {
+            id: payload.post_id,
+            content: payload.content,
+            author_type: payload.author_type,
+            author_name: payload.author_name,
+            author_key: payload.author_key || '',
+            created_at: payload.timestamp || new Date().toISOString(),
+            state: 'active',
+        };
+        wrap.insertAdjacentHTML('beforeend', renderForumPost(postObj, postCount));
+        // Scroll to new post
+        var newPost = document.getElementById('forum-post-' + payload.post_id);
+        if (newPost) newPost.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+
+    function showNewThreadForm() {
+        var form = document.getElementById('newThreadForm');
+        if (form) { form.style.display = ''; document.getElementById('newThreadContent').focus(); }
+    }
+
+    async function submitNewThread() {
+        var textarea = document.getElementById('newThreadContent');
+        var content = (textarea.value || '').trim();
+        if (!content) return;
+        textarea.disabled = true;
+        try {
+            var resp = await fetch('/api/v1/forum/posts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content: content })
+            });
+            var data = await resp.json();
+            textarea.value = '';
+            textarea.disabled = false;
+            document.getElementById('newThreadForm').style.display = 'none';
+            showToast('Thread created');
+            state.forumLoaded = false;
+            loadForumThreads();
+            // Navigate to the new thread
+            loadForumThread(data.thread_id);
+        } catch (e) {
+            textarea.disabled = false;
+            showToast('Failed to create thread', 'error');
+        }
+    }
+
+    async function submitThreadReply() {
+        var textarea = document.getElementById('threadReplyContent');
+        var content = (textarea.value || '').trim();
+        if (!content || !state.currentForumThread) return;
+        textarea.disabled = true;
+        try {
+            await fetch('/api/v1/forum/posts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content: content, thread_id: state.currentForumThread })
+            });
+            textarea.value = '';
+            textarea.disabled = false;
+            showToast('Reply posted');
+            // The WebSocket event will handle live-inserting the post
+        } catch (e) {
+            textarea.disabled = false;
+            showToast('Failed to post reply', 'error');
+        }
+    }
+
+    async function internalizePost(postId, btn) {
+        btn.disabled = true;
+        btn.textContent = 'internalizing...';
+        try {
+            var resp = await fetch('/api/v1/forum/posts/' + postId + '/internalize', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})
+            });
+            if (resp.ok) {
+                btn.textContent = 'internalized';
+                btn.style.color = 'var(--accent-green)';
+                btn.style.borderColor = 'var(--accent-green)';
+                showToast('Post internalized into memory');
+            } else {
+                var data = await resp.json();
+                btn.textContent = data.error === 'post already internalized' ? 'already internalized' : 'failed';
+                btn.disabled = false;
+            }
+        } catch (e) {
+            btn.textContent = 'failed';
+            btn.disabled = false;
+            showToast('Failed to internalize', 'error');
+        }
+    }
+
     function toggleToolDetail(e) {
         var pill = e.currentTarget;
         var toolId = pill.getAttribute('data-tool-use-id');

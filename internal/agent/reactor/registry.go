@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/appsprout-dev/mnemonic/internal/events"
+	"github.com/appsprout-dev/mnemonic/internal/llm"
 	"gopkg.in/yaml.v3"
 )
 
@@ -20,6 +21,9 @@ type ChainDeps struct {
 	MaxDBSizeMB          int
 	CooldownOverrides    map[string]time.Duration // chain ID -> cooldown override
 	Logger               *slog.Logger
+	// Forum @mention dependencies (can be nil to disable)
+	MentionLLM   llm.Provider // for @mention LLM responses
+	MentionQuery ForumQuerier // for @retrieval recall queries
 }
 
 // cooldown returns the override duration for a chain if set, otherwise the default.
@@ -205,6 +209,134 @@ func NewChainRegistry(deps ChainDeps) []*Chain {
 			Enabled:  true,
 		})
 	}
+
+	// --- Forum posting chains ---
+	// Agents autonomously post about their work in the forum.
+
+	forumAction := &CreateForumPostAction{Log: log}
+
+	chains = append(chains, &Chain{
+		ID:          "forum_on_consolidation",
+		Name:        "Forum: Post Consolidation Summary",
+		Description: "Post to forum when consolidation completes",
+		Trigger:     EventTypeMatcher{EventType: events.TypeConsolidationCompleted},
+		TriggerType: events.TypeConsolidationCompleted,
+		Conditions: []Condition{
+			&CooldownCondition{
+				ChainID:  "forum_on_consolidation",
+				Duration: deps.cooldown("forum_on_consolidation", 30*time.Minute),
+			},
+		},
+		Actions:  []Action{forumAction},
+		Cooldown: deps.cooldown("forum_on_consolidation", 30*time.Minute),
+		Priority: 1,
+		Enabled:  true,
+	})
+
+	chains = append(chains, &Chain{
+		ID:          "forum_on_dream",
+		Name:        "Forum: Post Dream Cycle Summary",
+		Description: "Post to forum when dream cycle completes",
+		Trigger:     EventTypeMatcher{EventType: events.TypeDreamCycleCompleted},
+		TriggerType: events.TypeDreamCycleCompleted,
+		Conditions: []Condition{
+			&CooldownCondition{
+				ChainID:  "forum_on_dream",
+				Duration: deps.cooldown("forum_on_dream", 10*time.Minute),
+			},
+		},
+		Actions:  []Action{forumAction},
+		Cooldown: deps.cooldown("forum_on_dream", 10*time.Minute),
+		Priority: 1,
+		Enabled:  true,
+	})
+
+	chains = append(chains, &Chain{
+		ID:          "forum_on_episode",
+		Name:        "Forum: Post Episode Summary",
+		Description: "Post to forum when an episode closes",
+		Trigger:     EventTypeMatcher{EventType: events.TypeEpisodeClosed},
+		TriggerType: events.TypeEpisodeClosed,
+		Conditions: []Condition{
+			&CooldownCondition{
+				ChainID:  "forum_on_episode",
+				Duration: deps.cooldown("forum_on_episode", 5*time.Minute),
+			},
+		},
+		Actions:  []Action{forumAction},
+		Cooldown: deps.cooldown("forum_on_episode", 5*time.Minute),
+		Priority: 1,
+		Enabled:  true,
+	})
+
+	chains = append(chains, &Chain{
+		ID:          "forum_on_pattern",
+		Name:        "Forum: Post Pattern Discovery",
+		Description: "Post to forum when a new pattern is discovered",
+		Trigger:     EventTypeMatcher{EventType: events.TypePatternDiscovered},
+		TriggerType: events.TypePatternDiscovered,
+		Conditions:  []Condition{},
+		Actions:     []Action{forumAction},
+		Cooldown:    0,
+		Priority:    1,
+		Enabled:     true,
+	})
+
+	chains = append(chains, &Chain{
+		ID:          "forum_on_abstraction",
+		Name:        "Forum: Post Abstraction Created",
+		Description: "Post to forum when a new principle or axiom is synthesized",
+		Trigger:     EventTypeMatcher{EventType: events.TypeAbstractionCreated},
+		TriggerType: events.TypeAbstractionCreated,
+		Conditions:  []Condition{},
+		Actions:     []Action{forumAction},
+		Cooldown:    0,
+		Priority:    1,
+		Enabled:     true,
+	})
+
+	// Forum @mention response chain
+	chains = append(chains, &Chain{
+		ID:          "forum_mention_response",
+		Name:        "Forum: Respond to @Mention",
+		Description: "Generate an LLM-powered response when an agent is @mentioned",
+		Trigger:     EventTypeMatcher{EventType: events.TypeForumMentionDetected},
+		TriggerType: events.TypeForumMentionDetected,
+		Conditions: []Condition{
+			&CooldownCondition{
+				ChainID:  "forum_mention_response",
+				Duration: deps.cooldown("forum_mention_response", 10*time.Second),
+			},
+		},
+		Actions: []Action{
+			&RespondToMentionAction{
+				LLM:          deps.MentionLLM,
+				ForumQuerier: deps.MentionQuery,
+				Log:          log,
+			},
+		},
+		Cooldown: deps.cooldown("forum_mention_response", 10*time.Second),
+		Priority: 5,
+		Enabled:  true,
+	})
+
+	chains = append(chains, &Chain{
+		ID:          "forum_on_meta",
+		Name:        "Forum: Post Metacognition Audit",
+		Description: "Post to forum when metacognition completes a quality audit",
+		Trigger:     EventTypeMatcher{EventType: events.TypeMetaCycleCompleted},
+		TriggerType: events.TypeMetaCycleCompleted,
+		Conditions: []Condition{
+			&CooldownCondition{
+				ChainID:  "forum_on_meta",
+				Duration: deps.cooldown("forum_on_meta", 30*time.Minute),
+			},
+		},
+		Actions:  []Action{forumAction},
+		Cooldown: deps.cooldown("forum_on_meta", 30*time.Minute),
+		Priority: 1,
+		Enabled:  true,
+	})
 
 	return chains
 }

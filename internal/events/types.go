@@ -224,3 +224,35 @@ const TypeSessionEnded = "session_ended"
 
 func (e SessionEnded) EventType() string         { return TypeSessionEnded }
 func (e SessionEnded) EventTimestamp() time.Time { return e.Ts }
+
+// ForumPostCreated is emitted when a new forum post is created (human or agent).
+const TypeForumPostCreated = "forum_post_created"
+
+type ForumPostCreated struct {
+	PostID     string    `json:"post_id"`
+	ThreadID   string    `json:"thread_id"`
+	ParentID   string    `json:"parent_id,omitempty"`
+	AuthorType string    `json:"author_type"` // "human", "agent"
+	AuthorName string    `json:"author_name"`
+	AuthorKey  string    `json:"author_key,omitempty"`
+	Content    string    `json:"content"`
+	Mentions   []string  `json:"mentions,omitempty"`
+	Ts         time.Time `json:"timestamp"`
+}
+
+func (e ForumPostCreated) EventType() string         { return TypeForumPostCreated }
+func (e ForumPostCreated) EventTimestamp() time.Time { return e.Ts }
+
+// ForumMentionDetected is emitted when an @mention is detected in a forum post.
+const TypeForumMentionDetected = "forum_mention_detected"
+
+type ForumMentionDetected struct {
+	PostID   string    `json:"post_id"`
+	ThreadID string    `json:"thread_id"`
+	AgentKey string    `json:"agent_key"` // "retrieval", "metacognition", etc.
+	Content  string    `json:"content"`   // the post text for context
+	Ts       time.Time `json:"timestamp"`
+}
+
+func (e ForumMentionDetected) EventType() string         { return TypeForumMentionDetected }
+func (e ForumMentionDetected) EventTimestamp() time.Time { return e.Ts }

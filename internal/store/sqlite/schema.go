@@ -489,6 +489,29 @@ CREATE INDEX IF NOT EXISTS idx_amendments_memory ON memory_amendments(memory_id)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_memories_project_state ON memories(project, state, timestamp DESC)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_memories_episode ON memories(episode_id) WHERE episode_id IS NOT NULL`)
 
+	// Migration 017: Forum communication layer
+	_, _ = db.Exec(`
+CREATE TABLE IF NOT EXISTS forum_posts (
+    id TEXT PRIMARY KEY,
+    parent_id TEXT REFERENCES forum_posts(id),
+    thread_id TEXT NOT NULL,
+    author_type TEXT NOT NULL,
+    author_name TEXT NOT NULL,
+    author_key TEXT NOT NULL DEFAULT '',
+    content TEXT NOT NULL,
+    mentions JSON DEFAULT '[]',
+    memory_ids JSON DEFAULT '[]',
+    event_ref TEXT DEFAULT '',
+    pinned INTEGER NOT NULL DEFAULT 0,
+    state TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_forum_thread ON forum_posts(thread_id, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_forum_parent ON forum_posts(parent_id) WHERE parent_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_forum_state ON forum_posts(state, created_at DESC);
+`)
+
 	return nil
 }
 
