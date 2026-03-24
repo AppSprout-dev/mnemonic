@@ -4781,7 +4781,7 @@
             for (var mi = 0; mi < memSections.length; mi++) {
                 var ms = memSections[mi];
                 var bgClass = mi % 2 === 0 ? 'bg1' : 'bg2';
-                html += '<li class="row ' + bgClass + '" id="memsec-' + ms.id + '" style="cursor:pointer">';
+                html += '<li class="row ' + bgClass + '" id="memsec-' + ms.id + '" onclick="window._loadMemSec(\'' + ms.id + '\')" style="cursor:pointer">';
                 html += '<dl class="row-item"><dt>';
                 html += '<span class="status-icon" style="width:28px;height:28px;font-size:0.6rem;flex-shrink:0;background:color-mix(in srgb, ' + ms.color + ' 15%, transparent);color:' + ms.color + ';border:1px solid color-mix(in srgb, ' + ms.color + ' 25%, transparent)">' + ms.icon + '</span>';
                 html += '<div class="list-inner">';
@@ -4798,14 +4798,22 @@
             html += '<div style="padding:6px 16px"><button class="recall-btn" style="font-size:0.78rem;padding:3px 10px" onclick="showNewThreadForm()">+ New Thread</button></div>';
             container.innerHTML = html;
 
-            // Bind click handlers for memory section rows
-            memSections.forEach(function(ms) {
-                var el = document.getElementById('memsec-' + ms.id);
-                if (el) el.addEventListener('click', function() { loadMemorySection(ms.id, ms.name); });
+            // Bind click handlers for memory section rows via delegation
+            container.addEventListener('click', function(e) {
+                var row = e.target.closest('[id^="memsec-"]');
+                if (row) {
+                    var secId = row.id.replace('memsec-', '');
+                    var secNames = { episodes: 'Episodes', memories: 'Recent Memories', patterns: 'Discovered Patterns', abstractions: 'Abstractions & Principles' };
+                    if (secNames[secId]) loadMemorySection(secId, secNames[secId]);
+                }
             });
         } catch (e) { console.error('Failed to load forum index:', e); }
     }
 
+    window._loadMemSec = function(id) {
+        var names = { episodes: 'Episodes', memories: 'Recent Memories', patterns: 'Discovered Patterns', abstractions: 'Abstractions & Principles' };
+        loadMemorySection(id, names[id] || id);
+    };
     async function loadMemorySection(sectionId, sectionName) {
         state.currentView = 'thread';
         document.querySelectorAll('.view').forEach(function(v) { v.classList.remove('active'); });
