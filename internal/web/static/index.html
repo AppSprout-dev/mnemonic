@@ -1164,15 +1164,21 @@
 
             <!-- Forum View (replaces Explore) -->
             <section class="view" id="view-explore">
-                <div id="forumWelcome" class="welcome-panel" style="display:none">
-                    <div class="welcome-bar">Welcome Back</div>
-                    <div class="welcome-body">
+                <div class="welcome-panel" id="forumWelcome" style="display:none">
+                    <div class="welcome-bar" style="display:flex;align-items:center;justify-content:space-between">
+                        <span style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:var(--accent-green);animation:pulse 2s ease-in-out infinite"></span> Welcome Back</span>
+                        <span id="liveFeedCount" style="font-size:0.75rem;font-weight:normal;color:var(--text-dim)">waiting for events...</span>
+                    </div>
+                    <div class="welcome-body" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:4px">
                         <span id="welcomeVisit"></span>
                         <div class="stats">
                             <span><span class="stat-val" id="welcomeActive">0</span> active</span>
                             <span><span class="stat-val" id="welcomeFading">0</span> fading</span>
                             <span><span class="stat-val" id="welcomeArchived">0</span> archived</span>
                         </div>
+                    </div>
+                    <div id="liveFeedBody" style="max-height:150px;overflow-y:auto;border-top:1px solid var(--border-subtle);margin-top:4px">
+                        <div style="padding:4px 8px;color:var(--text-dim);font-size:0.78rem">Listening for agent activity...</div>
                     </div>
                 </div>
                 <div id="forumIndex">
@@ -1191,44 +1197,11 @@
                         </div>
                     </div>
                 </div>
-                <div class="forabg" id="forumLiveFeed">
-                    <div class="forabg-head">
-                        <span class="forabg-title" style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:var(--accent-green);animation:pulse 2s ease-in-out infinite"></span> Live Activity</span>
-                        <span class="forabg-meta" id="liveFeedCount">waiting for events...</span>
-                    </div>
-                    <div class="inner" id="liveFeedBody" style="max-height:300px;overflow-y:auto">
-                        <div style="padding:8px 16px;color:var(--text-dim);font-size:0.82rem">Listening for agent activity...</div>
-                    </div>
-                </div>
-                <div class="forabg">
-                    <div class="forabg-head" onclick="this.nextElementSibling.classList.toggle('collapsed')">
-                        <span class="forabg-title">Episodes</span>
-                        <span class="forabg-meta" id="epCount"></span>
-                    </div>
-                    <div class="inner" id="section-episodes"><div style="padding:10px;color:var(--text-dim)">Loading...</div></div>
-                </div>
-                <div class="forabg">
-                    <div class="forabg-head" onclick="this.nextElementSibling.classList.toggle('collapsed')">
-                        <span class="forabg-title">Recent Memories</span>
-                        <span class="forabg-meta" id="memCount"></span>
-                    </div>
-                    <div class="inner" id="section-memories"><div style="padding:10px;color:var(--text-dim)">Loading...</div></div>
-                </div>
-                <div class="forabg">
-                    <div class="forabg-head" onclick="this.nextElementSibling.classList.toggle('collapsed')">
-                        <span class="forabg-title">Discovered Patterns</span>
-                        <span class="forabg-meta" id="patCount"></span>
-                    </div>
-                    <div class="inner" id="section-patterns"><div style="padding:10px;color:var(--text-dim)">Loading...</div></div>
-                </div>
-                <div class="forabg">
-                    <div class="forabg-head" onclick="this.nextElementSibling.classList.toggle('collapsed')">
-                        <span class="forabg-title">Abstractions &amp; Principles</span>
-                        <span class="forabg-meta" id="absCount"></span>
-                    </div>
-                    <div class="inner" id="section-abstractions"><div style="padding:10px;color:var(--text-dim)">Loading...</div></div>
-                </div>
-                <input type="text" class="explore-search" id="exploreSearch" placeholder="Filter..." oninput="filterExplore()" style="margin:8px 16px;padding:4px 8px;background:var(--bg-primary);border:1px solid var(--border-subtle);color:var(--text-primary);font-size:0.85rem;border-radius:3px;width:calc(100% - 32px)">
+                <!-- Hidden containers for explore data (used by loadExploreTab but no longer shown directly) -->
+                <div style="display:none" id="section-episodes"></div>
+                <div style="display:none" id="section-memories"></div>
+                <div style="display:none" id="section-patterns"></div>
+                <div style="display:none" id="section-abstractions"></div>
             </section>
 
             <!-- Thread View (episode detail) -->
@@ -1719,18 +1692,11 @@
         var crumbMap = { recall: 'Search', explore: 'Forum', timeline: 'Timeline', agent: 'SDK', llm: 'LLM Usage', tools: 'Tools' };
         var bc = document.getElementById('breadcrumbs');
         if (bc && crumbMap[name]) bc.innerHTML = '<a href="#" onclick="switchView(\'explore\')">mnemonic</a><span class="sep"> › </span>' + crumbMap[name];
-        if (name === 'explore' && !state.exploreLoaded.episodes) {
-            // Load all forum blocks in parallel
-            loadExploreTab('episodes');
-            loadExploreTab('memories');
-            loadExploreTab('patterns');
-            loadExploreTab('abstractions');
+        if (name === 'explore') {
             loadForumIndex();
-            // Populate welcome panel
             var wp = document.getElementById('forumWelcome');
             if (wp) wp.style.display = '';
         }
-        if (name === 'explore' && !state.forumLoaded) loadForumIndex();
         if (name === 'timeline' && !state.timelineInitialized) { populateTimelineProjects(); loadTimelineData(false); }
         if (name === 'agent' && !state.agentLoaded) loadAgentData();
         if (name === 'llm' && !state.llmLoaded) loadLLMUsage();
@@ -1755,6 +1721,12 @@
         if (hash.startsWith('forum-thread/')) {
             var threadId = hash.substring(13);
             if (threadId) loadForumThread(threadId);
+            return;
+        }
+        if (hash.startsWith('memory-section/')) {
+            var secId = hash.substring(15);
+            var secNames = { episodes: 'Episodes', memories: 'Recent Memories', patterns: 'Discovered Patterns', abstractions: 'Abstractions & Principles' };
+            if (secId && secNames[secId]) loadMemorySection(secId, secNames[secId]);
             return;
         }
         if (hash.startsWith('forum-group/')) {
@@ -4785,9 +4757,84 @@
             });
 
             html += '</ul></div></div>';
+
+            // Memory System group — links to episode, memory, pattern, abstraction views
+            html += '<div class="forabg" style="margin-bottom:2px">';
+            html += '<div class="forabg-head"><span class="forabg-title">Memory System</span></div>';
+            html += '<div class="inner">';
+            html += '<ul class="topiclist"><li class="header"><dl class="row-item">';
+            html += '<dt><div class="list-inner">Section</div></dt>';
+            html += '<dd class="posts">Count</dd>';
+            html += '<dd class="posts"></dd>';
+            html += '<dd class="lastpost"></dd>';
+            html += '</dl></li></ul>';
+            html += '<ul class="topiclist forums">';
+
+            var memSections = [
+                { id: 'episodes', name: 'Episodes', desc: 'Temporal groupings of observations', icon: 'EP', color: 'var(--accent-violet)', countId: 'epCount' },
+                { id: 'memories', name: 'Recent Memories', desc: 'Encoded knowledge from all sources', icon: 'MM', color: 'var(--accent-cyan)', countId: 'memCount' },
+                { id: 'patterns', name: 'Discovered Patterns', desc: 'Recurring patterns across memories', icon: 'PT', color: 'var(--accent-orange)', countId: 'patCount' },
+                { id: 'abstractions', name: 'Abstractions & Principles', desc: 'Higher-order knowledge and axioms', icon: 'AB', color: 'var(--accent-green)', countId: 'absCount' },
+            ];
+            for (var mi = 0; mi < memSections.length; mi++) {
+                var ms = memSections[mi];
+                var bgClass = mi % 2 === 0 ? 'bg1' : 'bg2';
+                html += '<li class="row ' + bgClass + '" onclick="loadMemorySection(\'' + ms.id + '\', \'' + ms.name + '\')" style="cursor:pointer">';
+                html += '<dl class="row-item"><dt>';
+                html += '<span class="status-icon" style="width:28px;height:28px;font-size:0.6rem;flex-shrink:0;background:color-mix(in srgb, ' + ms.color + ' 15%, transparent);color:' + ms.color + ';border:1px solid color-mix(in srgb, ' + ms.color + ' 25%, transparent)">' + ms.icon + '</span>';
+                html += '<div class="list-inner">';
+                html += '<a class="topictitle" style="color:var(--link)">' + ms.name + '</a>';
+                html += '<br><span style="font-size:0.75rem;color:var(--text-dim)">' + ms.desc + '</span>';
+                html += '</div></dt>';
+                html += '<dd class="posts" id="forumIdx_' + ms.countId + '"></dd>';
+                html += '<dd class="posts"></dd>';
+                html += '<dd class="lastpost"></dd>';
+                html += '</dl></li>';
+            }
+            html += '</ul></div></div>';
+
             html += '<div style="padding:6px 16px"><button class="recall-btn" style="font-size:0.78rem;padding:3px 10px" onclick="showNewThreadForm()">+ New Thread</button></div>';
             container.innerHTML = html;
+
+            // Populate memory section counts from existing explore data
+            loadExploreTab('episodes');
+            loadExploreTab('memories');
+            loadExploreTab('patterns');
+            loadExploreTab('abstractions');
         } catch (e) { console.error('Failed to load forum index:', e); }
+    }
+
+    function loadMemorySection(sectionId, sectionName) {
+        // Navigate to thread view and render the explore section content there
+        state.currentView = 'thread';
+        document.querySelectorAll('.view').forEach(function(v) { v.classList.remove('active'); });
+        document.querySelectorAll('.ntab').forEach(function(t) { t.classList.remove('active'); });
+        var viewEl = document.getElementById('view-thread');
+        if (viewEl) viewEl.classList.add('active');
+        window.location.hash = 'memory-section/' + sectionId;
+        var bc = document.getElementById('breadcrumbs');
+        if (bc) bc.innerHTML = '<a href="#" onclick="switchView(\'explore\')">mnemonic</a><span class="sep"> › </span><a href="#" onclick="switchView(\'explore\')">Forum</a><span class="sep"> › </span>Memory System<span class="sep"> › </span>' + escapeHtml(sectionName);
+        var compose = document.getElementById('threadCompose');
+        if (compose) compose.style.display = 'none';
+
+        var container = document.getElementById('threadContent');
+        if (!container) return;
+
+        // Copy content from the hidden explore section
+        var source = document.getElementById('section-' + sectionId);
+        if (source && source.innerHTML && !source.innerHTML.includes('Loading...')) {
+            container.innerHTML = '<div class="forabg" style="margin:0"><div class="forabg-head"><span class="forabg-title">' + escapeHtml(sectionName) + '</span></div><div class="inner">' + source.innerHTML + '</div></div>';
+        } else {
+            container.innerHTML = '<div style="padding:16px;color:var(--text-dim)">Loading ' + escapeHtml(sectionName) + '...</div>';
+            // Trigger load and retry after data arrives
+            if (!state.exploreLoaded[sectionId]) loadExploreTab(sectionId);
+            setTimeout(function() {
+                var src = document.getElementById('section-' + sectionId);
+                if (src && container) {
+                    container.innerHTML = '<div class="forabg" style="margin:0"><div class="forabg-head"><span class="forabg-title">' + escapeHtml(sectionName) + '</span></div><div class="inner">' + src.innerHTML + '</div></div>';
+                }
+            }, 2000);
+        }
     }
 
     async function loadForumGroup(type) {
