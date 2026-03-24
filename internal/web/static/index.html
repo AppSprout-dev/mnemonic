@@ -1870,6 +1870,10 @@
         var tab = document.querySelector('.ntab[data-view="' + name + '"]') || document.querySelector('.nav-tab[data-view="' + name + '"]');
         if (tab) tab.classList.add('active');
         window.location.hash = name;
+        // Update breadcrumbs
+        var crumbMap = { recall: 'Search', explore: 'Forum', timeline: 'Timeline', agent: 'SDK', llm: 'LLM Usage', tools: 'Tools' };
+        var bc = document.getElementById('breadcrumbs');
+        if (bc && crumbMap[name]) bc.innerHTML = '<a href="#" onclick="switchView(\'explore\')">mnemonic</a><span class="sep"> › </span>' + crumbMap[name];
         if (name === 'explore' && !state.exploreLoaded.episodes) {
             // Load all forum blocks in parallel
             loadExploreTab('episodes');
