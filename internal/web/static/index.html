@@ -179,44 +179,24 @@
         }
         .results-meta { font-size: 0.8rem; color: var(--text-dim); }
 
-        .result-card {
-            background: var(--bg-card);
-            border: 1px solid var(--border-subtle);
-            border-radius: var(--radius-md);
-            padding: 16px; margin-bottom: 8px;
-            cursor: pointer;
-            transition: border-color 0.2s, background 0.2s;
-        }
-        .result-card:hover {
-            border-color: var(--border-color);
-            background: var(--bg-tertiary);
-        }
-        .result-card-header { display: flex; align-items: flex-start; gap: 10px; }
-        .result-score {
-            flex-shrink: 0; padding: 2px 8px;
-            border-radius: 4px; font-size: 0.75rem; font-weight: 700;
-            font-family: 'SF Mono', Monaco, monospace;
-        }
-        .score-high { background: color-mix(in srgb, var(--accent-green) 15%, transparent); color: var(--accent-green); }
-        .score-mid { background: color-mix(in srgb, var(--accent-cyan) 15%, transparent); color: var(--accent-cyan); }
-        .score-low { background: color-mix(in srgb, var(--text-muted) 15%, transparent); color: var(--text-muted); }
-        .result-summary { font-size: 0.95rem; line-height: 1.5; color: var(--text-secondary); }
-        .result-meta { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+        
+        
+        
+        
+        
+        
+        
+        
+        
         .concept-tag {
             padding: 2px 8px; border-radius: 10px;
             font-size: 0.7rem; font-weight: 500;
             background: color-mix(in srgb, var(--accent-violet) 12%, transparent); color: var(--accent-violet);
         }
-        .result-date { font-size: 0.75rem; color: var(--text-dim); margin-left: auto; }
-        .result-expanded {
-            display: none; margin-top: 12px; padding-top: 12px;
-            border-top: 1px solid var(--border-subtle);
-        }
-        .result-expanded.open { display: block; }
-        .result-content {
-            font-size: 0.85rem; line-height: 1.6; color: var(--text-muted);
-            white-space: pre-wrap; max-height: 200px; overflow-y: auto;
-        }
+        
+        
+        
+        
 
         /* Feedback */
         .feedback-bar {
@@ -333,16 +313,10 @@
         .explore-section.active { display: block; }
 
         /* Episode cards */
-        .episode-card {
-            background: var(--bg-card);
-            border: 1px solid var(--border-subtle);
-            border-radius: var(--radius-md);
-            padding: 16px; margin-bottom: 10px;
-            cursor: pointer; transition: border-color 0.2s;
-        }
-        .episode-card:hover { border-color: var(--border-color); }
-        .episode-header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
-        .episode-title { font-size: 0.95rem; font-weight: 600; flex: 1; }
+        
+        
+        
+        
         .badge {
             padding: 2px 8px; border-radius: 10px;
             font-size: 0.7rem; font-weight: 600;
@@ -356,100 +330,49 @@
         .badge-paused { background: color-mix(in srgb, var(--accent-orange) 15%, transparent); color: var(--accent-orange); }
         .badge-type { background: color-mix(in srgb, var(--accent-teal) 15%, transparent); color: var(--accent-teal); }
         .badge-level { background: color-mix(in srgb, var(--accent-violet) 15%, transparent); color: var(--accent-violet); }
-        .episode-summary { font-size: 0.85rem; color: var(--text-muted); line-height: 1.5; margin-bottom: 8px; }
-        .episode-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-        .episode-concepts { display: flex; gap: 4px; flex-wrap: wrap; }
+        
+        
+        
         .episode-date { font-size: 0.75rem; color: var(--text-dim); margin-left: auto; }
-        .episode-expanded {
-            display: none; margin-top: 12px; padding-top: 12px;
-            border-top: 1px solid var(--border-subtle);
-        }
+        
         .episode-expanded.open { display: block; }
-        .episode-narrative {
-            font-size: 0.85rem; color: var(--text-muted); line-height: 1.6;
-            font-style: italic; border-left: 2px solid var(--accent-cyan);
-            padding-left: 12px; margin-bottom: 12px;
-        }
-        .episode-file {
-            font-size: 0.8rem; color: var(--accent-cyan);
-            font-family: 'SF Mono', Monaco, monospace; padding: 2px 0;
-        }
+        
+        
 
         /* Memory cards */
-        .memory-card {
-            background: var(--bg-card);
-            border: 1px solid var(--border-subtle);
-            border-radius: var(--radius-md);
-            padding: 16px 18px; margin-bottom: 10px;
-            cursor: pointer; transition: border-color 0.2s;
-        }
-        .memory-card:hover { border-color: var(--border-color); }
-        .memory-header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-        .memory-type-badge {
-            flex-shrink: 0; padding: 2px 8px;
-            border-radius: 4px; font-size: 0.7rem; font-weight: 600;
-        }
+        
+        
+        
+        
         .type-decision { background: color-mix(in srgb, var(--accent-orange) 15%, transparent); color: var(--accent-orange); }
         .type-error { background: color-mix(in srgb, var(--accent-red) 15%, transparent); color: var(--accent-red); }
         .type-insight { background: color-mix(in srgb, var(--accent-violet) 15%, transparent); color: var(--accent-violet); }
         .type-learning { background: color-mix(in srgb, var(--accent-blue) 15%, transparent); color: var(--accent-blue); }
         .type-general { background: color-mix(in srgb, var(--text-muted) 10%, transparent); color: var(--text-muted); }
-        .memory-project {
-            font-size: 0.75rem; color: var(--accent-blue); opacity: 0.8;
-        }
-        .memory-header-spacer { flex: 1; }
-        .memory-date { font-size: 0.75rem; color: var(--text-dim); flex-shrink: 0; }
-        .memory-summary {
-            font-size: 0.9rem; line-height: 1.5; margin-top: 8px;
-            color: var(--text-primary);
-        }
-        .memory-content-preview {
-            font-size: 0.82rem; line-height: 1.55; color: var(--text-muted);
-            margin-top: 6px;
-            display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
-            overflow: hidden;
-        }
-        .memory-stats-row {
-            display: flex; align-items: center; gap: 12px; margin-top: 10px;
-            font-size: 0.75rem; color: var(--text-dim); flex-wrap: wrap;
-        }
-        .memory-salience {
-            display: flex; align-items: center; gap: 6px;
-        }
+        
+        
+        
+        
+        
+        
+        
         .salience-bar { width: 80px; height: 5px; background: var(--bg-secondary); border-radius: 3px; overflow: hidden; }
         .salience-fill { height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--accent-cyan), var(--accent-teal)); }
         .salience-label { font-size: 0.72rem; color: var(--text-dim); }
-        .memory-stat-sep { color: var(--border-color); }
-        .memory-access-count { color: var(--accent-teal); }
-        .memory-state {
-            padding: 1px 6px;
-            border-radius: 3px; font-size: 0.7rem; font-weight: 600;
-        }
+        
+        
+        
         .state-active { background: color-mix(in srgb, var(--accent-green) 15%, transparent); color: var(--accent-green); }
         .state-fading { background: color-mix(in srgb, var(--accent-orange) 15%, transparent); color: var(--accent-orange); }
         .state-archived { background: color-mix(in srgb, var(--text-muted) 10%, transparent); color: var(--text-dim); }
-        .memory-gist-badge {
-            font-size: 0.72rem; color: var(--accent-violet); opacity: 0.9;
-        }
-        .memory-episode-link {
-            font-size: 0.72rem; color: var(--accent-cyan); opacity: 0.9;
-        }
-        .memory-meta-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
-        .memory-expanded {
-            display: none; margin-top: 12px; padding-top: 12px;
-            border-top: 1px solid var(--border-subtle);
-        }
+        
+        
+        
+        
         .memory-expanded.open { display: block; }
-        .memory-expanded-detail {
-            font-size: 0.75rem; color: var(--text-dim); margin-top: 8px;
-            display: flex; flex-wrap: wrap; gap: 12px;
-        }
+        
         .memory-expanded-detail span { opacity: 0.8; }
-        .memory-id-label {
-            font-family: 'SF Mono', Monaco, monospace;
-            font-size: 0.7rem; color: var(--text-dim); opacity: 0.6;
-            cursor: pointer;
-        }
+        
         .memory-id-label:hover { opacity: 1; }
 
         /* Pattern & Abstraction cards */
@@ -552,22 +475,10 @@
         .timeline-body::-webkit-scrollbar-track { background: transparent; }
         .timeline-body::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
 
-        .timeline-date-group { margin-top: 24px; }
-        .timeline-date-label {
-            font-size: 0.7rem; font-weight: 600; color: var(--text-dim);
-            text-transform: uppercase; letter-spacing: 0.06em;
-            padding-bottom: 8px;
-            position: sticky; top: 0; z-index: 5;
-            background: var(--bg-primary);
-            display: flex; align-items: center; gap: 10px;
-        }
-        .timeline-date-label::after {
-            content: ''; flex: 1; height: 1px;
-            background: var(--border-subtle);
-        }
-        .timeline-date-count {
-            font-size: 0.65rem; color: var(--text-dim); font-weight: 400; opacity: 0.6;
-        }
+        
+        
+        
+        
 
         .tl-card {
             position: relative;
@@ -597,19 +508,19 @@
         .tl-card.dimmed { opacity: 0.25; }
         .tl-card.highlighted { border-color: var(--accent-cyan); background: rgba(6,182,212,0.04); }
 
-        .tl-card.tl-episode { border-left-color: var(--accent-cyan); }
-        .tl-card.tl-episode::before { border-color: var(--accent-cyan); }
-        .tl-card.tl-decision { border-left-color: var(--accent-blue); }
-        .tl-card.tl-decision::before { border-color: var(--accent-blue); }
-        .tl-card.tl-error { border-left-color: var(--accent-red); }
-        .tl-card.tl-error::before { border-color: var(--accent-red); }
-        .tl-card.tl-insight { border-left-color: var(--accent-violet); }
-        .tl-card.tl-insight::before { border-color: var(--accent-violet); }
-        .tl-card.tl-learning { border-left-color: var(--accent-green); }
-        .tl-card.tl-learning::before { border-color: var(--accent-green); }
-        .tl-card.tl-general { border-left-color: var(--text-dim); }
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
 
-        .tl-card-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        
         .tl-card-type {
             flex-shrink: 0; padding: 2px 8px;
             border-radius: 4px; font-size: 0.68rem; font-weight: 600;
@@ -635,32 +546,13 @@
             background: rgba(6,182,212,0.3); color: var(--accent-cyan);
             box-shadow: 0 0 0 1px var(--accent-cyan);
         }
-        .tl-card-title {
-            font-size: 0.9rem; font-weight: 500; color: var(--text-primary);
-            flex: 1; line-height: 1.4;
-        }
-        .tl-card-time {
-            flex-shrink: 0; font-size: 0.72rem; color: var(--text-dim);
-            font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
-        }
-        .tl-card-tone {
-            font-size: 0.7rem; padding: 1px 6px;
-            border-radius: 3px; font-weight: 500;
-            background: rgba(139,92,246,0.08); color: var(--accent-violet);
-        }
-        .tl-card-meta {
-            display: flex; align-items: center; gap: 6px;
-            margin-top: 8px; flex-wrap: wrap;
-        }
-        .tl-card-files {
-            font-size: 0.72rem; color: var(--accent-cyan); opacity: 0.8;
-            font-family: 'SF Mono', Monaco, monospace;
-        }
-        .tl-card-events { font-size: 0.72rem; color: var(--text-dim); }
-        .tl-card-salience {
-            display: flex; align-items: center; gap: 4px;
-            font-size: 0.68rem; color: var(--text-dim);
-        }
+        
+        
+        
+        
+        
+        
+        
         .tl-sal-bar {
             width: 50px; height: 3px;
             background: var(--bg-secondary); border-radius: 2px; overflow: hidden;
@@ -717,22 +609,13 @@
         .tl-outcome-failure { background: rgba(239,68,68,0.15); color: var(--accent-red); }
         .tl-outcome-blocked { background: rgba(249,115,22,0.15); color: var(--accent-orange); }
 
-        .timeline-rail {
-            position: absolute; left: 23px; top: 0; bottom: 0;
-            width: 1px; background: var(--border-subtle); z-index: 1;
-        }
+        
         .timeline-loading {
             text-align: center; padding: 20px;
             font-size: 0.8rem; color: var(--text-dim);
         }
-        .timeline-empty {
-            text-align: center; padding: 60px 24px;
-            color: var(--text-dim); font-size: 0.9rem;
-        }
-        .timeline-empty-sub {
-            font-size: 0.8rem; color: var(--text-dim); opacity: 0.6;
-            margin-top: 6px;
-        }
+        
+        
 
         /* ── LLM Usage View ── */
         .llm-view { padding: 24px; max-width: 1200px; margin: 0 auto; }
