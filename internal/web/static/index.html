@@ -1861,7 +1861,8 @@
             if (ep.start_time && ep.end_time) {
                 html += '<span><b>Duration:</b> ' + new Date(ep.start_time).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) + ' – ' + new Date(ep.end_time).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) + '</span>';
             }
-            html += '<span><b>Memories:</b> ' + memories.length + '</span>';
+            var rawCount = (ep.raw_memory_ids || []).length;
+            html += '<span><b>Memories:</b> ' + memories.length + (rawCount > memories.length ? ' <span style="color:var(--text-dim)">(' + rawCount + ' observations)</span>' : '') + '</span>';
             if (ep.files_modified && ep.files_modified.length > 0) {
                 html += '<span><b>Files:</b> ' + ep.files_modified.slice(0, 5).map(function(f) { return escapeHtml(f.split('/').pop()); }).join(', ') + '</span>';
             }
@@ -4836,12 +4837,12 @@
                 var html = '<div class="forabg" style="margin:0"><div class="forabg-head"><span class="forabg-title">Episodes</span><span class="forabg-meta">' + eps.length + ' episodes</span></div>';
                 html += '<div class="inner"><ul class="topiclist"><li class="header"><dl class="row-item">';
                 html += '<dt><div class="list-inner">Episode</div></dt>';
-                html += '<dd class="posts">Memories</dd><dd class="posts">Files</dd><dd class="lastpost">Activity</dd>';
+                html += '<dd class="posts">Obs</dd><dd class="posts">Files</dd><dd class="lastpost">Activity</dd>';
                 html += '</dl></li></ul><ul class="topiclist forums">';
                 for (var i = 0; i < eps.length; i++) {
                     var ep = eps[i];
                     var bgClass = i % 2 === 0 ? 'bg1' : 'bg2';
-                    var mems = (ep.memory_ids || []).length || (ep.raw_memory_ids || []).length;
+                    var mems = (ep.raw_memory_ids || []).length;
                     var files = (ep.files_modified || []).length;
                     var time = ep.end_time ? new Date(ep.end_time).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
                     var stateLabel = ep.state === 'open' ? '<span style="color:var(--accent-green)">open</span>' : '';
