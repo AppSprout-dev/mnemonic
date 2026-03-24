@@ -232,8 +232,9 @@ func (a *RespondToMentionAction) Execute(ctx context.Context, trigger events.Eve
 				{Role: "system", Content: systemPrompt.String()},
 				{Role: "user", Content: mention.Content},
 			},
-			MaxTokens:   a.MaxTokens,
-			Temperature: float32(a.Temperature),
+			MaxTokens:       a.MaxTokens,
+			Temperature:     float32(a.Temperature),
+			DisableThinking: true, // forum replies don't need chain-of-thought
 		})
 		if err != nil {
 			content = fmt.Sprintf("%s encountered an error processing your mention. Try again later.", personality.Name)

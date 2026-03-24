@@ -298,10 +298,9 @@ func (p *LMStudioProvider) Complete(ctx context.Context, req CompletionRequest) 
 		Stop:        req.Stop,
 	}
 
-	// Thinking models: disable reasoning for structured output requests.
-	// Thinking tokens consume the max_tokens budget and can starve the actual
-	// JSON output, causing parse failures.
-	if isThinkingModel && req.ResponseFormat != nil && req.ResponseFormat.Type == "json_schema" {
+	// Thinking models: disable reasoning when explicitly requested or for
+	// structured output (thinking tokens consume the max_tokens budget).
+	if isThinkingModel && (req.DisableThinking || (req.ResponseFormat != nil && req.ResponseFormat.Type == "json_schema")) {
 		apiReq.ReasoningEffort = "none"
 	}
 
