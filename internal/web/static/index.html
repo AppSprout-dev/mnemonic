@@ -589,27 +589,29 @@
         
         
 
-        /* ── LLM Usage View ── */
-        .llm-view { padding: 24px; max-width: 1200px; margin: 0 auto; }
-        .llm-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+        /* ── LLM Usage View (forum-aligned) ── */
+        .llm-view { padding: 8px 16px; max-width: 1200px; margin: 0 auto; }
+        .llm-header { display: flex; align-items: center; justify-content: space-between; margin: 6px 0; padding: 6px 16px; background: var(--bg-head); border: 1px solid var(--border-accent); border-radius: 4px; }
         .llm-header-title { font-size: 1.2rem; font-weight: 700; }
         .llm-header-meta { display: flex; align-items: center; gap: 12px; }
         .llm-updated { font-size: 0.75rem; color: var(--text-dim); }
-        .llm-cards { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 20px; }
+        .llm-cards { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-bottom: 8px; padding: 8px 16px; }
         .llm-card {
-            background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md);
-            padding: 16px; text-align: center;
+            background: var(--bg-row); border: 1px solid var(--border-subtle); border-radius: 4px;
+            padding: 12px 8px; text-align: center;
         }
-        .llm-card-label { font-size: 0.75rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
-        .llm-card-value { font-size: 1.4rem; font-weight: 700; color: var(--accent-cyan); font-family: 'SF Mono', Monaco, monospace; }
-        .llm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .llm-card-label { font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+        .llm-card-value { font-size: 1.3rem; font-weight: 700; color: var(--accent-cyan); font-family: 'SF Mono', Monaco, monospace; }
+        .llm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
         .llm-panel {
-            background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 16px;
+            background: var(--bg-row); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 12px 16px; margin-bottom: 8px;
         }
-        .llm-panel-title { font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 12px; }
+        .llm-panel-title { font-size: 0.82rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border-subtle); }
         .llm-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
-        .llm-table th { text-align: left; color: var(--text-dim); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); }
+        .llm-table th { text-align: left; color: var(--text-dim); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-head); }
         .llm-table td { padding: 6px 8px; color: var(--text-secondary); border-bottom: 1px solid var(--border-subtle); }
+        .llm-table tr:nth-child(even) td { background: var(--bg-row-alt); }
+        .llm-table tr:hover td { background: var(--bg-row-hover); }
         .llm-table tr:last-child td { border-bottom: none; }
         .llm-empty { text-align: center; color: var(--text-dim); padding: 20px; }
         .llm-log-scroll { max-height: 400px; overflow-y: auto; }
@@ -632,14 +634,14 @@
         .llm-header-sub { font-size: 0.72rem; color: var(--text-dim); margin-top: 2px; }
         .llm-completion-val { color: var(--accent-violet) !important; }
 
-        /* ── SDK Agent View ── */
-        .sdk-section { margin-bottom: 16px; }
-        .sdk-section-label { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-dim); margin-bottom: 8px; }
-        .sdk-stat-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
-        .sdk-stat-cards-5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+        /* ── SDK Agent View (forum-aligned) ── */
+        .sdk-section { margin-bottom: 8px; }
+        .sdk-section-label { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-dim); margin-bottom: 6px; padding: 4px 0; border-bottom: 1px solid var(--border-subtle); }
+        .sdk-stat-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+        .sdk-stat-cards-5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
         .sdk-api-equiv .stat-number { color: var(--text-muted) !important; font-size: 1rem !important; }
         .sdk-api-equiv .stat-sub { color: var(--accent-orange); }
-        .sdk-evo-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+        .sdk-evo-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
         .sdk-cost-chart-wrap { position: relative; }
         .sdk-cost-tooltip { position: absolute; top: 4px; background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 4px 8px; font-size: 0.72rem; color: var(--text-primary); pointer-events: none; display: none; z-index: 20; white-space: nowrap; }
 
@@ -701,8 +703,8 @@
         .ra-brief .ra-good { color: var(--accent-green); }
         .ra-brief .ra-bad { color: var(--accent-red); }
         /* ── Research Analytics KPI cards ── */
-        .ra-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
-        .ra-kpi { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 14px 16px; }
+        .ra-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 8px; }
+        .ra-kpi { background: var(--bg-row); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 12px 14px; }
         .ra-kpi-label { font-size: 0.68rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
         .ra-kpi-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; }
         .ra-kpi-value { font-size: 1.5rem; font-weight: 700; font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace; line-height: 1; }
@@ -766,8 +768,8 @@
         .event-subtitle { font-size: 0.72rem; color: var(--text-muted); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-style: italic; }
         .event-duration { font-size: 0.65rem; color: var(--text-dim); font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace; }
         /* ── Cognitive Agents Panel ── */
-        .cognitive-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
-        .cognitive-card { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 12px 14px; text-align: center; }
+        .cognitive-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 8px; }
+        .cognitive-card { background: var(--bg-row); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 10px 12px; text-align: center; }
         .cognitive-card-label { font-size: 0.68rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
         .cognitive-card-value { font-size: 1.3rem; font-weight: 700; font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace; color: var(--accent-cyan); line-height: 1; }
         .cognitive-card-sub { font-size: 0.65rem; color: var(--text-dim); margin-top: 4px; }
@@ -857,14 +859,14 @@
         .agent-refresh-btn.loading { opacity: 0.5; pointer-events: none; }
         .agent-updated { font-size: 0.7rem; color: var(--text-dim); }
         .agent-stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 20px; }
-        .agent-stat-card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 14px 12px; text-align: center; transition: border-color 0.15s; }
+        .agent-stat-card { background: var(--bg-row); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 12px 10px; text-align: center; transition: border-color 0.15s; }
         .agent-stat-card:hover { border-color: var(--accent-violet); }
         .agent-stat-card .stat-number { font-size: 1.5rem; font-weight: 700; color: var(--accent-violet); line-height: 1.2; }
         .agent-stat-card .stat-label { font-size: 0.7rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 3px; }
         .agent-stat-card .stat-sub { font-size: 0.7rem; color: var(--text-dim); margin-top: 2px; opacity: 0.7; }
-        .agent-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
-        .agent-panel { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 16px; max-height: 500px; overflow-y: auto; }
-        .agent-panel-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+        .agent-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+        .agent-panel { background: var(--bg-row); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 12px 16px; max-height: 500px; overflow-y: auto; }
+        .agent-panel-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border-subtle); }
         .agent-panel-title { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); font-weight: 600; }
         .agent-panel-count { font-size: 0.7rem; color: var(--text-dim); background: var(--bg-tertiary); padding: 1px 6px; border-radius: 8px; }
         .agent-empty { color: var(--text-dim); font-size: 0.85rem; font-style: italic; padding: 12px 0; }
