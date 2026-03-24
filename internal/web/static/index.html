@@ -4776,6 +4776,45 @@
         } catch (e) { console.error('Failed to load forum thread:', e); }
     }
 
+    function formatForumContent(text) {
+        if (!text) return '';
+        var lines = text.split('\n');
+        var html = '';
+        var inQuote = false;
+        var quoteLines = [];
+
+        function flushQuote() {
+            if (quoteLines.length === 0) return;
+            var quoteHtml = quoteLines.map(function(l) {
+                var line = escapeHtml(l);
+                return line.replace(/@(retrieval|metacognition|encoding|episoding|consolidation|dreaming|abstraction|perception)/g, '<strong style="color:var(--accent-cyan)">@$1</strong>');
+            }).join('<br>');
+            html += '<blockquote style="margin:6px 0;padding:8px 12px;border-left:3px solid var(--border-accent);background:color-mix(in srgb, var(--bg-head) 50%, transparent);border-radius:0 4px 4px 0;font-size:0.84rem;color:var(--text-dim)">' + quoteHtml + '</blockquote>';
+            quoteLines = [];
+        }
+
+        for (var i = 0; i < lines.length; i++) {
+            var line = lines[i];
+            if (line.startsWith('> ')) {
+                inQuote = true;
+                quoteLines.push(line.substring(2));
+            } else {
+                if (inQuote) { flushQuote(); inQuote = false; }
+                if (line.trim() === '') {
+                    if (html && !html.endsWith('<br>')) html += '<br>';
+                } else {
+                    var escaped = escapeHtml(line);
+                    escaped = escaped.replace(/@(retrieval|metacognition|encoding|episoding|consolidation|dreaming|abstraction|perception)/g, '<strong style="color:var(--accent-cyan)">@$1</strong>');
+                    html += escaped + '<br>';
+                }
+            }
+        }
+        if (inQuote) flushQuote();
+        // Trim trailing <br>
+        html = html.replace(/(<br>)+$/, '');
+        return html;
+    }
+
     var _forumAgentProfiles = {
         consolidation: { tag: '@consolidation', title: 'Memory Maintainer', icon: 'CA', color: 'var(--accent-yellow)' },
         dreaming: { tag: '@dreaming', title: 'Memory Replay', icon: 'DA', color: 'var(--accent-violet)' },
@@ -4794,8 +4833,8 @@
         var prof = _forumAgentProfiles[agentKey] || { tag: post.author_name || 'Human', title: isAgent ? 'Agent' : 'User', icon: isAgent ? agentKey.slice(0,2).toUpperCase() : 'HU', color: isAgent ? 'var(--text-dim)' : 'var(--accent-cyan)' };
         var displayName = isAgent ? prof.tag : (post.author_name || 'Human');
         var time = new Date(post.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-        // Highlight @mentions in content
-        var contentHtml = escapeHtml(post.content || '').replace(/@(retrieval|metacognition|encoding|episoding|consolidation|dreaming|abstraction|perception)/g, '<strong style="color:var(--accent-cyan)">@$1</strong>');
+        // Parse content: render > lines as blockquotes, highlight @mentions
+        var contentHtml = formatForumContent(post.content || '');
         // Store post data for quote functionality via data attributes
         var postDataId = 'forum-post-' + post.id;
         var html = '<div class="post ' + bgClass + '" id="' + postDataId + '" data-author="' + escapeHtml(displayName) + '" data-content="' + escapeHtml(post.content || '') + '">';
