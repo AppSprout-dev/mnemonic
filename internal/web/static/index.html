@@ -3218,7 +3218,7 @@
                     el.appendChild(child);
                     return wrap(child);
                 },
-                attr: function(name, val) { if (val === undefined) return el.getAttribute(name); el.setAttribute(name, val); return obj; },
+                attr: function(name, val) { if (val === undefined) return el.getAttribute(name); el.setAttribute(name, typeof val === 'function' ? val(el.__data__) : val); return obj; },
                 style: function(name, val) { if (val === undefined) return el.style[name]; el.style[name] = val; return obj; },
                 text: function(val) { if (val === undefined) return el.textContent; el.textContent = val; return obj; },
                 html: function(val) { if (val === undefined) return el.innerHTML; el.innerHTML = val; return obj; },
@@ -3228,7 +3228,7 @@
                 selectAll: function(sel) { return wrapAll(el.querySelectorAll(sel), el); },
                 select: function(sel) { return wrap(el.querySelector(sel)); },
                 classed: function(cls, val) { if (val) el.classList.add(cls); else el.classList.remove(cls); return obj; },
-                datum: function() { return obj; },
+                datum: function(d) { if (d !== undefined) { el.__data__ = d; return obj; } return el.__data__; },
                 call: function(fn) { fn(obj); return obj; },
                 empty: function() { return false; }
             };
@@ -3405,12 +3405,16 @@
 
         function stack() {
             var _keys = [];
+            var _value = function(d, key) { return d[key] || 0; };
             function s(data) {
-                var result = _keys.map(function(key) {
+                var result = _keys.map(function(key, keyIdx) {
                     var series = data.map(function(d, i) {
                         var y0 = 0;
-                        _keys.forEach(function(k) { if (k === key) return; if (_keys.indexOf(k) < _keys.indexOf(key)) y0 += (d[k] || 0); });
-                        return [y0, y0 + (d[key] || 0)];
+                        for (var k = 0; k < keyIdx; k++) y0 += _value(d, _keys[k]);
+                        var y1 = y0 + _value(d, key);
+                        var point = [y0, y1];
+                        point.data = d; // D3 attaches original data row
+                        return point;
                     });
                     series.key = key;
                     return series;
@@ -3418,6 +3422,7 @@
                 return result;
             }
             s.keys = function(k) { _keys = k; return s; };
+            s.value = function(fn) { _value = fn; return s; };
             return s;
         }
 
@@ -4189,13 +4194,13 @@
             } catch(e) { /* analysis is optional, fail silently */ }
 
             // ── Memory Lifecycle Chart (D3 stacked area) ──
-            renderLifecycleChart(svData, fbData, chData);
+            try { renderLifecycleChart(svData, fbData, chData); } catch(e) { console.error('Lifecycle chart error:', e); }
 
             // ── Signal Quality by Source (D3 horizontal bars) ──
-            renderSignalChart(sn);
+            try { renderSignalChart(sn); } catch(e) { console.error('Signal chart error:', e); }
 
             // ── Recall Learning Curve (D3 connected dots) ──
-            renderRecallChart(re);
+            try { renderRecallChart(re); } catch(e) { console.error('Recall chart error:', e); }
 
         } catch(e) {
             console.error('Analytics load failed:', e);
