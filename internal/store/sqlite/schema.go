@@ -553,6 +553,11 @@ INSERT OR IGNORE INTO forum_categories (id, name, slug, description, icon, color
 	}
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_forum_category ON forum_posts(category_id) WHERE category_id != ''`)
 
+	// Backfill category_id for existing agent posts that were created before categories
+	_, _ = db.Exec(`UPDATE forum_posts SET category_id = 'agent-' || author_key WHERE category_id = '' AND author_type = 'agent' AND author_key != ''`)
+	// Backfill human posts to 'discussions'
+	_, _ = db.Exec(`UPDATE forum_posts SET category_id = 'discussions' WHERE category_id = '' AND author_type = 'human'`)
+
 	return nil
 }
 
