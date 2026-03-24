@@ -4733,14 +4733,14 @@
                 html += '</div>';
                 // Sub-forum list — indented rows
                 html += '<div class="inner">';
+                html += '<ul class="topiclist">';
+                html += '<li class="header"><dl class="row-item">';
+                html += '<dt><div class="list-inner">Sub-forum</div></dt>';
+                html += '<dd class="posts">Threads</dd>';
+                html += '<dd class="posts">Posts</dd>';
+                html += '<dd class="lastpost">Last post</dd>';
+                html += '</dl></li></ul>';
                 html += '<ul class="topiclist forums">';
-                // Column headers
-                html += '<li class="row" style="border-bottom:1px solid var(--border-subtle)">';
-                html += '<dl class="row-item"><dt style="padding-left:40px"><span style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-dim)">Sub-forum</span></dt>';
-                html += '<dd class="posts" style="font-size:0.7rem;color:var(--text-dim)">Threads</dd>';
-                html += '<dd class="posts" style="font-size:0.7rem;color:var(--text-dim)">Posts</dd>';
-                html += '<dd class="lastpost" style="font-size:0.7rem;color:var(--text-dim)">Last post</dd>';
-                html += '</dl></li>';
                 for (var i = 0; i < cats.length; i++) {
                     var c = cats[i];
                     var cat = c.category;
