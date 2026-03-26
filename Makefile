@@ -44,6 +44,33 @@ build:
 	@mkdir -p $(BUILD_DIR)
 	go build $(TAGS) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY) ./cmd/mnemonic
 
+# --- Embedded LLM (llama.cpp + Felix architecture) ---
+LLAMACPP_DIR=third_party/llama.cpp
+LLAMACPP_BUILD=$(LLAMACPP_DIR)/build
+BRIDGE_DIR=internal/llm/llamacpp/csrc
+
+build-llamacpp:
+	@if [ ! -f $(LLAMACPP_BUILD)/src/libllama.a ]; then \
+		cmake -B $(LLAMACPP_BUILD) -S $(LLAMACPP_DIR) \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DBUILD_SHARED_LIBS=OFF \
+			-DGGML_NATIVE=ON \
+			-DGGML_HIP=ON; \
+		cmake --build $(LLAMACPP_BUILD) --target llama -j$$(nproc); \
+	fi
+
+build-bridge: build-llamacpp
+	@if [ ! -f $(BRIDGE_DIR)/bridge.o ] || [ $(BRIDGE_DIR)/bridge.cpp -nt $(BRIDGE_DIR)/bridge.o ]; then \
+		g++ -std=c++17 -O2 -c $(BRIDGE_DIR)/bridge.cpp -o $(BRIDGE_DIR)/bridge.o \
+			-I$(BRIDGE_DIR) \
+			-I$(LLAMACPP_DIR)/include \
+			-I$(LLAMACPP_DIR)/ggml/include; \
+	fi
+
+build-embedded: build-bridge
+	@mkdir -p $(BUILD_DIR)
+	CGO_ENABLED=1 go build -tags llamacpp $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY) ./cmd/mnemonic
+
 run: build
 	./$(BUILD_DIR)/$(BINARY) --config config.yaml serve
 

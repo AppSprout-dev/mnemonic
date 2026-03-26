@@ -24,6 +24,7 @@ import (
 	"github.com/appsprout-dev/mnemonic/internal/daemon"
 	"github.com/appsprout-dev/mnemonic/internal/events"
 	"github.com/appsprout-dev/mnemonic/internal/llm"
+	"github.com/appsprout-dev/mnemonic/internal/llm/llamacpp"
 	"github.com/appsprout-dev/mnemonic/internal/logger"
 	"github.com/appsprout-dev/mnemonic/internal/store/sqlite"
 	"github.com/appsprout-dev/mnemonic/internal/watcher"
@@ -2939,9 +2940,16 @@ func newLLMProvider(cfg *config.Config) llm.Provider {
 			Temperature:    float32(cfg.LLM.Temperature),
 			MaxConcurrent:  cfg.LLM.MaxConcurrent,
 		})
-		// Note: LoadModels must be called with a backend factory before use.
-		// Until llama.cpp bindings are integrated, the provider will return
-		// ErrProviderUnavailable on all inference calls.
+		backend := llamacpp.NewBackend()
+		if backend != nil {
+			if err := ep.LoadModels(func() llm.Backend {
+				return llamacpp.NewBackend()
+			}); err != nil {
+				slog.Error("failed to load embedded models", "error", err)
+			}
+		} else {
+			slog.Warn("embedded provider selected but llama.cpp not compiled in (build with: make build-embedded)")
+		}
 		return ep
 	default: // "api" or ""
 		timeout := time.Duration(cfg.LLM.TimeoutSec) * time.Second

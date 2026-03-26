@@ -55,3 +55,4 @@ models/
 
 # llama.cpp build artifacts
 third_party/llama.cpp/build/
+*.o
