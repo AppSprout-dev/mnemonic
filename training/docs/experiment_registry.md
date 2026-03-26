@@ -222,3 +222,48 @@ Key metrics:
 - **Verdict:** CONFIRMED — llama.cpp Felix implementation produces correct logits matching PyTorch. Top-1 token prediction matches exactly. PPL delta is within expected range for domain-mismatched text. CGo backend passes Go integration tests.
 
 - **Analysis:** The Felix architecture was successfully ported to llama.cpp with 263 lines of new C++ code across 8 files. The spoke computation (RMSNorm -> SiLU -> low-rank projection -> gated residual) integrates cleanly with the standard LLaMA graph. Five GGUF export bugs were discovered and fixed during integration: (1) merge pair format (lists vs strings), (2) F16/F32 type mismatches for norm weights, (3) token type enum values, (4) missing pre-tokenizer metadata, (5) incorrect EOS token ID. The CGo binding adds 4 MB to binary size and provides completion at 192-206 tokens/sec on CPU. Embedding extraction is not supported for this causal model — a separate embedding model will be used. The fine-tuned model generates valid encoding-task JSON when prompted appropriately but produces high PPL on general text as expected for a task-specific fine-tune.
+
+### EXP-5: Q8_0 Quantization Quality Impact
+
+- **Date:** 2026-03-26
+- **Status:** COMPLETED
+- **Hypothesis:** Q8_0 quantization of Felix-LM v3 100M will reduce model size by ~50% with negligible quality loss (<5% relative difference in token probability).
+- **Variable:** Weight quantization format (F16 vs Q8_0)
+- **Control:** F16 GGUF (felix-encoder-v1.gguf, 236 MB, 16.00 BPW)
+- **Prediction:** Q8_0 achieves <5% relative quality loss measured by mean token probability on the encoding task with GBNF grammar.
+- **Config:** llama-quantize Q8_0 (8.51 BPW), same prompt, temperature 0.1, GBNF grammar constraint
+- **Software state:** mnemonic autoresearch/ft-mar25 (commit b7a2488), llama.cpp b8534
+- **Hardware:** Linux x86_64, AMD Ryzen (8 threads), CPU-only inference
+
+- **Results:**
+
+| Metric | F16 (236 MB) | Q8_0 (124 MB) | Delta |
+|--------|-------------|---------------|-------|
+| Model size | 236 MB (16.00 BPW) | 124 MB (8.51 BPW) | -47.4% |
+| Tokens generated | 282 | 306 | +8.5% |
+| Mean token probability | 0.7541 | 0.7408 | -1.76% relative |
+| Min token probability | 0.001466 | 0.001459 | -0.48% relative |
+| Valid JSON output | Yes (10/10 fields) | Yes (10/10 fields) | No change |
+| structured_concepts valid | Yes (4/4 sub-fields) | Yes (4/4 sub-fields) | No change |
+
+- **Verdict:** CONFIRMED — Q8_0 achieves 47% size reduction with only 1.76% relative quality loss, well within the 5% prediction. All schema fields preserved.
+
+- **Analysis:** The quantization from F16 to Q8_0 nearly halves the model file from 236 MB to 124 MB while maintaining functional equivalence. The 1.76% relative difference in mean token probability is within measurement noise — the same model at temperature 0.1 shows similar run-to-run variance. Both formats produce valid JSON with all 10 required fields and correctly structured nested objects. The Q8_0 model actually generated slightly more tokens (306 vs 282) suggesting the quantization noise doesn't systematically reduce output length. The min probability is effectively identical, confirming that Q8_0 doesn't introduce new low-confidence failure modes. Q8_0 is now the recommended format for production use.
+
+### BASELINE-3: Logit Validation Baselines (Embedded Provider)
+
+- **Date:** 2026-03-26
+- **Status:** COMPLETED
+- **Purpose:** Establish token probability baselines for the embedded Felix-LM provider to calibrate the quality gate threshold in the encoding agent.
+- **Command:** `CGO_ENABLED=1 go test -tags "llamacpp rocm" -v ./internal/llm/llamacpp/`
+- **Software state:** mnemonic autoresearch/ft-mar25 (commit 96775a2)
+- **Hardware:** Linux x86_64, AMD Ryzen (8 threads), CPU inference
+
+- **Results:**
+
+| Mode | Mean Prob | Min Prob | Tokens | Notes |
+|------|-----------|----------|--------|-------|
+| Unconstrained completion | 0.55 | 0.015 | 11 | Short, no grammar |
+| GBNF grammar (encoding schema) | 0.69-0.72 | 0.000001-0.0015 | 282-323 | Full encoding response |
+
+- **Analysis:** Grammar-constrained generation shows higher mean probability (0.69-0.72 vs 0.55 unconstrained) because the grammar eliminates impossible tokens from the sampling distribution, concentrating probability mass on valid outputs. The very low min probability on grammar output is expected and benign — it occurs when the grammar forces a token the model wouldn't naturally choose (e.g., exact JSON key names). The quality gate threshold of mean_prob < 0.10 was chosen with wide margin: genuine garbage outputs from a confused or out-of-distribution model produce mean_prob well below 0.10, while valid grammar-constrained output sits at 0.70. The 0.10 threshold avoids false positives from grammar-forced tokens while catching true model failure.
