@@ -267,3 +267,42 @@ Key metrics:
 | GBNF grammar (encoding schema) | 0.69-0.72 | 0.000001-0.0015 | 282-323 | Full encoding response |
 
 - **Analysis:** Grammar-constrained generation shows higher mean probability (0.69-0.72 vs 0.55 unconstrained) because the grammar eliminates impossible tokens from the sampling distribution, concentrating probability mass on valid outputs. The very low min probability on grammar output is expected and benign — it occurs when the grammar forces a token the model wouldn't naturally choose (e.g., exact JSON key names). The quality gate threshold of mean_prob < 0.10 was chosen with wide margin: genuine garbage outputs from a confused or out-of-distribution model produce mean_prob well below 0.10, while valid grammar-constrained output sits at 0.70. The 0.10 threshold avoids false positives from grammar-forced tokens while catching true model failure.
+
+### EXP-6: Synthesis Fine-Tuning (Tool-Use, Multi-Turn)
+
+- **Date:** 2026-03-26
+- **Status:** REGISTERED
+- **Hypothesis:** A 100M model fine-tuned on synthetic multi-turn synthesis conversations with tool-use will learn to call retrieval tools appropriately and produce 2-5 sentence synthesis grounded in retrieved memories.
+- **Variable:** Training data source (organic single-turn captures vs synthetic multi-turn with tool calls)
+- **Control:** Gemini Flash synthesis quality on the same queries
+- **Prediction:** The fine-tuned model will use at least 1 tool in >50% of synthesis requests and produce synthesis within 20% of Gemini quality (measured by human evaluation of coherence, grounding, conciseness).
+- **Config:** Felix-LM v3 100M, spoke-only FT + last 4 layers, LR 3.5e-3, spoke_lr_mult 2.0, ~500-1000 synthetic training examples
+- **Data:** Generated via `training/scripts/generate_synthesis_data.py` using Gemini as teacher model, real memories/associations from DB
+- **Result:** (pending)
+- **Verdict:** (pending)
+
+### EXP-7: Contrastive Embedding Fine-Tuning
+
+- **Date:** 2026-03-26
+- **Status:** REGISTERED
+- **Hypothesis:** An embedding model fine-tuned on mnemonic's association graph (contrastive triplets) will produce embeddings where associated memories have higher cosine similarity than non-associated ones, improving retrieval precision over the general-purpose embeddinggemma-300m baseline.
+- **Variable:** Embedding model (general-purpose vs mnemonic-domain fine-tuned)
+- **Control:** embeddinggemma-300m (384-dim, pre-trained, no domain adaptation)
+- **Prediction:** Fine-tuned model will achieve >10% relative improvement in retrieval nDCG@5 on the mnemonic IR benchmark.
+- **Config:** embeddinggemma-300m base, MultipleNegativesRankingLoss, 5-10 epochs, 10K-50K triplets from associations (strength > 0.7)
+- **Data:** Extracted via `training/scripts/extract_embedding_pairs.py` from 347K associations, 34K memories
+- **Result:** (pending)
+- **Verdict:** (pending)
+
+### EXP-8: Spoke Gate Specialization Analysis
+
+- **Date:** 2026-03-26
+- **Status:** REGISTERED
+- **Hypothesis:** After task-specific fine-tuning, spoke gate activations and inter-spoke agreement will differ across encoding subtasks (compression, concept extraction, salience, classification), indicating organic specialization. If gates are uniform, a router network is needed.
+- **Variable:** Encoding subtask type (compression vs concepts vs salience vs classification)
+- **Control:** Uniform gate values (no specialization — all subtasks produce same gate pattern)
+- **Prediction:** Gate variance across layers will be >0.01 and agreement will differ by >0.05 between subtask types if organic specialization is occurring.
+- **Config:** Felix-LM v3 100M (fine-tuned checkpoint), 200 encoding examples, CPU inference
+- **Data:** Encoding captures from `~/.mnemonic/training-data/`, analyzed via `training/scripts/analyze_spoke_gates.py`
+- **Result:** (pending)
+- **Verdict:** (pending)
