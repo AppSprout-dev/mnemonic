@@ -86,6 +86,18 @@ build-embedded: build-llamacpp build-bridge
 	CGO_ENABLED=1 go build -tags llamacpp $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY) ./cmd/mnemonic
 endif
 
+build-quantize: build-llamacpp
+	cmake --build $(LLAMACPP_BUILD) --target llama-quantize -j$$(nproc)
+
+quantize: build-quantize
+	@for f in models/*-v1.gguf; do \
+		q8="$${f%.gguf}-q8_0.gguf"; \
+		if [ ! -f "$$q8" ]; then \
+			echo "Quantizing $$f -> $$q8"; \
+			$(LLAMACPP_BUILD)/bin/llama-quantize "$$f" "$$q8" q8_0; \
+		fi; \
+	done
+
 run: build
 	./$(BUILD_DIR)/$(BINARY) --config config.yaml serve
 

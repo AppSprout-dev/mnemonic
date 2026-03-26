@@ -12,9 +12,11 @@ import (
 )
 
 func findModel() string {
-	// Check common locations
+	// Prefer Q8_0 quantized models (smaller, equivalent quality)
 	paths := []string{
+		"../../../models/felix-encoder-v1-q8_0.gguf",
 		"../../../models/felix-encoder-v1.gguf",
+		"../../../models/felix-base-test-q8_0.gguf",
 		"../../../models/felix-base-test.gguf",
 	}
 	for _, p := range paths {
