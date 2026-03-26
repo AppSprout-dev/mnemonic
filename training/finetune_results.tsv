@@ -1,0 +1,9 @@
+commit	eval_bpb	eval_ppl	train_ppl	memory_gb	status	description
+baseline	1.724	214.77	N/A	0.0	baseline	pretrained step_100000, no fine-tuning
+498dd28	0.365	3.11	3.3	10.0	keep	full fine-tune, lr=5e-4, 1 epoch, all 106M params
+498dd28	0.577	6.04	5.9	10.0	discard	spokes + last 4 layers + norm (21%), lr=5e-4, 1 epoch
+498dd28	0.302	2.56	2.7	10.0	keep	full fine-tune, lr=1e-3, 1 epoch, all 106M params
+498dd28	0.261	2.25	2.3	10.0	keep	full fine-tune, lr=2e-3, 1 epoch
+498dd28	0.257	2.23	2.3	10.0	keep	full fine-tune, lr=3.5e-3, 1 epoch
+498dd28	0.309	2.61	2.7	10.0	discard	full fine-tune, lr=5e-3, 1 epoch — overshoot
+498dd28	0.236	2.08	2.4	10.0	keep	full FT, lr=3.5e-3, 1 epoch, expanded dataset (3304 examples) — eval on encoding-only

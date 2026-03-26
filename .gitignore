@@ -50,3 +50,4 @@ benchmark-results.md
 sweep-results.md
 lifecycle-results.md
 training/probe_results.tsv
+models/

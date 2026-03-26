@@ -429,15 +429,15 @@ def eval_generate(
 
         # Ground truth: decode the completion portion
         gt_token_ids = input_ids[completion_start:]
-        # Strip trailing EOS/pad (token 0)
-        while gt_token_ids and gt_token_ids[-1] == 0:
+        # Strip trailing EOS (32767) and pad (1)
+        while gt_token_ids and gt_token_ids[-1] in (1, 32767):
             gt_token_ids = gt_token_ids[:-1]
         ground_truth_text = tokenizer.decode(gt_token_ids) if gt_token_ids else None
 
         # Generate
         gen_ids = greedy_decode(
             model, prompt_ids, max_tokens, device,
-            temperature=temperature, eos_token=0,
+            temperature=temperature, eos_token=32767,
         )
         generated_text = tokenizer.decode(gen_ids) if gen_ids else ""
 
@@ -632,6 +632,10 @@ def main():
         default=str(TRAINING_DIR / "tokenizer" / "tokenizer.json"),
         help="Path to tokenizer.json (default: training/tokenizer/tokenizer.json)",
     )
+    parser.add_argument(
+        "--max-examples", type=int, default=None,
+        help="Limit number of eval examples (default: all)",
+    )
     args = parser.parse_args()
 
     # Validate paths
@@ -679,7 +683,9 @@ def main():
         tokenizer = Tokenizer.from_file(args.tokenizer)
         print(f"  Tokenizer vocab: {tokenizer.get_vocab_size()}")
 
-        print("\nRunning generation evaluation...")
+        if args.max_examples:
+            examples = examples[:args.max_examples]
+        print(f"\nRunning generation evaluation ({len(examples)} examples)...")
         metrics = eval_generate(
             model, examples, device, tokenizer,
             max_tokens=args.max_tokens,

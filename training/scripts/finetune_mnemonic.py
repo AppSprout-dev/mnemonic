@@ -180,6 +180,10 @@ def train(config, args):
 
     device = torch.device(args.device)
 
+    # Override dropout if specified
+    if hasattr(args, 'dropout') and args.dropout is not None:
+        config.dropout = args.dropout
+
     # Build model
     model = FelixLMv3(config).to(device)
 
@@ -588,6 +592,7 @@ def main():
         "--dtype", type=str, default="bf16", choices=["bf16", "fp32"]
     )
     parser.add_argument("--device", type=str, default="cuda")
+    parser.add_argument("--dropout", type=float, default=None, help="Override dropout (default: use config value 0.1)")
     args = parser.parse_args()
 
     if args.smoke_test:
