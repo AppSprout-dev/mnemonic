@@ -4,7 +4,7 @@ package llamacpp
 
 /*
 #cgo CFLAGS: -I${SRCDIR}/csrc
-#cgo LDFLAGS: ${SRCDIR}/csrc/bridge.o -L${SRCDIR}/../../../third_party/llama.cpp/build/src -L${SRCDIR}/../../../third_party/llama.cpp/build/ggml/src -lllama -lggml -lggml-base -lggml-cpu -lm -lstdc++ -lpthread -fopenmp
+#cgo LDFLAGS: ${SRCDIR}/csrc/bridge.o -L${SRCDIR}/../../../third_party/llama.cpp/build/src -L${SRCDIR}/../../../third_party/llama.cpp/build/ggml/src -L${SRCDIR}/../../../third_party/llama.cpp/build/ggml/src/ggml-hip -L/opt/rocm/lib -lllama -lggml -lggml-base -lggml-cpu -lggml-hip -lhipblas -lamdhip64 -lrocblas -lm -lstdc++ -lpthread -fopenmp
 #include "csrc/bridge.h"
 #include <stdlib.h>
 */
