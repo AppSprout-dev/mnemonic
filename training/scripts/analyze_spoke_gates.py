@@ -29,16 +29,30 @@ from felix_lm.v3.model import FelixLMv3
 from felix_lm.v3.config import FelixV3Config
 
 
+def make_v3_mnemonic_100m_config() -> FelixV3Config:
+    """Felix-LM v3 at ~100M params with mnemonic's 32K vocab."""
+    return FelixV3Config(
+        vocab_size=32768,
+        d_embed=512,
+        num_layers=20,
+        num_heads=8,
+        num_spokes=4,
+        spoke_rank=64,
+        gate_schedule="uniform",
+        embed_proj=True,
+        dropout=0.0,  # inference mode
+        gradient_checkpointing=False,
+    )
+
+
 def load_model(checkpoint_path: str, device: str) -> FelixLMv3:
     """Load fine-tuned Felix-LM v3 from checkpoint."""
     ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
 
     if isinstance(ckpt, dict) and "model_state_dict" in ckpt:
         state_dict = ckpt["model_state_dict"]
-        config_dict = ckpt.get("config")
     else:
         state_dict = ckpt
-        config_dict = None
 
     # Strip _orig_mod. prefix if present
     if any(k.startswith("_orig_mod.") for k in state_dict.keys()):
@@ -46,12 +60,7 @@ def load_model(checkpoint_path: str, device: str) -> FelixLMv3:
             k.replace("_orig_mod.", "", 1): v for k, v in state_dict.items()
         }
 
-    if config_dict:
-        config = FelixV3Config(**config_dict)
-    else:
-        config = FelixV3Config()
-
-    config.gradient_checkpointing = False
+    config = make_v3_mnemonic_100m_config()
     model = FelixLMv3(config).to(device)
     model.load_state_dict(state_dict)
     model.eval()
@@ -124,17 +133,26 @@ def classify_subtask(response: dict) -> str:
     return max(scores, key=scores.get)
 
 
-def tokenize_prompt(model: FelixLMv3, text: str, device: str, max_len: int = 512) -> torch.Tensor:
-    """Tokenize text using the model's tokenizer (GPT-2 BPE via tiktoken)."""
-    try:
-        import tiktoken
-        enc = tiktoken.get_encoding("gpt2")
-        tokens = enc.encode(text)[:max_len]
-        return torch.tensor([tokens], device=device)
-    except ImportError:
-        # Fallback: use a simple character-level encoding
-        tokens = [ord(c) % 32000 for c in text[:max_len]]
-        return torch.tensor([tokens], device=device)
+def get_tokenizer():
+    """Load the custom BPE tokenizer."""
+    from tokenizers import Tokenizer
+
+    tok_path = Path(__file__).parent.parent / "tokenizer" / "tokenizer.json"
+    if not tok_path.exists():
+        raise FileNotFoundError(f"Tokenizer not found at {tok_path}")
+    return Tokenizer.from_file(str(tok_path))
+
+
+_tokenizer = None
+
+
+def tokenize_prompt(text: str, device: str, max_len: int = 512) -> torch.Tensor:
+    """Tokenize text using the custom 32K BPE tokenizer."""
+    global _tokenizer
+    if _tokenizer is None:
+        _tokenizer = get_tokenizer()
+    tokens = _tokenizer.encode(text).ids[:max_len]
+    return torch.tensor([tokens], device=device)
 
 
 def run_analysis(
@@ -152,7 +170,7 @@ def run_analysis(
         messages = ex["request"].get("messages", [])
         prompt_text = "\n".join(m.get("content", "") for m in messages)
 
-        token_ids = tokenize_prompt(model, prompt_text, device)
+        token_ids = tokenize_prompt(prompt_text, device)
 
         with torch.no_grad():
             output = model(token_ids)

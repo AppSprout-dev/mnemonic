@@ -315,78 +315,167 @@ def generate_with_gemini(
     }
 
 
+def _make_tool_call_id() -> str:
+    """Generate a plausible tool call ID."""
+    return f"call_{random.randint(100000, 999999)}"
+
+
+# Tool-use patterns to sample from
+TOOL_PATTERNS = [
+    # Pattern 1: search_memories to find more context
+    ["search_memories"],
+    # Pattern 2: get_details on an interesting memory
+    ["get_details"],
+    # Pattern 3: search then get details
+    ["search_memories", "get_details"],
+    # Pattern 4: get_related to explore connections
+    ["get_related"],
+    # Pattern 5: search_timeline for temporal context
+    ["search_timeline"],
+    # Pattern 6: search then explore relations
+    ["search_memories", "get_related"],
+]
+
+
 def generate_training_example(
     scenario: dict,
     api_key: str,
     max_tool_rounds: int = 3,
 ) -> dict | None:
-    """Generate a multi-turn synthesis conversation using Gemini as teacher.
+    """Generate a multi-turn synthesis conversation.
 
-    Returns a training example with messages including tool calls.
+    Strategy: programmatically construct tool-call turns from scenario data,
+    then have Gemini generate the final synthesis from the full context.
+    Gemini is too smart to use tools when given full context, so we construct
+    the tool-use trajectory ourselves and only ask Gemini for the final answer.
     """
-    prompt = build_synthesis_prompt(scenario)
+    if not scenario.get("hidden_memories"):
+        # No hidden memories = no reason for tool calls
+        # Generate a single-turn example instead
+        return _generate_single_turn(scenario, api_key)
+
+    # Pick a tool-use pattern
+    pattern = random.choice(TOOL_PATTERNS)
+    if len(pattern) > max_tool_rounds:
+        pattern = pattern[:max_tool_rounds]
+
+    # Build initial prompt with ONLY the first 1-2 memories (incomplete info)
+    sparse_scenario = dict(scenario)
+    sparse_scenario["initial_memories"] = scenario["initial_memories"][:1]
+    prompt = build_synthesis_prompt(sparse_scenario)
+
     messages = [{"role": "user", "content": prompt}]
-    tool_round = 0
+    tool_rounds = 0
 
-    while tool_round < max_tool_rounds:
-        # Ask Gemini to respond (with tools available)
-        tools = SYNTHESIS_TOOLS if tool_round < max_tool_rounds - 1 else None
+    for tool_name in pattern:
+        tc_id = _make_tool_call_id()
 
-        try:
-            resp = generate_with_gemini(messages, tools, api_key)
-        except Exception as e:
-            print(f"  API error: {e}")
-            return None
+        # Construct the tool call based on pattern
+        if tool_name == "search_memories":
+            # Search for concepts from the anchor memory
+            concepts = scenario["anchor"].get("concepts", ["context"])
+            query = random.choice(concepts) if concepts else "related context"
+            arguments = json.dumps({"query": query})
+        elif tool_name == "get_details":
+            # Get details of a memory the model "noticed"
+            target = random.choice(scenario["initial_memories"])
+            arguments = json.dumps({"memory_id": target["id"]})
+        elif tool_name == "get_related":
+            arguments = json.dumps({"memory_id": scenario["anchor"]["id"]})
+        elif tool_name == "search_timeline":
+            ts = scenario["anchor"].get("timestamp", "2026-03-20")[:10]
+            arguments = json.dumps({"from": ts, "to": "2026-03-27"})
+        else:
+            continue
 
-        # If no tool calls, we have the final synthesis
-        if not resp["tool_calls"]:
-            if resp["content"]:
-                messages.append({"role": "assistant", "content": resp["content"]})
-            break
-
-        # Record assistant's tool call
+        # Assistant decides to call a tool
         messages.append({
             "role": "assistant",
-            "content": resp.get("content", ""),
-            "tool_calls": resp["tool_calls"],
+            "content": "",
+            "tool_calls": [{
+                "id": tc_id,
+                "type": "function",
+                "function": {"name": tool_name, "arguments": arguments},
+            }],
         })
 
-        # Execute tool calls using our scenario data
-        for tc in resp["tool_calls"]:
-            fn = tc["function"]
-            tool_name = fn["name"]
-            try:
-                args = json.loads(fn["arguments"])
-            except json.JSONDecodeError:
-                args = {}
+        # Execute and append tool result
+        try:
+            args = json.loads(arguments)
+        except json.JSONDecodeError:
+            args = {}
+        result = execute_simulated_tool(tool_name, args, scenario)
+        messages.append({
+            "role": "tool",
+            "content": result,
+            "tool_call_id": tc_id,
+        })
+        tool_rounds += 1
 
-            result = execute_simulated_tool(
-                tool_name, args, scenario
-            )
+    # Ask Gemini to generate the final synthesis.
+    # Gemini's OpenAI endpoint doesn't support tool role messages without tools,
+    # so we flatten the conversation for the API call: tool results become a user
+    # message. The training data keeps the proper tool structure.
+    flat_messages = [messages[0]]  # original user prompt
+    tool_context_parts = []
+    for m in messages[1:]:
+        if m["role"] == "tool":
+            tool_context_parts.append(f"[Tool result]: {m['content']}")
+        elif m["role"] == "assistant" and m.get("tool_calls"):
+            for tc in m["tool_calls"]:
+                fn = tc["function"]
+                tool_context_parts.append(f"[Used tool {fn['name']}({fn['arguments']})]")
+    if tool_context_parts:
+        flat_messages.append({
+            "role": "user",
+            "content": "Additional context from tool calls:\n" + "\n".join(tool_context_parts)
+            + "\n\nNow synthesize all the above in 2-5 sentences.",
+        })
 
-            messages.append({
-                "role": "tool",
-                "content": result,
-                "tool_call_id": tc["id"],
-            })
-
-        tool_round += 1
-
-    # Must have at least a final text response
-    if not messages or messages[-1]["role"] != "assistant":
+    try:
+        resp = generate_with_gemini(flat_messages, tools=None, api_key=api_key)
+    except Exception as e:
+        print(f"  API error: {e}")
         return None
-    if not messages[-1].get("content"):
+
+    if not resp["content"]:
         return None
+
+    messages.append({"role": "assistant", "content": resp["content"]})
 
     return {
         "task_type": "synthesis",
         "messages": messages,
         "tools": SYNTHESIS_TOOLS,
         "query": scenario["query"],
-        "tool_rounds": tool_round,
-        "has_tool_calls": any(
-            m.get("tool_calls") for m in messages if m["role"] == "assistant"
-        ),
+        "tool_rounds": tool_rounds,
+        "has_tool_calls": tool_rounds > 0,
+    }
+
+
+def _generate_single_turn(scenario: dict, api_key: str) -> dict | None:
+    """Generate a single-turn synthesis (no tools needed)."""
+    prompt = build_synthesis_prompt(scenario)
+    messages = [{"role": "user", "content": prompt}]
+
+    try:
+        resp = generate_with_gemini(messages, tools=None, api_key=api_key)
+    except Exception as e:
+        print(f"  API error: {e}")
+        return None
+
+    if not resp["content"]:
+        return None
+
+    messages.append({"role": "assistant", "content": resp["content"]})
+
+    return {
+        "task_type": "synthesis",
+        "messages": messages,
+        "tools": SYNTHESIS_TOOLS,
+        "query": scenario["query"],
+        "tool_rounds": 0,
+        "has_tool_calls": False,
     }
 
 
