@@ -108,17 +108,30 @@ mnm_completion_result mnm_complete(
                                    false, true);
     }
     tokens.resize(n_tokens);
+
+    // Truncate prompt to fit context window (leave room for generation)
+    int max_prompt = m->n_ctx - max_tokens;
+    if (max_prompt < 1) max_prompt = 1;
+    if (n_tokens > max_prompt) {
+        n_tokens = max_prompt;
+        tokens.resize(n_tokens);
+    }
     result.prompt_tokens = n_tokens;
 
     // Clear memory (KV cache)
     llama_memory_clear(llama_get_memory(m->ctx), true);
 
-    // Decode prompt
-    llama_batch batch = llama_batch_init(n_tokens + 1, 0, 1);
-    for (int i = 0; i < n_tokens; i++) {
-        batch_add(batch, tokens[i], i, 0, i == n_tokens - 1);
+    // Decode prompt in n_batch-sized chunks to avoid assertion failures
+    int n_batch = llama_n_batch(m->ctx);
+    for (int i = 0; i < n_tokens; i += n_batch) {
+        int chunk = (n_tokens - i < n_batch) ? n_tokens - i : n_batch;
+        llama_batch batch = llama_batch_init(chunk, 0, 1);
+        for (int j = 0; j < chunk; j++) {
+            batch_add(batch, tokens[i + j], i + j, 0, (i + j) == n_tokens - 1);
+        }
+        llama_decode(m->ctx, batch);
+        llama_batch_free(batch);
     }
-    llama_decode(m->ctx, batch);
 
     // Set up sampler
     auto sparams = llama_sampler_chain_default_params();
@@ -169,13 +182,13 @@ mnm_completion_result mnm_complete(
         n_generated++;
 
         // Prepare next batch (single token)
-        batch_clear(batch);
-        batch_add(batch, new_token, n_pos++, 0, true);
-        llama_decode(m->ctx, batch);
+        llama_batch gen_batch = llama_batch_init(1, 0, 1);
+        batch_add(gen_batch, new_token, n_pos++, 0, true);
+        llama_decode(m->ctx, gen_batch);
+        llama_batch_free(gen_batch);
     }
 
     llama_sampler_free(smpl);
-    llama_batch_free(batch);
 
     result.text = strdup(output.c_str());
     result.completion_tokens = n_generated;

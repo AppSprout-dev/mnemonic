@@ -54,12 +54,21 @@ build-llamacpp:
 		cmake -B $(LLAMACPP_BUILD) -S $(LLAMACPP_DIR) \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DBUILD_SHARED_LIBS=OFF \
+			-DGGML_NATIVE=ON; \
+		cmake --build $(LLAMACPP_BUILD) --target llama -j$$(nproc); \
+	fi
+
+build-llamacpp-rocm:
+	@if [ ! -f $(LLAMACPP_BUILD)/src/libllama.a ]; then \
+		cmake -B $(LLAMACPP_BUILD) -S $(LLAMACPP_DIR) \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DBUILD_SHARED_LIBS=OFF \
 			-DGGML_NATIVE=ON \
 			-DGGML_HIP=ON; \
 		cmake --build $(LLAMACPP_BUILD) --target llama -j$$(nproc); \
 	fi
 
-build-bridge: build-llamacpp
+build-bridge:
 	@if [ ! -f $(BRIDGE_DIR)/bridge.o ] || [ $(BRIDGE_DIR)/bridge.cpp -nt $(BRIDGE_DIR)/bridge.o ]; then \
 		g++ -std=c++17 -O2 -c $(BRIDGE_DIR)/bridge.cpp -o $(BRIDGE_DIR)/bridge.o \
 			-I$(BRIDGE_DIR) \
@@ -67,9 +76,15 @@ build-bridge: build-llamacpp
 			-I$(LLAMACPP_DIR)/ggml/include; \
 	fi
 
-build-embedded: build-bridge
+ifdef ROCM
+build-embedded: build-llamacpp-rocm build-bridge
+	@mkdir -p $(BUILD_DIR)
+	CGO_ENABLED=1 go build -tags "llamacpp rocm" $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY) ./cmd/mnemonic
+else
+build-embedded: build-llamacpp build-bridge
 	@mkdir -p $(BUILD_DIR)
 	CGO_ENABLED=1 go build -tags llamacpp $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY) ./cmd/mnemonic
+endif
 
 run: build
 	./$(BUILD_DIR)/$(BINARY) --config config.yaml serve

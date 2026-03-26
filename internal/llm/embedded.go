@@ -214,13 +214,25 @@ func (p *EmbeddedProvider) Complete(ctx context.Context, req CompletionRequest) 
 		grammar = GBNFJSONObject
 	}
 	if req.ResponseFormat != nil && req.ResponseFormat.Type == "json_schema" && req.ResponseFormat.JSONSchema != nil {
-		// For json_schema, we'd generate a GBNF grammar from the JSON schema.
-		// For now, fall back to generic JSON constraint.
-		grammar = GBNFJSONObject
+		if req.ResponseFormat.JSONSchema.Name == "encoding_response" {
+			grammar = GBNFEncodingResponse
+		} else {
+			grammar = GBNFJSONObject
+		}
+	}
+
+	// Warn if prompt likely exceeds context window (bridge will hard-truncate)
+	prompt := formatPrompt(req.Messages)
+	if estimatedTokens := len(prompt) / 4; estimatedTokens > p.opts.ContextSize-maxTokens {
+		slog.Warn("prompt likely exceeds context window, bridge will truncate",
+			"estimated_tokens", estimatedTokens,
+			"context_size", p.opts.ContextSize,
+			"max_tokens", maxTokens,
+			"prompt_chars", len(prompt))
 	}
 
 	backendReq := BackendCompletionRequest{
-		Prompt:      formatPrompt(req.Messages),
+		Prompt:      prompt,
 		MaxTokens:   maxTokens,
 		Temperature: temp,
 		TopP:        req.TopP,
