@@ -16,28 +16,28 @@ import (
 
 // Config is the root configuration structure.
 type Config struct {
-	LLM           LLMConfig           `yaml:"llm"`
-	Store         StoreConfig         `yaml:"store"`
-	Memory        MemoryConfig        `yaml:"memory"`
-	Perception    PerceptionConfig    `yaml:"perception"`
-	Encoding      EncodingConfig      `yaml:"encoding"`
-	Consolidation ConsolidationConfig `yaml:"consolidation"`
-	Retrieval     RetrievalConfig     `yaml:"retrieval"`
-	Metacognition MetacognitionConfig `yaml:"metacognition"`
-	Dreaming      DreamingConfig      `yaml:"dreaming"`
-	Episoding     EpisodingConfig     `yaml:"episoding"`
-	Abstraction   AbstractionConfig   `yaml:"abstraction"`
-	Orchestrator  OrchestratorConfig  `yaml:"orchestrator"`
+	LLM            LLMConfig            `yaml:"llm"`
+	Store          StoreConfig          `yaml:"store"`
+	Memory         MemoryConfig         `yaml:"memory"`
+	Perception     PerceptionConfig     `yaml:"perception"`
+	Encoding       EncodingConfig       `yaml:"encoding"`
+	Consolidation  ConsolidationConfig  `yaml:"consolidation"`
+	Retrieval      RetrievalConfig      `yaml:"retrieval"`
+	Metacognition  MetacognitionConfig  `yaml:"metacognition"`
+	Dreaming       DreamingConfig       `yaml:"dreaming"`
+	Episoding      EpisodingConfig      `yaml:"episoding"`
+	Abstraction    AbstractionConfig    `yaml:"abstraction"`
+	Orchestrator   OrchestratorConfig   `yaml:"orchestrator"`
 	Reactor        ReactorConfig        `yaml:"reactor"`
 	MemoryDefaults MemoryDefaultsConfig `yaml:"memory_defaults"`
 	MCP            MCPConfig            `yaml:"mcp"`
-	AgentSDK      AgentSDKConfig      `yaml:"agent_sdk"`
-	Training      TrainingConfig      `yaml:"training"`
-	Coaching      CoachingConfig      `yaml:"coaching"`
-	API           APIConfig           `yaml:"api"`
-	Web           WebConfig           `yaml:"web"`
-	Logging       LoggingConfig       `yaml:"logging"`
-	Projects      []ProjectConfig     `yaml:"projects"`
+	AgentSDK       AgentSDKConfig       `yaml:"agent_sdk"`
+	Training       TrainingConfig       `yaml:"training"`
+	Coaching       CoachingConfig       `yaml:"coaching"`
+	API            APIConfig            `yaml:"api"`
+	Web            WebConfig            `yaml:"web"`
+	Logging        LoggingConfig        `yaml:"logging"`
+	Projects       []ProjectConfig      `yaml:"projects"`
 }
 
 // LLMConfig holds LLM provider settings.
@@ -292,14 +292,14 @@ type RetrievalConfig struct {
 
 // MetacognitionConfig holds metacognition settings.
 type MetacognitionConfig struct {
-	Enabled              bool          `yaml:"enabled"`
-	IntervalRaw          string        `yaml:"interval"`
-	Interval             time.Duration `yaml:"-"`
-	StartupDelaySec      int           `yaml:"startup_delay_sec"`       // seconds before first cycle (default: 60)
-	ReflectionLookbackRaw string       `yaml:"reflection_lookback"`     // how far back to analyze (default: "7d")
-	ReflectionLookback   time.Duration `yaml:"-"`
-	DeadMemoryWindowRaw  string        `yaml:"dead_memory_window"`      // age threshold for dead memory analysis (default: "30d")
-	DeadMemoryWindow     time.Duration `yaml:"-"`
+	Enabled               bool          `yaml:"enabled"`
+	IntervalRaw           string        `yaml:"interval"`
+	Interval              time.Duration `yaml:"-"`
+	StartupDelaySec       int           `yaml:"startup_delay_sec"`   // seconds before first cycle (default: 60)
+	ReflectionLookbackRaw string        `yaml:"reflection_lookback"` // how far back to analyze (default: "7d")
+	ReflectionLookback    time.Duration `yaml:"-"`
+	DeadMemoryWindowRaw   string        `yaml:"dead_memory_window"` // age threshold for dead memory analysis (default: "30d")
+	DeadMemoryWindow      time.Duration `yaml:"-"`
 }
 
 // DreamingConfig holds dreaming (memory replay) agent settings.
@@ -311,52 +311,52 @@ type DreamingConfig struct {
 	SalienceThreshold      float32       `yaml:"salience_threshold"`
 	AssociationBoostFactor float32       `yaml:"association_boost_factor"`
 	NoisePruneThreshold    float32       `yaml:"noise_prune_threshold"`
-	StartupDelaySec        int           `yaml:"startup_delay_sec"`       // seconds before first cycle (default: 90)
-	DeadMemoryWindowRaw    string        `yaml:"dead_memory_window"`      // age threshold for noise pruning (default: "30d")
+	StartupDelaySec        int           `yaml:"startup_delay_sec"`  // seconds before first cycle (default: 90)
+	DeadMemoryWindowRaw    string        `yaml:"dead_memory_window"` // age threshold for noise pruning (default: "30d")
 	DeadMemoryWindow       time.Duration `yaml:"-"`
-	InsightsBudget         int           `yaml:"insights_budget"`         // max insights per dream cycle (default: 2)
-	DefaultConfidence      float32       `yaml:"default_confidence"`      // fallback confidence for generated insights (default: 0.6)
+	InsightsBudget         int           `yaml:"insights_budget"`    // max insights per dream cycle (default: 2)
+	DefaultConfidence      float32       `yaml:"default_confidence"` // fallback confidence for generated insights (default: 0.6)
 }
 
 // EpisodingConfig configures the episoding agent.
 type EpisodingConfig struct {
-	Enabled              bool    `yaml:"enabled"`
-	EpisodeWindowSizeMin int     `yaml:"episode_window_size_min"`
-	MinEventsPerEpisode  int     `yaml:"min_events_per_episode"`
-	StartupLookbackRaw   string  `yaml:"startup_lookback"`       // how far back to look on startup (default: "1h")
+	Enabled              bool          `yaml:"enabled"`
+	EpisodeWindowSizeMin int           `yaml:"episode_window_size_min"`
+	MinEventsPerEpisode  int           `yaml:"min_events_per_episode"`
+	StartupLookbackRaw   string        `yaml:"startup_lookback"` // how far back to look on startup (default: "1h")
 	StartupLookback      time.Duration `yaml:"-"`
-	DefaultSalience      float32 `yaml:"default_salience"`       // fallback salience for synthesized episodes (default: 0.5)
-	PollingIntervalSec   int     `yaml:"polling_interval_sec"`   // seconds between episode checks (default: 10)
+	DefaultSalience      float32       `yaml:"default_salience"`     // fallback salience for synthesized episodes (default: 0.5)
+	PollingIntervalSec   int           `yaml:"polling_interval_sec"` // seconds between episode checks (default: 10)
 }
 
 // AbstractionConfig configures the abstraction agent (hierarchical knowledge).
 type AbstractionConfig struct {
-	Enabled     bool          `yaml:"enabled"`
-	IntervalRaw string        `yaml:"interval"`
-	Interval    time.Duration `yaml:"-"`
-	MinStrength float32       `yaml:"min_strength"`  // minimum pattern strength to consider
-	MaxLLMCalls int           `yaml:"max_llm_calls"` // budget per cycle
-	StartupDelaySec          int     `yaml:"startup_delay_sec"`           // seconds before first cycle (default: 300)
-	DefaultConfidence        float32 `yaml:"default_confidence"`          // fallback confidence for principles (default: 0.6)
-	PatternAxiomConfidence   float32 `yaml:"pattern_axiom_confidence"`    // fallback confidence for axioms (default: 0.5)
-	ConfidenceModerateDecay  float32 `yaml:"confidence_moderate_decay"`   // grounding multiplier for moderate decay (default: 0.9)
-	ConfidenceSignificantDecay float32 `yaml:"confidence_significant_decay"` // grounding multiplier for significant decay (default: 0.7)
-	ConfidenceSevereDecay    float32 `yaml:"confidence_severe_decay"`     // grounding multiplier for severe decay (default: 0.5)
-	GroundingFloor           float32 `yaml:"grounding_floor"`             // confidence floor for young abstractions (default: 0.5)
+	Enabled                    bool          `yaml:"enabled"`
+	IntervalRaw                string        `yaml:"interval"`
+	Interval                   time.Duration `yaml:"-"`
+	MinStrength                float32       `yaml:"min_strength"`                 // minimum pattern strength to consider
+	MaxLLMCalls                int           `yaml:"max_llm_calls"`                // budget per cycle
+	StartupDelaySec            int           `yaml:"startup_delay_sec"`            // seconds before first cycle (default: 300)
+	DefaultConfidence          float32       `yaml:"default_confidence"`           // fallback confidence for principles (default: 0.6)
+	PatternAxiomConfidence     float32       `yaml:"pattern_axiom_confidence"`     // fallback confidence for axioms (default: 0.5)
+	ConfidenceModerateDecay    float32       `yaml:"confidence_moderate_decay"`    // grounding multiplier for moderate decay (default: 0.9)
+	ConfidenceSignificantDecay float32       `yaml:"confidence_significant_decay"` // grounding multiplier for significant decay (default: 0.7)
+	ConfidenceSevereDecay      float32       `yaml:"confidence_severe_decay"`      // grounding multiplier for severe decay (default: 0.5)
+	GroundingFloor             float32       `yaml:"grounding_floor"`              // confidence floor for young abstractions (default: 0.5)
 }
 
 // OrchestratorConfig configures the autonomous orchestrator.
 type OrchestratorConfig struct {
-	Enabled                bool          `yaml:"enabled"`
-	AdaptiveIntervals      bool          `yaml:"adaptive_intervals"`
-	MaxDBSizeMB            int           `yaml:"max_db_size_mb"`
-	SelfTestIntervalRaw    string        `yaml:"self_test_interval"`
-	SelfTestInterval       time.Duration `yaml:"-"`
-	AutoRecovery           bool          `yaml:"auto_recovery"`
-	MonitorIntervalRaw     string        `yaml:"monitor_interval"`
-	MonitorInterval        time.Duration `yaml:"-"`
-	HealthReportIntervalRaw string       `yaml:"health_report_interval"` // how often to write health reports (default: "5m")
-	HealthReportInterval   time.Duration `yaml:"-"`
+	Enabled                 bool          `yaml:"enabled"`
+	AdaptiveIntervals       bool          `yaml:"adaptive_intervals"`
+	MaxDBSizeMB             int           `yaml:"max_db_size_mb"`
+	SelfTestIntervalRaw     string        `yaml:"self_test_interval"`
+	SelfTestInterval        time.Duration `yaml:"-"`
+	AutoRecovery            bool          `yaml:"auto_recovery"`
+	MonitorIntervalRaw      string        `yaml:"monitor_interval"`
+	MonitorInterval         time.Duration `yaml:"-"`
+	HealthReportIntervalRaw string        `yaml:"health_report_interval"` // how often to write health reports (default: "5m")
+	HealthReportInterval    time.Duration `yaml:"-"`
 }
 
 // ReactorConfig configures the event-driven reactor engine.
@@ -520,19 +520,19 @@ func Default() *Config {
 				KeywordMedium:    0.10,
 				KeywordLow:       0.05,
 			},
-			ContentDedupTTLSec:    5,
-			GitOpCooldownSec:      10,
-			MaxRawContentLen:      10000,
-			LLMGateSnippetLen:     500,
-			LLMGateTimeoutSec:     10,
-			HeuristicPassScore:    0.2,
-			BatchEditWindowSec:    5,
-			BatchEditThreshold:    3,
-			RecallBoostWindowMin:  30,
-			RecallBoostMax:        0.2,
-			RejectionThreshold:    50,
-			RejectionWindowMin:    60,
-			RejectionMaxPromoted:  20,
+			ContentDedupTTLSec:   5,
+			GitOpCooldownSec:     10,
+			MaxRawContentLen:     10000,
+			LLMGateSnippetLen:    500,
+			LLMGateTimeoutSec:    10,
+			HeuristicPassScore:   0.2,
+			BatchEditWindowSec:   5,
+			BatchEditThreshold:   3,
+			RecallBoostWindowMin: 30,
+			RecallBoostMax:       0.2,
+			RejectionThreshold:   50,
+			RejectionWindowMin:   60,
+			RejectionMaxPromoted: 20,
 			Filesystem: FilesystemPerceptionConfig{
 				Enabled: true,
 				WatchDirs: []string{
@@ -754,12 +754,12 @@ func Default() *Config {
 			GroundingFloor:             0.5,
 		},
 		Orchestrator: OrchestratorConfig{
-			Enabled:             true,
-			AdaptiveIntervals:   true,
-			MaxDBSizeMB:         500,
-			SelfTestIntervalRaw: "12h",
-			SelfTestInterval:    12 * time.Hour,
-			AutoRecovery:        true,
+			Enabled:                 true,
+			AdaptiveIntervals:       true,
+			MaxDBSizeMB:             500,
+			SelfTestIntervalRaw:     "12h",
+			SelfTestInterval:        12 * time.Hour,
+			AutoRecovery:            true,
 			MonitorIntervalRaw:      "5m",
 			MonitorInterval:         5 * time.Minute,
 			HealthReportIntervalRaw: "5m",
