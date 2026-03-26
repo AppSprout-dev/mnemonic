@@ -165,18 +165,18 @@ func (p *EmbeddedProvider) release() {
 	<-p.sem
 }
 
-// formatPrompt converts a slice of Messages into a single prompt string
-// using the ChatML format that most GGUF models support.
+// formatPrompt converts a slice of Messages into a single prompt string.
+// Uses the Felix-LM fine-tuning format: <|system|>\n...\n<|user|>\n...\n<|assistant|>\n
 func formatPrompt(messages []Message) string {
 	var b strings.Builder
 	for _, msg := range messages {
-		b.WriteString("<|im_start|>")
+		b.WriteString("<|")
 		b.WriteString(msg.Role)
-		b.WriteByte('\n')
+		b.WriteString("|>\n")
 		b.WriteString(msg.Content)
-		b.WriteString("<|im_end|>\n")
+		b.WriteByte('\n')
 	}
-	b.WriteString("<|im_start|>assistant\n")
+	b.WriteString("<|assistant|>\n")
 	return b.String()
 }
 

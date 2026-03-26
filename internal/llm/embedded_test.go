@@ -248,7 +248,7 @@ func TestFormatPrompt(t *testing.T) {
 		{Role: "user", Content: "Hello"},
 	}
 	got := formatPrompt(messages)
-	expected := "<|im_start|>system\nYou are helpful.<|im_end|>\n<|im_start|>user\nHello<|im_end|>\n<|im_start|>assistant\n"
+	expected := "<|system|>\nYou are helpful.\n<|user|>\nHello\n<|assistant|>\n"
 	if got != expected {
 		t.Errorf("formatPrompt mismatch:\ngot:  %q\nwant: %q", got, expected)
 	}
