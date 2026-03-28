@@ -458,7 +458,7 @@ Pivot from Felix-LM 100M to Qwen 3.5 2B with Felix spoke layers. The base model 
 
 - **Date:** 2026-03-28
 - **Status:** REGISTERED
-- **Hypothesis:** A frozen Qwen 3.5 2B base with trainable spoke layers (18.9M params, ~0.9% overhead) will show decreasing loss on the encoding task within 100 optimizer steps, verifying the training pipeline works end-to-end on ROCm.
+- **Hypothesis:** A frozen Qwen 3.5 2B base with trainable spoke layers (25.2M params, ~1.3% overhead) will show decreasing loss on the encoding task within 100 optimizer steps, verifying the training pipeline works end-to-end on ROCm.
 - **Variable:** Model architecture (Felix-LM 100M trained from scratch -> Qwen 3.5 2B pretrained + spoke adapters)
 - **Control:** Random loss baseline (untrained spokes, ~ln(vocab_size) ~ 12.4 for Qwen's 248K vocab)
 - **Prediction:** Loss decreases from ~12.4 to below 8.0 within 100 steps. VRAM usage stays below 12 GB with gradient checkpointing.
