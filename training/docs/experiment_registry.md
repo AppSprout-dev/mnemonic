@@ -403,3 +403,47 @@ Training time: ~2.5h (epochs 1-2) + ~0.8h (epoch 3) = ~3.3h total
 - **Verdict:** CONFIRMED — Mixed fine-tune achieved eval loss 0.522 / PPL 1.7 over 3 epochs with no sign of overfitting. Loss curve descended cleanly throughout. The model learned both encoding (JSON structured output) and synthesis (narrative summarization) tasks. Exported to GGUF (felix-encoder-v2.gguf), quantized to Q8_0 (124 MB), and verified with all 4 CGo backend integration tests passing (mean_prob 0.72 on grammar-constrained encoding).
 
 - **Analysis:** The mixed fine-tune from the pretrained base (not the encoding-only checkpoint) was the right call — starting fresh avoided catastrophic forgetting risk while letting the model learn both tasks from scratch. The 6% synthesis data (203/3507 examples) did not dilute encoding quality: the v2 model achieves comparable mean_prob (0.72) to v1 (0.69-0.72) on the GBNF grammar test, suggesting encoding quality is maintained or slightly improved. The synthesis capability hasn't been evaluated against Gemini yet (requires shadow-mode A/B testing in Phase 6), but the training loss on synthesis examples converged alongside encoding examples. Epoch 3 was run as a continuation from the step_3500 checkpoint with reduced LR (1e-3 vs 3.5e-3), which produced an additional 0.24 loss reduction — meaningful but with diminishing returns. For production, 5-10 epochs from scratch at LR 3.5e-3 with cosine decay would likely reach lower loss.
+- **Post-deployment finding (2026-03-27):** Testing felix-encoder-v2 on a fresh DB with novel inputs revealed severe hallucination. Most inputs produce "Mnemonic v0.0 adds multi-format ingestion" regardless of content — the model memorized a dominant pattern from its narrow 3,304-example training set. Only inputs close to training distribution encode correctly. The GBNF grammar ensures valid JSON but not semantic accuracy. This motivates EXP-10: training on the full 13K+ validated encoding corpus with more epochs.
+
+### EXP-10: Full-Corpus Encoding Fine-Tune
+
+- **Date:** 2026-03-27
+- **Status:** COMPLETED
+- **Hypothesis:** Training on the full validated encoding corpus (13K+ examples, 4x EXP-9) with more epochs will eliminate the hallucination mode collapse observed in felix-encoder-v2. The model should generalize to novel inputs instead of defaulting to memorized patterns.
+- **Variable:** Training data size (3,304 → 13,272 encoding) and epochs (3 → 5-10)
+- **Control:** EXP-9 (felix-encoder-v2): 3,304 encoding examples, 3 epochs, eval loss 0.522. Hallucinates on novel inputs.
+- **Prediction:** The model will produce semantically accurate summaries on novel inputs (>80% of test memories should have summaries reflecting the actual content, not hallucinated templates). Eval loss should be lower than 0.522.
+- **Config (actual):** Felix-LM v3 100M, full fine-tune from pretrained base (step_100000.pt), LR 3.5e-3 with cosine decay, batch 2, accum 8, 5 epochs, bf16, torch.compile, seq_len 4096
+- **Data:** 14,082 train / 1,564 eval (encoding-only split from the full validated corpus)
+- **Hardware:** RX 7800 XT (16GB VRAM), ROCm 6.3, Linux x86_64
+- **wandb:** [exp10-full-corpus](https://wandb.ai/appsprout/mnemonic-lm/runs/fxghfqcu)
+- **Training time:** 19.9h (35,205 micro-steps / 4,400 optimizer steps)
+
+- **Results:**
+
+| Epoch | Step | Eval Loss | Eval PPL | Train Loss |
+|-------|------|-----------|----------|------------|
+| 0.5 | 3500 | 1.614 | 5.0 | 1.69 |
+| 1.0 | 7000 | 1.495 | 4.5 | 1.45 |
+| 2.0 | 14000 | 1.298 | 3.7 | 1.32 |
+| 3.0 | 21000 | 1.167 | 3.2 | 1.06 |
+| **4.0** | **28000** | **1.106** | **3.0** | **0.83** |
+| 4.5 | 31500 | 1.128 | 3.1 | 0.59 |
+| 5.0 | 35000 | 1.119 | 3.1 | 0.56 |
+| Final | 35205 | 1.119 | 3.1 | 0.58 |
+
+Best eval: step 28000 (end epoch 4), eval loss 1.106, PPL 3.0. Mild overfitting in epoch 5 — eval loss rebounded briefly at 28500 (1.123) before settling to 1.119.
+
+- **Novel input generation test (4 inputs outside training distribution):**
+
+| Metric | EXP-9 (v2) | EXP-10 |
+|--------|-----------|--------|
+| JSON valid | Yes (with GBNF) | 0/4 |
+| Content accuracy | Hallucinated same template | Degenerate repetition |
+| Failure mode | "Mnemonic v0.0 adds multi-format ingestion" | Repetitive fragments ("ments inments inments"), broken JSON, training-distribution echoes |
+
+The specific hallucination from EXP-9 is gone, replaced by degenerate repetitive output. The model cannot produce structurally valid JSON on any novel input tested. On training-distribution eval (perplexity), it scores reasonably (PPL 3.1), but autoregressive generation on novel inputs completely fails.
+
+- **Verdict:** REFUTED — 4x more data and 5 epochs did NOT fix generalization. The hallucination mode shifted from a specific memorized template to degenerate repetition, but the core failure is the same: the model memorizes the training distribution without learning the encoding function. Eval loss comparison to EXP-9 is not direct (different eval sets: 389 vs 1,564 examples from different corpus sizes).
+
+- **Analysis:** The train-eval gap (0.58 vs 1.12) shows the model memorized training patterns but doesn't generalize. The complete inability to produce even structurally valid JSON on novel inputs — not just wrong content, but broken syntax — suggests something beyond simple overfitting. Possible factors: (1) 100M parameter capacity is fundamentally insufficient for the encoding task on arbitrary text. (2) Potential prompt format sensitivity — the novel input test used a manually constructed prompt that may differ subtly from training prompts. (3) The degenerate repetition pattern (token loops) is characteristic of models pushed past their capacity limit, not just overfitting. (4) **LR was 3.5e-3 (pretrain-level) — should have been ~3.5e-5 for fine-tuning. This likely caused catastrophic forgetting of pretrained capabilities.** This result motivates pivoting from training-from-scratch to fine-tuning a pretrained Qwen 3.5 base with spoke adapters.
