@@ -43,6 +43,7 @@ sdk/agent/evolution/.decay_stamp
 # Training data (large downloads, not shipped)
 training/data/
 training/training/
+training/tokenizer_qwen35/
 
 # Model files (large, downloaded at runtime)
 models/
