@@ -72,8 +72,12 @@ class SpokeLayer(nn.Module):
             nn.init.zeros_(up.weight)
 
     def forward(self, h: torch.Tensor) -> torch.Tensor:
+        # Compute in fp32 for stability, cast result back to input dtype
+        input_dtype = h.dtype
+        h_fp32 = h.float()
+
         # Parameterless RMSNorm
-        h_norm = F.rms_norm(h, (h.size(-1),))
+        h_norm = F.rms_norm(h_fp32, (h_fp32.size(-1),))
 
         updates = []
         for s in range(self.num_spokes):
@@ -82,7 +86,8 @@ class SpokeLayer(nn.Module):
 
         mean_update = torch.stack(updates, dim=0).mean(dim=0)
         gate = torch.sigmoid(self.gate_bias)
-        return h + gate * mean_update
+        result = h_fp32 + gate * mean_update
+        return result.to(input_dtype)
 
     def extra_repr(self) -> str:
         gate_val = torch.sigmoid(self.gate_bias).item()
@@ -131,6 +136,10 @@ class QwenWithSpokes(nn.Module):
                     rank=spoke_config.spoke_rank,
                     gate_init=gate_init,
                 )
+
+        # Keep spokes in fp32 for optimizer stability (Muon NaN in bf16).
+        # The forward pass casts to base model dtype automatically.
+        self.spokes.float()
 
         # Install forward hooks on the transformer blocks
         self._hooks = []
@@ -189,7 +198,7 @@ class QwenWithSpokes(nn.Module):
         cls,
         model_name_or_path: str,
         spoke_config: SpokeConfig | None = None,
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
         **kwargs,
     ):
         """Load a pretrained Qwen model and wrap it with spoke layers."""
@@ -201,7 +210,7 @@ class QwenWithSpokes(nn.Module):
         print(f"Loading base model: {model_name_or_path}")
         base_model = AutoModelForCausalLM.from_pretrained(
             model_name_or_path,
-            torch_dtype=torch_dtype,
+            dtype=dtype,
             **kwargs,
         )
 

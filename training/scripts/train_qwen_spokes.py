@@ -166,7 +166,7 @@ def train(args):
 
     if device.type == "cuda":
         print(f"GPU: {torch.cuda.get_device_name()}")
-        print(f"VRAM: {torch.cuda.get_device_properties(0).total_mem / 1e9:.1f} GB")
+        print(f"VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
 
     # Spoke config
     spoke_config = SpokeConfig(
@@ -180,7 +180,7 @@ def train(args):
     model = QwenWithSpokes.from_pretrained(
         args.base_model,
         spoke_config=spoke_config,
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
         attn_implementation="eager",  # Flash attention may not work with hooks
     )
 
@@ -313,20 +313,24 @@ def train(args):
             labels = labels.to(device)
             attention_mask = attention_mask.to(device)
 
-            with torch.amp.autocast("cuda", dtype=torch.bfloat16):
-                outputs = model(input_ids=input_ids, labels=labels, attention_mask=attention_mask)
+            outputs = model(input_ids=input_ids, labels=labels, attention_mask=attention_mask)
 
-                # Recompute loss with proper masking
-                logits = outputs.logits
-                shift_logits = logits[..., :-1, :].contiguous()
-                shift_labels = labels[..., 1:].contiguous()
+            # Loss in fp32 for stability
+            logits = outputs.logits.float()
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
 
-                loss = F.cross_entropy(
-                    shift_logits.view(-1, shift_logits.size(-1)),
-                    shift_labels.view(-1),
-                    ignore_index=-100,
-                )
-                loss = loss / args.grad_accum
+            # Skip if all labels are masked (truncated examples with no completion)
+            if (shift_labels == -100).all():
+                global_step += 1
+                continue
+
+            loss = F.cross_entropy(
+                shift_logits.view(-1, shift_logits.size(-1)),
+                shift_labels.view(-1),
+                ignore_index=-100,
+            )
+            loss = loss / args.grad_accum
 
             loss.backward()
 
@@ -501,7 +505,8 @@ def main():
     parser.add_argument("--warmup-steps", type=int, default=0, help="0=auto (10%% of total)")
     parser.add_argument("--use-muon", action="store_true", default=True, help="Use Muon for matrices")
     parser.add_argument("--no-muon", action="store_true", help="Disable Muon, use AdamW only")
-    parser.add_argument("--gradient-checkpointing", action="store_true", default=True)
+    parser.add_argument("--gradient-checkpointing", action="store_true", default=False)
+    parser.add_argument("--no-gradient-checkpointing", dest="gradient_checkpointing", action="store_false")
 
     # Eval / checkpointing
     parser.add_argument("--eval-interval", type=int, default=200)
