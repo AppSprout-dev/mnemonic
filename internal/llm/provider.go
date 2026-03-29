@@ -30,14 +30,15 @@ type JSONSchema struct {
 
 // CompletionRequest is the input to a completion call.
 type CompletionRequest struct {
-	Messages       []Message       `json:"messages"`
-	Model          string          `json:"model,omitempty"`
-	MaxTokens      int             `json:"max_tokens,omitempty"`
-	Temperature    float32         `json:"temperature,omitempty"`
-	TopP           float32         `json:"top_p,omitempty"`
-	Stop           []string        `json:"stop,omitempty"`
-	Tools          []Tool          `json:"tools,omitempty"`
-	ResponseFormat *ResponseFormat `json:"response_format,omitempty"`
+	Messages        []Message       `json:"messages"`
+	Model           string          `json:"model,omitempty"`
+	MaxTokens       int             `json:"max_tokens,omitempty"`
+	Temperature     float32         `json:"temperature,omitempty"`
+	TopP            float32         `json:"top_p,omitempty"`
+	Stop            []string        `json:"stop,omitempty"`
+	Tools           []Tool          `json:"tools,omitempty"`
+	ResponseFormat  *ResponseFormat `json:"response_format,omitempty"`
+	DisableThinking bool            `json:"-"` // if true, set reasoning_effort=none on thinking models
 }
 
 // CompletionResponse is the output of a completion call.

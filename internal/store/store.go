@@ -354,6 +354,55 @@ type RetrievalFeedback struct {
 	CreatedAt       time.Time             `json:"created_at"`
 }
 
+// ForumCategory is a sub-forum in the forum index.
+type ForumCategory struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Slug        string    `json:"slug"`
+	Description string    `json:"description"`
+	Icon        string    `json:"icon"`
+	Color       string    `json:"color"`
+	Type        string    `json:"type"` // "system", "project", "agent", "custom"
+	SortOrder   int       `json:"sort_order"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// ForumCategorySummary is a category with thread/post counts for the index page.
+type ForumCategorySummary struct {
+	Category    ForumCategory `json:"category"`
+	ThreadCount int           `json:"thread_count"`
+	PostCount   int           `json:"post_count"`
+	LastPost    *ForumPost    `json:"last_post,omitempty"`
+}
+
+// ForumPost is a single post in the forum communication layer.
+// Forum posts are separate from memories — they are a conversation space
+// between humans and agents. Posts can link to memories but are not memories.
+type ForumPost struct {
+	ID         string    `json:"id"`
+	ParentID   string    `json:"parent_id,omitempty"` // NULL = top-level post
+	ThreadID   string    `json:"thread_id"`           // root post ID (denormalized)
+	AuthorType string    `json:"author_type"`         // "human", "agent"
+	AuthorName string    `json:"author_name"`
+	AuthorKey  string    `json:"author_key,omitempty"` // agent key for avatar lookup
+	Content    string    `json:"content"`
+	Mentions   []string  `json:"mentions,omitempty"`    // extracted @mentions
+	MemoryIDs  []string  `json:"memory_ids,omitempty"`  // linked memory IDs
+	EventRef   string    `json:"event_ref,omitempty"`   // event that triggered this post
+	CategoryID string    `json:"category_id,omitempty"` // sub-forum this thread belongs to
+	Pinned     bool      `json:"pinned"`
+	State      string    `json:"state"` // "active", "archived", "internalized"
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+// ForumThread is a denormalized thread summary for listing.
+type ForumThread struct {
+	RootPost   ForumPost `json:"root_post"`
+	ReplyCount int       `json:"reply_count"`
+	LastReply  time.Time `json:"last_reply"`
+}
+
 // Store is the abstraction for persistent memory.
 type Store interface {
 	// --- Raw memory operations ---
@@ -523,6 +572,22 @@ type Store interface {
 
 	// --- Research analytics ---
 	GetAnalytics(ctx context.Context) (AnalyticsData, error)
+
+	// --- Forum category operations ---
+	WriteForumCategory(ctx context.Context, cat ForumCategory) error
+	GetForumCategory(ctx context.Context, id string) (ForumCategory, error)
+	ListForumCategories(ctx context.Context) ([]ForumCategory, error)
+	ListForumCategorySummaries(ctx context.Context) ([]ForumCategorySummary, error)
+
+	// --- Forum operations ---
+	WriteForumPost(ctx context.Context, post ForumPost) error
+	GetForumPost(ctx context.Context, id string) (ForumPost, error)
+	ListForumThreads(ctx context.Context, limit, offset int) ([]ForumThread, error)
+	ListForumThreadsByCategory(ctx context.Context, categoryID string, limit, offset int) ([]ForumThread, error)
+	ListForumPostsByThread(ctx context.Context, threadID string, limit int) ([]ForumPost, error)
+	UpdateForumPostState(ctx context.Context, id string, state string) error
+	CountForumPosts(ctx context.Context) (int, error)
+	GetDailyDigestThread(ctx context.Context, categoryID string, date time.Time) (ForumPost, error)
 
 	// --- Lifecycle ---
 	Close() error

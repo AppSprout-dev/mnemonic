@@ -612,17 +612,19 @@ func TestNewChainRegistry(t *testing.T) {
 	dreamTrigger := make(chan struct{}, 1)
 
 	chains := NewChainRegistry(ChainDeps{
-		ConsolidationTrigger: consolTrigger,
-		AbstractionTrigger:   abstrTrigger,
-		MetacognitionTrigger: metaTrigger,
-		DreamingTrigger:      dreamTrigger,
-		IncrementAutonomous:  func() {},
-		MaxDBSizeMB:          100,
-		Logger:               testLogger(),
+		ConsolidationTrigger:  consolTrigger,
+		AbstractionTrigger:    abstrTrigger,
+		MetacognitionTrigger:  metaTrigger,
+		DreamingTrigger:       dreamTrigger,
+		IncrementAutonomous:   func() {},
+		MaxDBSizeMB:           100,
+		ForumAgentPosting:     true,
+		ForumMentionResponses: true,
+		Logger:                testLogger(),
 	})
 
-	if len(chains) != 6 {
-		t.Errorf("expected 6 chains, got %d", len(chains))
+	if len(chains) != 13 {
+		t.Errorf("expected 13 chains, got %d", len(chains))
 	}
 
 	// Verify chain IDs
@@ -638,6 +640,13 @@ func TestNewChainRegistry(t *testing.T) {
 		"abstraction_on_pattern",
 		"meta_on_consolidation_completed",
 		"dreaming_on_episode_closed",
+		"forum_on_consolidation",
+		"forum_on_dream",
+		"forum_on_episode",
+		"forum_on_pattern",
+		"forum_on_abstraction",
+		"forum_on_meta",
+		"forum_mention_response",
 	}
 	for _, id := range expected {
 		if !ids[id] {

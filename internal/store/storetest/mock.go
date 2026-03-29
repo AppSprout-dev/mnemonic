@@ -328,6 +328,40 @@ func (MockStore) GetToolUsageChart(context.Context, time.Time, int) ([]store.Too
 	return nil, nil
 }
 
+// --- Forum category operations ---
+
+func (MockStore) WriteForumCategory(context.Context, store.ForumCategory) error { return nil }
+func (MockStore) GetForumCategory(context.Context, string) (store.ForumCategory, error) {
+	return store.ForumCategory{}, nil
+}
+func (MockStore) ListForumCategories(context.Context) ([]store.ForumCategory, error) {
+	return nil, nil
+}
+func (MockStore) ListForumCategorySummaries(context.Context) ([]store.ForumCategorySummary, error) {
+	return nil, nil
+}
+
+// --- Forum operations ---
+
+func (MockStore) WriteForumPost(context.Context, store.ForumPost) error { return nil }
+func (MockStore) GetForumPost(context.Context, string) (store.ForumPost, error) {
+	return store.ForumPost{}, nil
+}
+func (MockStore) ListForumThreads(context.Context, int, int) ([]store.ForumThread, error) {
+	return nil, nil
+}
+func (MockStore) ListForumThreadsByCategory(context.Context, string, int, int) ([]store.ForumThread, error) {
+	return nil, nil
+}
+func (MockStore) ListForumPostsByThread(context.Context, string, int) ([]store.ForumPost, error) {
+	return nil, nil
+}
+func (MockStore) UpdateForumPostState(context.Context, string, string) error { return nil }
+func (MockStore) CountForumPosts(context.Context) (int, error)               { return 0, nil }
+func (MockStore) GetDailyDigestThread(context.Context, string, time.Time) (store.ForumPost, error) {
+	return store.ForumPost{}, store.ErrNotFound
+}
+
 // --- Lifecycle ---
 
 func (MockStore) Close() error { return nil }

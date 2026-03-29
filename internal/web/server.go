@@ -7,7 +7,7 @@ import (
 	"net/http"
 )
 
-//go:embed static/*
+//go:embed static
 var staticFiles embed.FS
 
 // RegisterRoutes registers the web UI routes on the given ServeMux.

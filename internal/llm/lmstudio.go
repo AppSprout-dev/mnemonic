@@ -298,10 +298,11 @@ func (p *LMStudioProvider) Complete(ctx context.Context, req CompletionRequest) 
 		Stop:        req.Stop,
 	}
 
-	// Thinking models: disable reasoning for structured output requests.
-	// Thinking tokens consume the max_tokens budget and can starve the actual
-	// JSON output, causing parse failures.
-	if isThinkingModel && req.ResponseFormat != nil && req.ResponseFormat.Type == "json_schema" {
+	// Thinking models: always disable reasoning. Mnemonic's prompts are
+	// short, structured tasks (encoding, retrieval, forum replies) where
+	// thinking tokens waste budget and cause truncation. If a future use
+	// case needs thinking, add an EnableThinking field to CompletionRequest.
+	if isThinkingModel {
 		apiReq.ReasoningEffort = "none"
 	}
 

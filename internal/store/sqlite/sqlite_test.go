@@ -992,6 +992,18 @@ func TestWriteMemoryDuplicateRawID(t *testing.T) {
 
 	ctx := context.Background()
 
+	// Write the raw memory that the FK references
+	raw := store.RawMemory{
+		ID:        "raw-1",
+		Timestamp: time.Now(),
+		Source:    "mcp",
+		Type:      "general",
+		Content:   "test raw memory",
+	}
+	if err := s.WriteRaw(ctx, raw); err != nil {
+		t.Fatalf("WriteRaw: %v", err)
+	}
+
 	mem1 := store.Memory{
 		ID:        "m1",
 		RawID:     "raw-1",
