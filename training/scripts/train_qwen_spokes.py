@@ -516,7 +516,7 @@ def main():
     parser.add_argument("--seq-len", type=int, default=4096)
 
     # Training
-    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--scalar-lr-scale", type=float, default=0.1, help="LR scale for gate_bias")
     parser.add_argument("--weight-decay", type=float, default=0.0)
     parser.add_argument("--batch-size", type=int, default=1)

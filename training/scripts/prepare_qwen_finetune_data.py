@@ -62,6 +62,22 @@ def extract_messages(example: dict) -> tuple[str, str, str] | None:
     if not user_content:
         return None
 
+    # Strip coaching instructions and session context from encoding prompts.
+    # These are 2000+ token additions designed for Gemini's large context window.
+    # The fine-tuned model should learn encoding behavior from (input, output)
+    # pairs, not from verbose per-prompt instructions.
+    trim_markers = [
+        "RECENT SESSION CONTEXT:",
+        "RELATED EXISTING MEMORIES:",
+        "COACHING NOTES:",
+        "COACHING INSTRUCTIONS:",
+    ]
+    for marker in trim_markers:
+        idx = user_content.find(marker)
+        if idx > 0:
+            user_content = user_content[:idx].rstrip()
+            break
+
     return system_content, user_content, response_content
 
 
