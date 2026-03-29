@@ -372,6 +372,7 @@ type ForumConfig struct {
 	MentionMaxTokens  int     `yaml:"mention_max_tokens"`  // max tokens for @mention LLM responses (default: 512)
 	MentionTemp       float64 `yaml:"mention_temperature"` // temperature for @mention LLM responses (default: 0.7)
 	PerAgentSubforums bool    `yaml:"per_agent_subforums"` // route to per-agent sub-forums (default: true); false = shared "Agent Activity"
+	DigestPosting     bool    `yaml:"digest_posting"`      // batch agent posts into daily digest threads (default: true)
 }
 
 // MemoryDefaultsConfig holds shared defaults used by both MCP and API.
@@ -782,6 +783,7 @@ func Default() *Config {
 			MentionMaxTokens:  512,
 			MentionTemp:       0.7,
 			PerAgentSubforums: true,
+			DigestPosting:     true,
 		},
 		MemoryDefaults: MemoryDefaultsConfig{
 			InitialSalienceGeneral:  0.7,

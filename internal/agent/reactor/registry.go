@@ -27,6 +27,7 @@ type ChainDeps struct {
 	ForumMentionMaxTokens  int          // max tokens for @mention LLM responses
 	ForumMentionTemp       float64      // temperature for @mention LLM responses
 	ForumPerAgentSubforums bool         // route to per-agent sub-forums (true) or shared (false)
+	ForumDigestPosting     bool         // batch agent posts into daily digest threads
 	MentionLLM             llm.Provider // for @mention LLM responses (can be nil)
 	MentionQuery           ForumQuerier // for @retrieval recall queries (can be nil)
 }
@@ -223,7 +224,7 @@ func NewChainRegistry(deps ChainDeps) []*Chain {
 		log.Info("forum agent posting disabled by config")
 	}
 
-	forumAction := &CreateForumPostAction{PerAgentSubforums: deps.ForumPerAgentSubforums, Log: log}
+	forumAction := &CreateForumPostAction{PerAgentSubforums: deps.ForumPerAgentSubforums, DigestPosting: deps.ForumDigestPosting, Log: log}
 
 	if deps.ForumAgentPosting {
 		chains = append(chains, &Chain{

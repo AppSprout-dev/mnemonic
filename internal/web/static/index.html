@@ -1625,6 +1625,7 @@
         dreamSessionTotals: { cycles: 0, replayed: 0, strengthened: 0, newLinks: 0, insights: 0, crossProject: 0, demoted: 0 },
         forumLoaded: false,
         currentForumThread: null,
+        currentEpisodeId: '',
         mindLoaded: false,
         mindSimulation: null,
         mindData: null,
@@ -1859,6 +1860,24 @@
             var memData = await fetchJSON('/memories?episode_id=' + episodeId + '&limit=100');
             var memories = memData.memories || [];
 
+            // Fetch associations for these memories
+            var assocMap = {}; // memoryID -> [{target_summary, strength, relation_type}]
+            if (memories.length > 0) {
+                var memIds = memories.map(function(m) { return m.id; }).join(',');
+                try {
+                    var assocResp = await forumFetch('/api/v1/associations?memory_ids=' + memIds);
+                    var assocData = await assocResp.json();
+                    (assocData.associations || []).forEach(function(a) {
+                        // Index by source — show what each memory links to
+                        if (!assocMap[a.source_id]) assocMap[a.source_id] = [];
+                        assocMap[a.source_id].push({ summary: a.target_summary, strength: a.strength, type: a.relation_type });
+                        // Index by target — show what links back
+                        if (!assocMap[a.target_id]) assocMap[a.target_id] = [];
+                        assocMap[a.target_id].push({ summary: a.source_summary, strength: a.strength, type: a.relation_type });
+                    });
+                } catch (e) { /* associations are non-critical */ }
+            }
+
             // Build thread header
             var html = '<div class="thread-wrap">';
             html += '<div class="thread-top">';
@@ -1911,7 +1930,8 @@
                     var type = memoryType(m);
                     var rankClass = 'rank-' + type;
                     var salPct = safeSalience(m.salience);
-                    var linkCount = m.association_count || 0;
+                    var memAssocs = assocMap[m.id] || [];
+                    var linkCount = memAssocs.length;
                     var source = m.source || 'mcp';
                     var agent = agentProfile(source);
                     var time = m.created_at ? new Date(m.created_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '';
@@ -1951,6 +1971,19 @@
                         html += '<div class="post-tags">';
                         concepts.forEach(function(c) { html += '<span class="forum-tag">' + escapeHtml(c) + '</span>'; });
                         html += '</div>';
+                    }
+
+                    // Association quotes (linked memories)
+                    if (memAssocs.length > 0) {
+                        var shown = memAssocs.slice(0, 5); // cap at 5 to avoid clutter
+                        shown.forEach(function(a) {
+                            if (!a.summary) return;
+                            var strengthPct = Math.round(a.strength * 100);
+                            html += '<blockquote class="quote">';
+                            html += '<div class="quote-header">\u2197 ' + escapeHtml(a.type || 'linked') + ' (' + strengthPct + '%)</div>';
+                            html += '<div class="quote-body">' + escapeHtml(a.summary) + '</div>';
+                            html += '</blockquote>';
+                        });
                     }
 
                     html += '</div></div></div>'; // close postbody, inner, post
@@ -2630,18 +2663,15 @@
         tooltip.className = 'spark-tooltip';
         container.appendChild(tooltip);
 
-        var svg = d3.select(container).append('svg')
-            .attr('width', w).attr('height', h)
-            .style('display', 'block');
+        var svg = svgEl('svg', { width: w, height: h });
+        svg.style.display = 'block';
+        container.appendChild(svg);
 
-        var x = d3.scaleBand()
-            .domain(buckets.map(function(d, i) { return i; }))
-            .range([0, w])
-            .padding(0.3);
-
-        var y = d3.scaleLinear()
-            .domain([0, maxCount])
-            .range([h - 2, 4]);
+        var nb = buckets.length;
+        var bandStep = w / nb;
+        var bandPad = 0.3;
+        var bandW = bandStep * (1 - bandPad);
+        var bandOff = bandStep * bandPad / 2;
 
         var dayFilter = _timelineState.dayFilter;
 
@@ -2649,70 +2679,59 @@
             return MONTHS[d.getMonth()] + ' ' + d.getDate();
         }
 
-        // Hit-area rects (full height, transparent) for easy hover/click
-        svg.selectAll('.spark-hit')
-            .data(buckets)
-            .enter().append('rect')
-            .attr('class', 'spark-hit')
-            .attr('x', function(d, i) { return x(i) - x.bandwidth() * 0.15; })
-            .attr('y', 0)
-            .attr('width', function() { return x.bandwidth() * 1.3; })
-            .attr('height', h)
-            .attr('fill', 'transparent')
-            .style('cursor', function(d) { return d.count > 0 ? 'pointer' : 'default'; })
-            .on('mouseover', function(event, d) {
-                if (d.count === 0) return;
-                var label = fmtDate(d.date) + ' \u00B7 ' + d.count + ' memor' + (d.count === 1 ? 'y' : 'ies');
-                tooltip.textContent = label;
-                tooltip.style.display = 'block';
-                var bx = x(d.idx) + x.bandwidth() / 2;
-                tooltip.style.left = Math.min(bx - tooltip.offsetWidth / 2, w - tooltip.offsetWidth - 4) + 'px';
-            })
-            .on('mouseout', function() {
-                tooltip.style.display = 'none';
-            })
-            .on('click', function(event, d) {
-                if (d.count === 0) return;
-                var isActive = dayFilter && dayFilter.getTime() === d.date.getTime();
-                if (isActive) {
-                    _timelineState.dayFilter = null;
-                    dayFilter = null;
-                    container.classList.remove('day-active');
-                } else {
-                    _timelineState.dayFilter = d.date;
-                    dayFilter = d.date;
-                    container.classList.add('day-active');
-                }
-                tooltip.style.display = 'none';
-                renderTimelineSparkline();
-                renderTimelineItems();
-            });
+        buckets.forEach(function(d, i) {
+            var bx = i * bandStep + bandOff;
+            var barY = d.count > 0 ? linScale(d.count, 0, maxCount, h - 2, 4) : h - 2;
+            var barH = d.count > 0 ? h - 2 - barY : 2;
 
-        // Bar rects (visual only)
-        svg.selectAll('.spark-bar')
-            .data(buckets)
-            .enter().append('rect')
-            .attr('class', 'spark-bar')
-            .attr('x', function(d, i) { return x(i); })
-            .attr('y', function(d) { return d.count > 0 ? y(d.count) : h - 2; })
-            .attr('width', x.bandwidth())
-            .attr('height', function(d) { return d.count > 0 ? h - 2 - y(d.count) : 2; })
-            .attr('rx', 1)
-            .style('pointer-events', 'none')
-            .attr('fill', function(d) {
-                if (dayFilter && dayFilter.getTime() === d.date.getTime()) return 'var(--accent-cyan)';
-                return d.count > 0 ? 'var(--accent-cyan)' : 'var(--border-subtle)';
-            })
-            .attr('opacity', function(d) {
-                if (dayFilter) {
-                    if (dayFilter.getTime() === d.date.getTime()) return 1;
-                    return d.count > 0 ? 0.2 : 0.15;
-                }
-                // today is the last bucket (idx 29)
+            // Compute fill and opacity
+            var fill, opacity;
+            if (dayFilter && dayFilter.getTime() === d.date.getTime()) {
+                fill = 'var(--accent-cyan)';
+                opacity = 1;
+            } else if (dayFilter) {
+                fill = d.count > 0 ? 'var(--accent-cyan)' : 'var(--border-subtle)';
+                opacity = d.count > 0 ? 0.2 : 0.15;
+            } else {
+                fill = d.count > 0 ? 'var(--accent-cyan)' : 'var(--border-subtle)';
                 var isToday = d.idx === 29;
-                if (d.count > 0) return isToday ? 1 : 0.3 + 0.7 * (d.count / maxCount);
-                return isToday ? 0.25 : 0.15;
-            });
+                if (d.count > 0) opacity = isToday ? 1 : 0.3 + 0.7 * (d.count / maxCount);
+                else opacity = isToday ? 0.25 : 0.15;
+            }
+
+            // Visual bar
+            svg.appendChild(svgEl('rect', { x: bx, y: barY, width: bandW, height: barH, rx: 1, fill: fill, opacity: String(opacity), 'pointer-events': 'none' }));
+
+            // Hit area
+            var hit = svgEl('rect', { x: bx - bandW * 0.15, y: 0, width: bandW * 1.3, height: h, fill: 'transparent', cursor: d.count > 0 ? 'pointer' : 'default' });
+            (function(dd) {
+                hit.addEventListener('mouseover', function() {
+                    if (dd.count === 0) return;
+                    tooltip.textContent = fmtDate(dd.date) + ' \u00B7 ' + dd.count + ' memor' + (dd.count === 1 ? 'y' : 'ies');
+                    tooltip.style.display = 'block';
+                    var cx = dd.idx * bandStep + bandStep / 2;
+                    tooltip.style.left = Math.min(cx - tooltip.offsetWidth / 2, w - tooltip.offsetWidth - 4) + 'px';
+                });
+                hit.addEventListener('mouseout', function() { tooltip.style.display = 'none'; });
+                hit.addEventListener('click', function() {
+                    if (dd.count === 0) return;
+                    var isActive = dayFilter && dayFilter.getTime() === dd.date.getTime();
+                    if (isActive) {
+                        _timelineState.dayFilter = null;
+                        dayFilter = null;
+                        container.classList.remove('day-active');
+                    } else {
+                        _timelineState.dayFilter = dd.date;
+                        dayFilter = dd.date;
+                        container.classList.add('day-active');
+                    }
+                    tooltip.style.display = 'none';
+                    renderTimelineSparkline();
+                    renderTimelineItems();
+                });
+            })(d);
+            svg.appendChild(hit);
+        });
     }
 
     // ── Activity Drawer ──
@@ -3075,320 +3094,28 @@
         setTimeout(function() { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 3000);
     }
 
-    // ── Lightweight D3 Shim (replaces CDN dependency) ──
-    // Provides only the subset of D3 API that our charts actually use.
-    var d3 = (function() {
-        var SVG_NS = 'http://www.w3.org/2000/svg';
-
-        function select(selector) {
-            var el = typeof selector === 'string' ? document.querySelector(selector) : selector;
-            return wrap(el);
-        }
-
-        function wrap(el) {
-            if (!el) return { append: function() { return wrap(null); }, attr: function() { return wrap(null); }, text: function() { return wrap(null); }, style: function() { return wrap(null); }, on: function() { return wrap(null); }, node: function() { return null; }, selectAll: function() { return wrapAll([]); } };
-            var obj = {
-                _el: el,
-                append: function(tag) {
-                    var child = tag === 'svg' || ['g','rect','line','circle','path','text','clipPath','defs'].indexOf(tag) >= 0
-                        ? document.createElementNS(SVG_NS, tag) : document.createElement(tag);
-                    el.appendChild(child);
-                    return wrap(child);
-                },
-                attr: function(name, val) { if (val === undefined) return el.getAttribute(name); el.setAttribute(name, typeof val === 'function' ? val(el.__data__) : val); return obj; },
-                style: function(name, val) { if (val === undefined) return el.style[name]; el.style[name] = val; return obj; },
-                text: function(val) { if (val === undefined) return el.textContent; el.textContent = val; return obj; },
-                html: function(val) { if (val === undefined) return el.innerHTML; el.innerHTML = val; return obj; },
-                on: function(evt, fn) { el.addEventListener(evt, fn); return obj; },
-                node: function() { return el; },
-                remove: function() { if (el.parentNode) el.parentNode.removeChild(el); return obj; },
-                selectAll: function(sel) { return wrapAll(el.querySelectorAll(sel), el); },
-                select: function(sel) { return wrap(el.querySelector(sel)); },
-                classed: function(cls, val) { if (val) el.classList.add(cls); else el.classList.remove(cls); return obj; },
-                datum: function(d) { if (d !== undefined) { el.__data__ = d; return obj; } return el.__data__; },
-                call: function(fn) { fn(obj); return obj; },
-                empty: function() { return false; }
-            };
-            return obj;
-        }
-
-        function wrapAll(nodeList, parentEl) {
-            var arr = Array.from(nodeList);
-            var _parent = parentEl || (arr.length > 0 ? arr[0].parentNode : null);
-            return {
-                data: function(data) {
-                    return { enter: function() { return { append: function(tag) {
-                        var results = data.map(function(d) {
-                            var child = ['g','rect','line','circle','path','text','clipPath','defs'].indexOf(tag) >= 0
-                                ? document.createElementNS(SVG_NS, tag) : document.createElement(tag);
-                            if (_parent) _parent.appendChild(child);
-                            child.__data__ = d;
-                            return wrap(child);
-                        });
-                        return {
-                            attr: function(name, fn) { results.forEach(function(w, i) { w.attr(name, typeof fn === 'function' ? fn(data[i], i) : fn); }); return this; },
-                            style: function(name, fn) { results.forEach(function(w, i) { w.style(name, typeof fn === 'function' ? fn(data[i], i) : fn); }); return this; },
-                            text: function(fn) { results.forEach(function(w, i) { w.text(typeof fn === 'function' ? fn(data[i], i) : fn); }); return this; },
-                            on: function(evt, fn) { results.forEach(function(w, i) { w.on(evt, function(e) { fn.call(this, e, data[i]); }); }); return this; },
-                            classed: function(cls, fn) { results.forEach(function(w, i) { var v = typeof fn === 'function' ? fn(data[i], i) : fn; if (v) w._el.classList.add(cls); }); return this; },
-                        };
-                    }};},
-                    exit: function() { return { remove: function() { arr.forEach(function(n) { if (n.parentNode) n.parentNode.removeChild(n); }); } }; }
-                    };
-                },
-                remove: function() { arr.forEach(function(n) { if (n.parentNode) n.parentNode.removeChild(n); }); },
-                attr: function(name, fn) { arr.forEach(function(n, i) { n.setAttribute(name, typeof fn === 'function' ? fn(n.__data__, i) : fn); }); return this; },
-                style: function(name, fn) { arr.forEach(function(n, i) { n.style[name] = typeof fn === 'function' ? fn(n.__data__, i) : fn; }); return this; },
-            };
-        }
-
-        function scaleLinear() {
-            var _domain = [0, 1], _range = [0, 1];
-            function scale(val) {
-                var d0 = _domain[0], d1 = _domain[1], r0 = _range[0], r1 = _range[1];
-                if (d1 === d0) return r0;
-                return r0 + (val - d0) / (d1 - d0) * (r1 - r0);
-            }
-            scale.domain = function(d) { if (!d) return _domain; _domain = d; return scale; };
-            scale.range = function(r) { if (!r) return _range; _range = r; return scale; };
-            scale.nice = function() { return scale; };
-            scale.ticks = function(n) {
-                n = n || 5;
-                var step = (_domain[1] - _domain[0]) / n;
-                var ticks = [];
-                for (var i = 0; i <= n; i++) ticks.push(_domain[0] + i * step);
-                return ticks;
-            };
-            return scale;
-        }
-
-        function scaleBand() {
-            var _domain = [], _range = [0, 1], _padding = 0;
-            function scale(val) {
-                var idx = _domain.indexOf(val);
-                if (idx < 0) return 0;
-                var step = (_range[1] - _range[0]) / _domain.length;
-                return _range[0] + idx * step + step * _padding / 2;
-            }
-            scale.domain = function(d) { if (!d) return _domain; _domain = d; return scale; };
-            scale.range = function(r) { if (!r) return _range; _range = r; return scale; };
-            scale.padding = function(p) { _padding = p; return scale; };
-            scale.paddingInner = function(p) { _padding = p; return scale; };
-            scale.paddingOuter = function() { return scale; };
-            scale.bandwidth = function() {
-                if (_domain.length === 0) return 0;
-                var step = (_range[1] - _range[0]) / _domain.length;
-                return step * (1 - _padding);
-            };
-            scale.step = function() {
-                if (_domain.length === 0) return 0;
-                return (_range[1] - _range[0]) / _domain.length;
-            };
-            return scale;
-        }
-
-        function scalePoint() {
-            var _domain = [], _range = [0, 1], _padding = 0;
-            function scale(val) {
-                var idx = _domain.indexOf(val);
-                if (idx < 0) return 0;
-                var usable = _range[1] - _range[0];
-                if (_domain.length <= 1) return _range[0] + usable / 2;
-                var step = usable / (_domain.length - 1 + _padding * 2);
-                return _range[0] + (_padding + idx) * step;
-            }
-            scale.domain = function(d) { if (!d) return _domain; _domain = d; return scale; };
-            scale.range = function(r) { if (!r) return _range; _range = r; return scale; };
-            scale.padding = function(p) { _padding = p; return scale; };
-            return scale;
-        }
-
-        function axisBottom(scale) {
-            var _tickValues = null;
-            var _tickFormat = null;
-            var _ticks = 5;
-            var axisFn = function(g) {
-                var ticks = _tickValues || (typeof scale.ticks === 'function' ? scale.ticks(_ticks) : scale.domain());
-                var gNode = g._el || g;
-                // Draw baseline
-                var domain = scale.range ? scale.range() : [0, 100];
-                var baseline = document.createElementNS(SVG_NS, 'line');
-                baseline.setAttribute('x1', domain[0]); baseline.setAttribute('x2', domain[1]);
-                baseline.setAttribute('stroke', 'currentColor'); baseline.setAttribute('opacity', '0.3');
-                baseline.setAttribute('class', 'domain');
-                gNode.appendChild(baseline);
-                ticks.forEach(function(t) {
-                    var xPos = scale(t) + (scale.bandwidth ? scale.bandwidth() / 2 : 0);
-                    var tick = document.createElementNS(SVG_NS, 'g');
-                    tick.setAttribute('transform', 'translate(' + xPos + ',0)');
-                    tick.setAttribute('class', 'tick');
-                    var ln = document.createElementNS(SVG_NS, 'line');
-                    ln.setAttribute('y2', '4'); ln.setAttribute('stroke', 'currentColor'); ln.setAttribute('opacity', '0.3');
-                    tick.appendChild(ln);
-                    var txt = document.createElementNS(SVG_NS, 'text');
-                    txt.setAttribute('y', '14'); txt.setAttribute('text-anchor', 'middle');
-                    txt.setAttribute('fill', 'currentColor'); txt.setAttribute('font-size', '9');
-                    txt.textContent = _tickFormat ? _tickFormat(t) : (typeof t === 'number' ? (t >= 1000 ? (t/1000).toFixed(0) + 'k' : String(t)) : String(t));
-                    tick.appendChild(txt);
-                    gNode.appendChild(tick);
-                });
-                return wrapAll(gNode.querySelectorAll('.tick'), gNode);
-            };
-            axisFn.tickValues = function(v) { _tickValues = v; return axisFn; };
-            axisFn.tickFormat = function(f) { _tickFormat = f; return axisFn; };
-            axisFn.ticks = function(n) { _ticks = n; return axisFn; };
-            return axisFn;
-        }
-
-        function axisLeft(scale) {
-            var _tickFormat = null;
-            var _ticks = 5;
-            var axisFn = function(g) {
-                var ticks = scale.ticks ? scale.ticks(_ticks) : scale.domain();
-                var gNode = g._el || g;
-                // Draw baseline
-                var range = scale.range ? scale.range() : [0, 100];
-                var baseline = document.createElementNS(SVG_NS, 'line');
-                baseline.setAttribute('y1', range[0]); baseline.setAttribute('y2', range[1]);
-                baseline.setAttribute('stroke', 'currentColor'); baseline.setAttribute('opacity', '0.3');
-                baseline.setAttribute('class', 'domain');
-                gNode.appendChild(baseline);
-                ticks.forEach(function(t) {
-                    var yPos = scale(t);
-                    var tick = document.createElementNS(SVG_NS, 'g');
-                    tick.setAttribute('transform', 'translate(0,' + yPos + ')');
-                    tick.setAttribute('class', 'tick');
-                    var ln = document.createElementNS(SVG_NS, 'line');
-                    ln.setAttribute('x2', '-4'); ln.setAttribute('stroke', 'currentColor'); ln.setAttribute('opacity', '0.3');
-                    tick.appendChild(ln);
-                    var txt = document.createElementNS(SVG_NS, 'text');
-                    txt.setAttribute('x', '-8'); txt.setAttribute('dy', '0.32em');
-                    txt.setAttribute('text-anchor', 'end'); txt.setAttribute('fill', 'currentColor'); txt.setAttribute('font-size', '9');
-                    txt.textContent = _tickFormat ? _tickFormat(t) : (typeof t === 'number' ? (t >= 1000000 ? (t/1000000).toFixed(1) + 'M' : t >= 1000 ? (t/1000).toFixed(0) + 'k' : String(Math.round(t))) : String(t));
-                    tick.appendChild(txt);
-                    gNode.appendChild(tick);
-                });
-                return wrapAll(gNode.querySelectorAll('.tick'), gNode);
-            };
-            axisFn.tickFormat = function(f) { _tickFormat = f; return axisFn; };
-            axisFn.ticks = function(n) { _ticks = n; return axisFn; };
-            return axisFn;
-        }
-
-        function max(arr, fn) {
-            if (!arr || arr.length === 0) return 0;
-            return Math.max.apply(null, arr.map(fn || function(d) { return d; }));
-        }
-
-        function stack() {
-            var _keys = [];
-            var _value = function(d, key) { return d[key] || 0; };
-            function s(data) {
-                var result = _keys.map(function(key, keyIdx) {
-                    var series = data.map(function(d, i) {
-                        var y0 = 0;
-                        for (var k = 0; k < keyIdx; k++) y0 += _value(d, _keys[k]);
-                        var y1 = y0 + _value(d, key);
-                        var point = [y0, y1];
-                        point.data = d; // D3 attaches original data row
-                        return point;
-                    });
-                    series.key = key;
-                    return series;
-                });
-                return result;
-            }
-            s.keys = function(k) { _keys = k; return s; };
-            s.value = function(fn) { _value = fn; return s; };
-            return s;
-        }
-
-        function area() {
-            var _x = function(d) { return d[0]; };
-            var _y0 = function(d) { return d[0]; };
-            var _y1 = function(d) { return d[1]; };
-            var _curve = null;
-            function a(data) {
-                var pts = data.map(function(d, i) { return { x: _x(d, i), y0: _y0(d, i), y1: _y1(d, i) }; });
-                if (pts.length === 0) return '';
-                var path = 'M' + pts[0].x + ',' + pts[0].y1;
-                for (var i = 1; i < pts.length; i++) path += 'L' + pts[i].x + ',' + pts[i].y1;
-                for (var j = pts.length - 1; j >= 0; j--) path += 'L' + pts[j].x + ',' + pts[j].y0;
-                path += 'Z';
-                return path;
-            }
-            a.x = function(fn) { _x = typeof fn === 'function' ? fn : function() { return fn; }; return a; };
-            a.y0 = function(fn) { _y0 = typeof fn === 'function' ? fn : function() { return fn; }; return a; };
-            a.y1 = function(fn) { _y1 = typeof fn === 'function' ? fn : function() { return fn; }; return a; };
-            a.curve = function(c) { _curve = c; return a; };
-            return a;
-        }
-
-        function line() {
-            var _x = function(d) { return d[0]; };
-            var _y = function(d) { return d[1]; };
-            function l(data) {
-                var pts = data.map(function(d, i) { return _x(d, i) + ',' + _y(d, i); });
-                return 'M' + pts.join('L');
-            }
-            l.x = function(fn) { _x = typeof fn === 'function' ? fn : function() { return fn; }; return l; };
-            l.y = function(fn) { _y = typeof fn === 'function' ? fn : function() { return fn; }; return l; };
-            l.curve = function() { return l; };
-            return l;
-        }
-
-        // Stub for curveMonotoneX — we just use straight lines
-        var curveMonotoneX = {};
-
-        function extent(arr, fn) {
-            fn = fn || function(d) { return d; };
-            var vals = arr.map(fn);
-            return [Math.min.apply(null, vals), Math.max.apply(null, vals)];
-        }
-
-        function format(spec) {
-            return function(n) {
-                if (spec === '.2s' || spec === '.1s') {
-                    if (n >= 1000000) return (n/1000000).toFixed(1) + 'M';
-                    if (n >= 1000) return (n/1000).toFixed(0) + 'k';
-                    return n.toFixed(0);
-                }
-                if (spec === '.0f') return Math.round(n).toString();
-                if (spec === '.1f') return n.toFixed(1);
-                if (spec === '.2f') return n.toFixed(2);
-                if (spec === ',.0f') return Math.round(n).toLocaleString();
-                return n.toString();
-            };
-        }
-
-        function pointer(event, node) {
-            var rect = (node || event.target).getBoundingClientRect();
-            return [event.clientX - rect.left, event.clientY - rect.top];
-        }
-
-        function scaleSqrt() {
-            var s = scaleLinear();
-            var origScale = s;
-            function sqrtScale(val) {
-                var d0 = s.domain()[0], d1 = s.domain()[1], r0 = s.range()[0], r1 = s.range()[1];
-                if (d1 === d0) return r0;
-                var t = (val - d0) / (d1 - d0);
-                return r0 + Math.sqrt(Math.max(0, t)) * (r1 - r0);
-            }
-            sqrtScale.domain = s.domain;
-            sqrtScale.range = s.range;
-            sqrtScale.nice = function() { return sqrtScale; };
-            sqrtScale.ticks = s.ticks;
-            return sqrtScale;
-        }
-
-        return {
-            select: select, scaleLinear: scaleLinear, scaleBand: scaleBand, scalePoint: scalePoint,
-            scaleSqrt: scaleSqrt,
-            axisBottom: axisBottom, axisLeft: axisLeft, max: max, stack: stack, area: area, line: line,
-            curveMonotoneX: curveMonotoneX, extent: extent, format: format, pointer: pointer
-        };
-    })();
+    // ── SVG Chart Helpers ──
+    var SVG_NS = 'http://www.w3.org/2000/svg';
+    function svgEl(tag, attrs) {
+        var el = document.createElementNS(SVG_NS, tag);
+        if (attrs) for (var k in attrs) el.setAttribute(k, attrs[k]);
+        return el;
+    }
+    function linScale(val, dMin, dMax, rMin, rMax) {
+        var dRange = dMax - dMin;
+        if (dRange === 0) return rMin;
+        return rMin + ((val - dMin) / dRange) * (rMax - rMin);
+    }
+    function svgText(x, y, text, attrs) {
+        var el = svgEl('text', Object.assign({ x: x, y: y, fill: 'var(--text-dim)', 'font-size': '10' }, attrs || {}));
+        el.textContent = text;
+        return el;
+    }
+    function fmtNum(n) {
+        if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+        if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
+        return String(n);
+    }
 
     // ── LLM Usage ──
     var _llmRange = '24h';
@@ -3557,71 +3284,78 @@
         var iw = w - margin.left - margin.right;
         var ih = h - margin.top - margin.bottom;
 
-        var svg = d3.select(container).append('svg').attr('width', w).attr('height', h);
-        var g = svg.append('g').attr('transform', 'translate(' + margin.left + ',' + margin.top + ')');
+        var svg = svgEl('svg', { width: w, height: h });
+        container.appendChild(svg);
+        var g = svgEl('g', { transform: 'translate(' + margin.left + ',' + margin.top + ')' });
+        svg.appendChild(g);
 
-        var maxTotal = d3.max(buckets, function(d) { return d.prompt + d.completion; }) || 1;
-        var x = d3.scaleBand().domain(buckets.map(function(d) { return d.idx; })).range([0, iw]).padding(0.25);
-        var y = d3.scaleLinear().domain([0, maxTotal]).nice().range([ih, 0]);
+        var maxTotal = Math.max.apply(null, buckets.map(function(d) { return d.prompt + d.completion; })) || 1;
+        var nb = buckets.length;
+        var bandStep = iw / nb;
+        var bandPad = 0.25;
+        var bandW = bandStep * (1 - bandPad);
+        var bandOff = bandStep * bandPad / 2;
 
-        g.append('g').attr('transform', 'translate(0,' + ih + ')')
-            .call(d3.axisBottom(x)
-                .tickValues(buckets.map(function(d) { return d.idx; }).filter(function(i) { return i % labelEvery === 0; }))
-                .tickFormat(function(i) { return buckets[i].label; }))
-            .selectAll('text').attr('fill', 'var(--text-dim)').style('font-size', '10px');
-        g.append('g').call(d3.axisLeft(y).ticks(4).tickFormat(d3.format('.2s')))
-            .selectAll('text').attr('fill', 'var(--text-dim)').style('font-size', '10px');
-        g.selectAll('.domain, .tick line').attr('stroke', 'var(--border-subtle)');
+        // Y axis ticks (format: .2s — 1000->1k, 1000000->1M)
+        var yTicks = 4;
+        var yStep = maxTotal / yTicks;
+        for (var t = 0; t <= yTicks; t++) {
+            var tv = t * yStep;
+            var ty = linScale(tv, 0, maxTotal, ih, 0);
+            g.appendChild(svgEl('line', { x1: -4, x2: 0, y1: ty, y2: ty, stroke: 'var(--border-subtle)' }));
+            g.appendChild(svgText(-8, ty, fmtNum(Math.round(tv)), { 'text-anchor': 'end', 'dominant-baseline': '0.32em', 'font-size': '10' }));
+        }
+        // X axis baseline
+        g.appendChild(svgEl('line', { x1: 0, x2: iw, y1: ih, y2: ih, stroke: 'var(--border-subtle)' }));
+        // X axis labels
+        buckets.forEach(function(d) {
+            if (d.idx % labelEvery !== 0) return;
+            var bx = d.idx * bandStep + bandStep / 2;
+            g.appendChild(svgEl('line', { x1: bx, x2: bx, y1: ih, y2: ih + 4, stroke: 'var(--border-subtle)' }));
+            g.appendChild(svgText(bx, ih + 14, d.label, { 'text-anchor': 'middle', 'font-size': '10' }));
+        });
 
-        // Full bar (prompt, cyan) with rounded top
-        g.selectAll('.llm-bar-prompt').data(buckets).enter().append('rect')
-            .attr('class', 'llm-bar-prompt')
-            .attr('x', function(d) { return x(d.idx); })
-            .attr('y', function(d) { return (d.prompt + d.completion) > 0 ? y(d.prompt + d.completion) : ih; })
-            .attr('width', x.bandwidth())
-            .attr('height', function(d) { return (d.prompt + d.completion) > 0 ? ih - y(d.prompt + d.completion) : 0; })
-            .attr('rx', 2).attr('fill', 'var(--accent-cyan)').attr('opacity', 0.8);
+        // Bars + hit areas + error markers
+        buckets.forEach(function(d) {
+            var bx = d.idx * bandStep + bandOff;
+            var total = d.prompt + d.completion;
+            // Full bar (prompt+completion, cyan)
+            if (total > 0) {
+                var fullY = linScale(total, 0, maxTotal, ih, 0);
+                g.appendChild(svgEl('rect', { x: bx, y: fullY, width: bandW, height: ih - fullY, rx: 2, fill: 'var(--accent-cyan)', opacity: '0.8' }));
+            }
+            // Completion overlay (violet, bottom portion)
+            if (d.completion > 0) {
+                var compY = linScale(d.completion, 0, maxTotal, ih, 0);
+                g.appendChild(svgEl('rect', { x: bx, y: compY, width: bandW, height: ih - compY, fill: 'var(--accent-violet)', opacity: '0.8' }));
+            }
+            // Hit area
+            var hit = svgEl('rect', { x: bx - bandW * 0.1, y: 0, width: bandW * 1.2, height: ih, fill: 'transparent' });
+            (function(dd) {
+                hit.addEventListener('mouseover', function() {
+                    if (dd.requests === 0) return;
+                    var errLine = dd.errors > 0 ? '<br><span style="color:var(--accent-red)">' + dd.errors + ' error' + (dd.errors === 1 ? '' : 's') + '</span>' : '';
+                    tooltip.innerHTML = '<strong>' + dd.label + '</strong><br>' +
+                        dd.requests + ' request' + (dd.requests === 1 ? '' : 's') + '<br>' +
+                        '<span style="color:var(--accent-cyan)">' + dd.prompt.toLocaleString() + '</span> prompt \u00B7 ' +
+                        '<span style="color:var(--accent-violet)">' + dd.completion.toLocaleString() + '</span> completion' + errLine;
+                    tooltip.style.display = 'block';
+                    var barX = margin.left + dd.idx * bandStep + bandStep / 2;
+                    var ttLeft = barX + 10;
+                    if (ttLeft + 180 > w) ttLeft = barX - 190;
+                    tooltip.style.left = ttLeft + 'px';
+                    tooltip.style.top = (margin.top + 2) + 'px';
+                });
+                hit.addEventListener('mouseout', function() { tooltip.style.display = 'none'; });
+            })(d);
+            g.appendChild(hit);
 
-        // Completion overlay (violet, no radius — sits at bottom of bar)
-        g.selectAll('.llm-bar-completion').data(buckets).enter().append('rect')
-            .attr('class', 'llm-bar-completion')
-            .attr('x', function(d) { return x(d.idx); })
-            .attr('y', function(d) { return d.completion > 0 ? y(d.completion) : ih; })
-            .attr('width', x.bandwidth())
-            .attr('height', function(d) { return d.completion > 0 ? ih - y(d.completion) : 0; })
-            .attr('fill', 'var(--accent-violet)').attr('opacity', 0.8);
-
-        // Transparent hit areas for tooltip
-        g.selectAll('.llm-hit').data(buckets).enter().append('rect')
-            .attr('class', 'llm-hit')
-            .attr('x', function(d) { return x(d.idx) - x.bandwidth() * 0.1; })
-            .attr('y', 0).attr('width', function() { return x.bandwidth() * 1.2; }).attr('height', ih)
-            .attr('fill', 'transparent')
-            .on('mouseover', function(event, d) {
-                if (d.requests === 0) return;
-                var errLine = d.errors > 0 ? '<br><span style="color:var(--accent-red)">' + d.errors + ' error' + (d.errors === 1 ? '' : 's') + '</span>' : '';
-                tooltip.innerHTML = '<strong>' + d.label + '</strong><br>' +
-                    d.requests + ' request' + (d.requests === 1 ? '' : 's') + '<br>' +
-                    '<span style="color:var(--accent-cyan)">' + d.prompt.toLocaleString() + '</span> prompt · ' +
-                    '<span style="color:var(--accent-violet)">' + d.completion.toLocaleString() + '</span> completion' + errLine;
-                tooltip.style.display = 'block';
-                var barX = margin.left + x(d.idx) + x.bandwidth() / 2;
-                var ttLeft = barX + 10;
-                if (ttLeft + 180 > w) ttLeft = barX - 190;
-                tooltip.style.left = ttLeft + 'px';
-                tooltip.style.top = (margin.top + 2) + 'px';
-            })
-            .on('mouseout', function() { tooltip.style.display = 'none'; });
-
-        // Error markers — red dot above bars with failed requests
-        g.selectAll('.llm-err-mark').data(buckets.filter(function(d) { return d.errors > 0; }))
-            .enter().append('circle')
-            .attr('class', 'llm-err-mark')
-            .attr('cx', function(d) { return x(d.idx) + x.bandwidth() / 2; })
-            .attr('cy', function(d) { return y(d.prompt + d.completion) - 5; })
-            .attr('r', 3)
-            .attr('fill', 'var(--accent-red)')
-            .style('pointer-events', 'none');
+            // Error marker
+            if (d.errors > 0) {
+                var ey = linScale(total, 0, maxTotal, ih, 0) - 5;
+                g.appendChild(svgEl('circle', { cx: d.idx * bandStep + bandStep / 2, cy: ey, r: 3, fill: 'var(--accent-red)', 'pointer-events': 'none' }));
+            }
+        });
     }
 
     // ── Tool Usage Analytics ──
@@ -3849,16 +3583,27 @@
     function _renderSparkline(container, data, color) {
         if (!data || data.length < 2) return;
         var w = 64, h = 24;
-        var svg = d3.select(container).append('svg').attr('width', w).attr('height', h);
-        var ext = d3.extent(data);
-        if (ext[0] === ext[1]) { ext[0] -= 1; ext[1] += 1; }
-        var x = d3.scaleLinear().domain([0, data.length - 1]).range([2, w - 2]);
-        var y = d3.scaleLinear().domain(ext).range([h - 2, 2]);
-        var line = d3.line().x(function(d, i) { return x(i); }).y(function(d) { return y(d); }).curve(d3.curveMonotoneX);
-        var area = d3.area().x(function(d, i) { return x(i); }).y0(h).y1(function(d) { return y(d); }).curve(d3.curveMonotoneX);
-        svg.append('path').datum(data).attr('d', area).attr('fill', color).attr('opacity', 0.1);
-        svg.append('path').datum(data).attr('d', line).attr('fill', 'none').attr('stroke', color).attr('stroke-width', 1.5);
-        svg.append('circle').attr('cx', x(data.length - 1)).attr('cy', y(data[data.length - 1])).attr('r', 2.5).attr('fill', color);
+        var svg = svgEl('svg', { width: w, height: h });
+        container.appendChild(svg);
+        var dMin = Math.min.apply(null, data), dMax = Math.max.apply(null, data);
+        if (dMin === dMax) { dMin -= 1; dMax += 1; }
+        // Build points
+        var pts = [];
+        for (var i = 0; i < data.length; i++) {
+            pts.push(linScale(i, 0, data.length - 1, 2, w - 2) + ',' + linScale(data[i], dMin, dMax, h - 2, 2));
+        }
+        // Area polygon (top line + bottom edge)
+        var bottomPts = [];
+        for (var j = data.length - 1; j >= 0; j--) {
+            bottomPts.push(linScale(j, 0, data.length - 1, 2, w - 2) + ',' + h);
+        }
+        svg.appendChild(svgEl('polygon', { points: pts.join(' ') + ' ' + bottomPts.join(' '), fill: color, opacity: '0.1' }));
+        // Line
+        svg.appendChild(svgEl('polyline', { points: pts.join(' '), fill: 'none', stroke: color, 'stroke-width': '1.5' }));
+        // End dot
+        var lastX = linScale(data.length - 1, 0, data.length - 1, 2, w - 2);
+        var lastY = linScale(data[data.length - 1], dMin, dMax, h - 2, 2);
+        svg.appendChild(svgEl('circle', { cx: lastX, cy: lastY, r: '2.5', fill: color }));
     }
 
     function _computeDelta(data) {
@@ -4099,51 +3844,71 @@
         var iw = w - margin.left - margin.right;
         var ih = h - margin.top - margin.bottom;
 
-        var svg = d3.select(container).append('svg').attr('width', w).attr('height', h);
-        var g = svg.append('g').attr('transform', 'translate(' + margin.left + ',' + margin.top + ')');
+        var svg = svgEl('svg', { width: w, height: h });
+        container.appendChild(svg);
+        var g = svgEl('g', { transform: 'translate(' + margin.left + ',' + margin.top + ')' });
+        svg.appendChild(g);
 
         // Prepare stack data
         var stackKeys = ['active', 'merged', 'fading', 'archived'];
         var stackColors = { active: 'var(--accent-green)', merged: 'var(--accent-cyan)', fading: 'var(--accent-yellow)', archived: 'var(--text-dim)' };
 
-        var x = d3.scaleBand().domain(svData.map(function(d) { return d.date; })).range([0, iw]).padding(0.1);
-        var maxY = d3.max(svData, function(d) { return (d.active || 0) + (d.merged || 0) + (d.fading || 0) + (d.archived || 0); }) || 1;
-        var y = d3.scaleLinear().domain([0, maxY]).nice().range([ih, 0]);
+        var nd = svData.length;
+        var bandStep = iw / nd;
+        var bandPad = 0.1;
+        var bandW = bandStep * (1 - bandPad);
+        var bandOff = bandStep * bandPad / 2;
 
-        var stack = d3.stack().keys(stackKeys).value(function(d, key) { return d[key] || 0; });
-        var series = stack(svData);
+        var maxY = Math.max.apply(null, svData.map(function(d) { return (d.active || 0) + (d.merged || 0) + (d.fading || 0) + (d.archived || 0); })) || 1;
 
-        var area = d3.area()
-            .x(function(d) { return x(d.data.date) + x.bandwidth() / 2; })
-            .y0(function(d) { return y(d[0]); })
-            .y1(function(d) { return y(d[1]); })
-            .curve(d3.curveMonotoneX);
+        // Manual stack calculation
+        var stackData = svData.map(function(d) {
+            var y0 = 0;
+            var layers = {};
+            stackKeys.forEach(function(k) {
+                var v = d[k] || 0;
+                layers[k] = { y0: y0, y1: y0 + v };
+                y0 += v;
+            });
+            return layers;
+        });
 
-        series.forEach(function(s) {
-            g.append('path').datum(s).attr('d', area)
-                .attr('fill', stackColors[s.key])
-                .attr('opacity', s.key === 'archived' ? 0.3 : 0.6);
+        // Draw stacked area polygons per layer
+        stackKeys.forEach(function(key) {
+            var pts = [];
+            // Top edge (left to right)
+            for (var i = 0; i < nd; i++) {
+                var cx = i * bandStep + bandStep / 2;
+                pts.push(cx + ',' + linScale(stackData[i][key].y1, 0, maxY, ih, 0));
+            }
+            // Bottom edge (right to left)
+            for (var j = nd - 1; j >= 0; j--) {
+                var cx2 = j * bandStep + bandStep / 2;
+                pts.push(cx2 + ',' + linScale(stackData[j][key].y0, 0, maxY, ih, 0));
+            }
+            g.appendChild(svgEl('polygon', { points: pts.join(' '), fill: stackColors[key], opacity: key === 'archived' ? '0.3' : '0.6' }));
         });
 
         // Feedback quality overlay line (secondary Y axis)
         if (fbData && fbData.length > 0) {
-            var yRight = d3.scaleLinear().domain([0, 100]).range([ih, 0]);
-            // Map feedback dates to survival dates
             var fbMap = {};
             fbData.forEach(function(d) { var t = d.helpful + d.partial + d.irrelevant; fbMap[d.date] = t > 0 ? (d.helpful / t) * 100 : null; });
-            var fbPoints = svData.map(function(d) { return { date: d.date, quality: fbMap[d.date] }; }).filter(function(d) { return d.quality !== null && d.quality !== undefined; });
+            var fbPoints = [];
+            svData.forEach(function(d, i) {
+                var q = fbMap[d.date];
+                if (q !== null && q !== undefined) {
+                    fbPoints.push({ idx: i, quality: q, date: d.date });
+                }
+            });
 
             if (fbPoints.length > 1) {
-                var fbLine = d3.line()
-                    .x(function(d) { return x(d.date) + x.bandwidth() / 2; })
-                    .y(function(d) { return yRight(d.quality); })
-                    .curve(d3.curveMonotoneX);
-                g.append('path').datum(fbPoints).attr('d', fbLine)
-                    .attr('fill', 'none').attr('stroke', 'var(--accent-violet)').attr('stroke-width', 2).attr('stroke-dasharray', '4,2');
+                var linePts = fbPoints.map(function(p) {
+                    return (p.idx * bandStep + bandStep / 2) + ',' + linScale(p.quality, 0, 100, ih, 0);
+                });
+                g.appendChild(svgEl('polyline', { points: linePts.join(' '), fill: 'none', stroke: 'var(--accent-violet)', 'stroke-width': 2, 'stroke-dasharray': '4,2' }));
 
                 // Right axis label
-                g.append('text').attr('x', iw + 8).attr('y', yRight(50)).attr('fill', 'var(--text-dim)')
-                    .attr('font-size', '0.6rem').attr('dominant-baseline', 'middle').text('quality %');
+                g.appendChild(svgText(iw + 8, linScale(50, 0, 100, ih, 0), 'quality %', { fill: 'var(--text-dim)', 'font-size': '0.6rem', 'dominant-baseline': 'middle' }));
             }
         }
 
@@ -4151,53 +3916,65 @@
         if (chData && chData.length > 0) {
             var chMap = {};
             chData.forEach(function(d) { if (d.processed > 0) chMap[d.date] = d.processed; });
-            svData.forEach(function(d) {
+            svData.forEach(function(d, i) {
                 if (chMap[d.date]) {
-                    var cx = x(d.date) + x.bandwidth() / 2;
-                    g.append('path')
-                        .attr('d', 'M' + cx + ',' + (y(maxY) - 2) + ' l4,6 l-4,6 l-4,-6 z')
-                        .attr('fill', 'var(--accent-orange)').attr('opacity', 0.7);
+                    var cx = i * bandStep + bandStep / 2;
+                    var dy = linScale(maxY, 0, maxY, ih, 0) - 2;
+                    g.appendChild(svgEl('path', { d: 'M' + cx + ',' + dy + ' l4,6 l-4,6 l-4,-6 z', fill: 'var(--accent-orange)', opacity: '0.7' }));
                 }
             });
         }
 
-        // X axis — show every Nth date label to avoid crowding
-        var labelEvery = Math.max(1, Math.ceil(svData.length / 7));
+        // X axis
+        var labelEvery = Math.max(1, Math.ceil(nd / 7));
         var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-        g.append('g').attr('transform', 'translate(0,' + ih + ')').call(
-            d3.axisBottom(x).tickValues(svData.filter(function(d, i) { return i % labelEvery === 0; }).map(function(d) { return d.date; }))
-                .tickFormat(function(d) { var parts = d.split('-'); return months[parseInt(parts[1]) - 1] + ' ' + parseInt(parts[2]); })
-        ).selectAll('text').attr('fill', 'var(--text-dim)').attr('font-size', '0.6rem');
-        g.selectAll('.domain,.tick line').attr('stroke', 'var(--border-subtle)');
+        g.appendChild(svgEl('line', { x1: 0, x2: iw, y1: ih, y2: ih, stroke: 'var(--border-subtle)' }));
+        svData.forEach(function(d, i) {
+            if (i % labelEvery !== 0) return;
+            var bx = i * bandStep + bandStep / 2;
+            g.appendChild(svgEl('line', { x1: bx, x2: bx, y1: ih, y2: ih + 4, stroke: 'var(--border-subtle)' }));
+            var parts = d.date.split('-');
+            g.appendChild(svgText(bx, ih + 14, months[parseInt(parts[1]) - 1] + ' ' + parseInt(parts[2]), { 'text-anchor': 'middle', 'font-size': '0.6rem' }));
+        });
 
-        // Y axis
-        g.append('g').call(d3.axisLeft(y).ticks(4).tickFormat(d3.format('d')))
-            .selectAll('text').attr('fill', 'var(--text-dim)').attr('font-size', '0.6rem');
-        g.selectAll('.domain,.tick line').attr('stroke', 'var(--border-subtle)');
+        // Y axis ticks
+        var yTicks = 4;
+        var yStep = maxY / yTicks;
+        for (var t = 0; t <= yTicks; t++) {
+            var tv = Math.round(t * yStep);
+            var ty = linScale(tv, 0, maxY, ih, 0);
+            g.appendChild(svgEl('line', { x1: -4, x2: 0, y1: ty, y2: ty, stroke: 'var(--border-subtle)' }));
+            g.appendChild(svgText(-8, ty, String(tv), { 'text-anchor': 'end', 'dominant-baseline': '0.32em', 'font-size': '0.6rem' }));
+        }
 
         // Tooltip on hover
-        var tooltipRect = g.append('rect').attr('width', iw).attr('height', ih).attr('fill', 'transparent');
-        var tooltipLine = g.append('line').attr('stroke', 'var(--text-dim)').attr('stroke-dasharray', '2,2').attr('y1', 0).attr('y2', ih).style('display', 'none');
+        var tooltipLine = svgEl('line', { stroke: 'var(--text-dim)', 'stroke-dasharray': '2,2', y1: 0, y2: ih, display: 'none' });
+        g.appendChild(tooltipLine);
         var tooltipDiv = document.getElementById('lifecycleTooltip');
-
-        tooltipRect.on('mousemove', function(event) {
-            var mx = d3.pointer(event, this)[0];
-            var dates = svData.map(function(d) { return d.date; });
-            var idx = Math.round(mx / iw * (dates.length - 1));
-            idx = Math.max(0, Math.min(idx, dates.length - 1));
+        var hitRect = svgEl('rect', { width: iw, height: ih, fill: 'transparent' });
+        hitRect.addEventListener('mousemove', function(event) {
+            var rect = hitRect.getBoundingClientRect();
+            var mx = event.clientX - rect.left;
+            var idx = Math.round(mx / iw * (nd - 1));
+            idx = Math.max(0, Math.min(idx, nd - 1));
             var d = svData[idx];
-            tooltipLine.attr('x1', x(d.date) + x.bandwidth() / 2).attr('x2', x(d.date) + x.bandwidth() / 2).style('display', null);
+            var cx = idx * bandStep + bandStep / 2;
+            tooltipLine.setAttribute('x1', cx);
+            tooltipLine.setAttribute('x2', cx);
+            tooltipLine.setAttribute('display', '');
             var fb = fbData.find(function(f) { return f.date === d.date; });
             var qStr = '';
-            if (fb) { var t = fb.helpful + fb.partial + fb.irrelevant; qStr = t > 0 ? ' · quality: ' + ((fb.helpful / t) * 100).toFixed(0) + '%' : ''; }
+            if (fb) { var tt = fb.helpful + fb.partial + fb.irrelevant; qStr = tt > 0 ? ' \u00B7 quality: ' + ((fb.helpful / tt) * 100).toFixed(0) + '%' : ''; }
             tooltipDiv.style.display = 'block';
             tooltipDiv.style.left = (event.offsetX + 12) + 'px';
             tooltipDiv.style.top = (event.offsetY - 10) + 'px';
-            tooltipDiv.innerHTML = '<strong>' + d.date + '</strong><br>Active: ' + (d.active || 0) + ' · Merged: ' + (d.merged || 0) + ' · Fading: ' + (d.fading || 0) + ' · Archived: ' + (d.archived || 0) + qStr;
-        }).on('mouseleave', function() {
-            tooltipLine.style('display', 'none');
+            tooltipDiv.innerHTML = '<strong>' + d.date + '</strong><br>Active: ' + (d.active || 0) + ' \u00B7 Merged: ' + (d.merged || 0) + ' \u00B7 Fading: ' + (d.fading || 0) + ' \u00B7 Archived: ' + (d.archived || 0) + qStr;
+        });
+        hitRect.addEventListener('mouseleave', function() {
+            tooltipLine.setAttribute('display', 'none');
             tooltipDiv.style.display = 'none';
         });
+        g.appendChild(hitRect);
 
         // Legend
         legendEl.innerHTML = stackKeys.map(function(k) {
@@ -4221,51 +3998,40 @@
         var h = sources.length * 36 + 10;
         var margin = { top: 4, right: 12, bottom: 4, left: 80 };
         var iw = w - margin.left - margin.right;
+        var ih = h - margin.top - margin.bottom;
 
-        var svg = d3.select(container).append('svg').attr('width', w).attr('height', h);
-        var g = svg.append('g').attr('transform', 'translate(' + margin.left + ',' + margin.top + ')');
+        var svg = svgEl('svg', { width: w, height: h });
+        container.appendChild(svg);
+        var g = svgEl('g', { transform: 'translate(' + margin.left + ',' + margin.top + ')' });
+        svg.appendChild(g);
 
-        var y = d3.scaleBand().domain(sources).range([0, h - margin.top - margin.bottom]).padding(0.25);
-        var x = d3.scaleLinear().domain([0, 100]).range([0, iw]);
+        // Band scale params
+        var bandStep = ih / sources.length;
+        var bandPadding = 0.25;
+        var bandW = bandStep * (1 - bandPadding);
+        var bandOffset = bandStep * bandPadding / 2;
 
-        // Background tracks
-        g.selectAll('.track').data(sources).enter().append('rect')
-            .attr('x', 0).attr('y', function(d) { return y(d); })
-            .attr('width', iw).attr('height', y.bandwidth())
-            .attr('fill', 'var(--bg-tertiary)').attr('rx', 3);
-
-        // Bars
-        g.selectAll('.bar').data(sources).enter().append('rect')
-            .attr('x', 0).attr('y', function(d) { return y(d); })
-            .attr('width', function(d) { return Math.max(2, x((sn[d].survival_rate || 0) * 100)); })
-            .attr('height', y.bandwidth())
-            .attr('fill', function(d) { return _raSourceColors[d] || 'var(--text-muted)'; })
-            .attr('opacity', 0.7).attr('rx', 3);
+        sources.forEach(function(src, i) {
+            var yPos = i * bandStep + bandOffset;
+            var survPct = (sn[src].survival_rate || 0) * 100;
+            var barW = Math.max(2, linScale(survPct, 0, 100, 0, iw));
+            // Background track
+            g.appendChild(svgEl('rect', { x: 0, y: yPos, width: iw, height: bandW, fill: 'var(--bg-tertiary)', rx: 3 }));
+            // Bar
+            g.appendChild(svgEl('rect', { x: 0, y: yPos, width: barW, height: bandW, fill: _raSourceColors[src] || 'var(--text-muted)', opacity: '0.7', rx: 3 }));
+            // Left label
+            var label = svgText(-6, yPos + bandW / 2, src, { 'text-anchor': 'end', 'dominant-baseline': 'middle', fill: _raSourceColors[src] || 'var(--text-muted)', 'font-size': '0.72rem', 'font-weight': '600' });
+            g.appendChild(label);
+            // Value label
+            var s = sn[src];
+            var valStr = s.active + '/' + s.total + ' (' + survPct.toFixed(0) + '%)' + (s.avg_salience ? ' \u00B7 sal ' + s.avg_salience.toFixed(2) : '');
+            var valLabel = svgText(barW + 4, yPos + bandW / 2, valStr, { 'dominant-baseline': 'middle', fill: 'var(--text-muted)', 'font-size': '0.65rem' });
+            g.appendChild(valLabel);
+        });
 
         // Average line
-        g.append('line').attr('x1', x(avgSurv * 100)).attr('x2', x(avgSurv * 100))
-            .attr('y1', 0).attr('y2', h - margin.top - margin.bottom)
-            .attr('stroke', 'var(--text-muted)').attr('stroke-dasharray', '3,3').attr('stroke-width', 1);
-
-        // Labels (left)
-        g.selectAll('.label').data(sources).enter().append('text')
-            .attr('x', -6).attr('y', function(d) { return y(d) + y.bandwidth() / 2; })
-            .attr('text-anchor', 'end').attr('dominant-baseline', 'middle')
-            .attr('fill', function(d) { return _raSourceColors[d] || 'var(--text-muted)'; })
-            .attr('font-size', '0.72rem').attr('font-weight', 600)
-            .text(function(d) { return d; });
-
-        // Value labels (on bar)
-        g.selectAll('.val').data(sources).enter().append('text')
-            .attr('x', function(d) { return Math.max(2, x((sn[d].survival_rate || 0) * 100)) + 4; })
-            .attr('y', function(d) { return y(d) + y.bandwidth() / 2; })
-            .attr('dominant-baseline', 'middle')
-            .attr('fill', 'var(--text-muted)').attr('font-size', '0.65rem')
-            .text(function(d) {
-                var s = sn[d];
-                return s.active + '/' + s.total + ' (' + ((s.survival_rate || 0) * 100).toFixed(0) + '%)' +
-                    (s.avg_salience ? ' · sal ' + s.avg_salience.toFixed(2) : '');
-            });
+        var avgX = linScale(avgSurv * 100, 0, 100, 0, iw);
+        g.appendChild(svgEl('line', { x1: avgX, x2: avgX, y1: 0, y2: ih, stroke: 'var(--text-muted)', 'stroke-dasharray': '3,3', 'stroke-width': 1 }));
     }
 
     function renderRecallChart(re) {
@@ -4279,56 +4045,82 @@
         var iw = w - margin.left - margin.right;
         var ih = h - margin.top - margin.bottom;
 
-        var svg = d3.select(container).append('svg').attr('width', w).attr('height', h);
-        var g = svg.append('g').attr('transform', 'translate(' + margin.left + ',' + margin.top + ')');
+        var svg = svgEl('svg', { width: w, height: h });
+        container.appendChild(svg);
+        var g = svgEl('g', { transform: 'translate(' + margin.left + ',' + margin.top + ')' });
+        svg.appendChild(g);
 
-        var buckets = re.map(function(b) { return b.bucket; });
-        var x = d3.scalePoint().domain(buckets).range([20, iw - 20]).padding(0.5);
-        var maxSal = d3.max(re, function(b) { return b.avg_salience; }) || 1;
-        var y = d3.scaleLinear().domain([0, Math.max(maxSal * 1.1, 0.5)]).range([ih, 0]);
-        var maxCount = d3.max(re, function(b) { return b.count; }) || 1;
-
-        // Reference line at first bucket's salience (to show slope)
-        if (re.length > 1) {
-            g.append('line').attr('x1', 0).attr('x2', iw).attr('y1', y(re[0].avg_salience)).attr('y2', y(re[0].avg_salience))
-                .attr('stroke', 'var(--border-subtle)').attr('stroke-dasharray', '3,3');
+        var bucketNames = re.map(function(b) { return b.bucket; });
+        var nb = bucketNames.length;
+        // scalePoint: evenly spaced points with padding
+        function xScale(val) {
+            var idx = bucketNames.indexOf(val);
+            if (idx < 0) return 0;
+            var usable = (iw - 40); // range [20, iw-20]
+            if (nb <= 1) return 20 + usable / 2;
+            var padStep = 0.5;
+            var step = usable / (nb - 1 + padStep * 2);
+            return 20 + (padStep + idx) * step;
         }
 
-        // Connecting line
-        var line = d3.line().x(function(d) { return x(d.bucket); }).y(function(d) { return y(d.avg_salience); }).curve(d3.curveMonotoneX);
-        var isLearning = re.length >= 2 && re[re.length - 1].avg_salience > re[0].avg_salience;
-        g.append('path').datum(re).attr('d', line)
-            .attr('fill', 'none').attr('stroke', isLearning ? 'var(--accent-green)' : 'var(--accent-red)')
-            .attr('stroke-width', 2);
+        var maxSal = Math.max.apply(null, re.map(function(b) { return b.avg_salience; })) || 1;
+        var yMax = Math.max(maxSal * 1.1, 0.5);
+        var maxCount = Math.max.apply(null, re.map(function(b) { return b.count; })) || 1;
 
-        // Dots (sized by count)
-        var rScale = d3.scaleSqrt().domain([0, maxCount]).range([4, 12]);
+        // scaleSqrt for circle sizing
+        function rScale(count) {
+            var t = maxCount > 0 ? count / maxCount : 0;
+            return 4 + Math.sqrt(Math.max(0, t)) * (12 - 4);
+        }
+
+        // Reference line at first bucket's salience
+        if (re.length > 1) {
+            var refY = linScale(re[0].avg_salience, 0, yMax, ih, 0);
+            g.appendChild(svgEl('line', { x1: 0, x2: iw, y1: refY, y2: refY, stroke: 'var(--border-subtle)', 'stroke-dasharray': '3,3' }));
+        }
+
+        // Connecting polyline
+        var isLearning = re.length >= 2 && re[re.length - 1].avg_salience > re[0].avg_salience;
+        var linePts = re.map(function(b) {
+            return xScale(b.bucket) + ',' + linScale(b.avg_salience, 0, yMax, ih, 0);
+        });
+        g.appendChild(svgEl('polyline', { points: linePts.join(' '), fill: 'none', stroke: isLearning ? 'var(--accent-green)' : 'var(--accent-red)', 'stroke-width': 2 }));
+
+        // Dots (sized by count) + labels
         re.forEach(function(b) {
+            var cx = xScale(b.bucket);
+            var cy = linScale(b.avg_salience, 0, yMax, ih, 0);
+            var r = rScale(b.count);
             var color = b.bucket.indexOf('never') >= 0 ? 'var(--accent-red)' : b.bucket.indexOf('6+') >= 0 ? 'var(--accent-green)' : 'var(--accent-cyan)';
-            g.append('circle').attr('cx', x(b.bucket)).attr('cy', y(b.avg_salience))
-                .attr('r', rScale(b.count)).attr('fill', color).attr('opacity', 0.7);
-            g.append('text').attr('x', x(b.bucket)).attr('y', y(b.avg_salience) - rScale(b.count) - 5)
-                .attr('text-anchor', 'middle').attr('fill', 'var(--text-secondary)').attr('font-size', '0.68rem').attr('font-weight', 600)
-                .text(b.avg_salience.toFixed(2));
+            g.appendChild(svgEl('circle', { cx: cx, cy: cy, r: r, fill: color, opacity: '0.7' }));
+            g.appendChild(svgText(cx, cy - r - 5, b.avg_salience.toFixed(2), { 'text-anchor': 'middle', fill: 'var(--text-secondary)', 'font-size': '0.68rem', 'font-weight': '600' }));
         });
 
         // X axis
-        g.append('g').attr('transform', 'translate(0,' + ih + ')').call(d3.axisBottom(x))
-            .selectAll('text').attr('fill', 'var(--text-dim)').attr('font-size', '0.65rem');
-        g.selectAll('.domain,.tick line').attr('stroke', 'var(--border-subtle)');
+        g.appendChild(svgEl('line', { x1: 0, x2: iw, y1: ih, y2: ih, stroke: 'var(--border-subtle)' }));
+        bucketNames.forEach(function(name) {
+            var bx = xScale(name);
+            g.appendChild(svgEl('line', { x1: bx, x2: bx, y1: ih, y2: ih + 4, stroke: 'var(--border-subtle)' }));
+            g.appendChild(svgText(bx, ih + 14, name, { 'text-anchor': 'middle', 'font-size': '0.65rem' }));
+        });
 
         // Y axis
-        g.append('g').call(d3.axisLeft(y).ticks(4)).selectAll('text').attr('fill', 'var(--text-dim)').attr('font-size', '0.6rem');
-        g.selectAll('.domain,.tick line').attr('stroke', 'var(--border-subtle)');
+        var yTicks = 4;
+        var yStep = yMax / yTicks;
+        for (var t = 0; t <= yTicks; t++) {
+            var tv = t * yStep;
+            var ty = linScale(tv, 0, yMax, ih, 0);
+            g.appendChild(svgEl('line', { x1: -4, x2: 0, y1: ty, y2: ty, stroke: 'var(--border-subtle)' }));
+            g.appendChild(svgText(-8, ty, tv.toFixed(1), { 'text-anchor': 'end', 'dominant-baseline': '0.32em', 'font-size': '0.6rem' }));
+        }
 
         // Verdict text
         var ratio = (re.length >= 2 && re[0].avg_salience > 0) ? (re[re.length - 1].avg_salience / re[0].avg_salience) : 0;
         var verdictColor = isLearning ? 'var(--accent-green)' : 'var(--accent-red)';
         var verdictText = isLearning
             ? 'Learning: ' + ratio.toFixed(1) + 'x salience increase from "' + re[0].bucket + '" to "' + re[re.length - 1].bucket + '"'
-            : 'No clear learning signal — salience flat or declining';
-        svg.append('text').attr('x', margin.left).attr('y', h - 2)
-            .attr('fill', verdictColor).attr('font-size', '0.65rem').text(verdictText);
+            : 'No clear learning signal \u2014 salience flat or declining';
+        svg.appendChild(svgText(margin.left, h - 2, verdictText, { fill: verdictColor, 'font-size': '0.65rem' }));
     }
 
     // ── Session Activity (expandable rows with quality enrichment) ──
@@ -4485,60 +4277,68 @@
         var iw = w - margin.left - margin.right;
         var ih = h - margin.top - margin.bottom;
 
-        var svg = d3.select(container).append('svg').attr('width', w).attr('height', h);
-        var g = svg.append('g').attr('transform', 'translate(' + margin.left + ',' + margin.top + ')');
+        var svg = svgEl('svg', { width: w, height: h });
+        container.appendChild(svg);
+        var g = svgEl('g', { transform: 'translate(' + margin.left + ',' + margin.top + ')' });
+        svg.appendChild(g);
 
-        var maxCalls = d3.max(buckets, function(d) { return d.calls; }) || 1;
-        var x = d3.scaleBand().domain(buckets.map(function(d) { return d.idx; })).range([0, iw]).padding(0.25);
-        var y = d3.scaleLinear().domain([0, maxCalls]).nice().range([ih, 0]);
+        var maxCalls = Math.max.apply(null, buckets.map(function(d) { return d.calls; })) || 1;
+        var n = buckets.length;
+        var bandStep = iw / n;
+        var bandPad = 0.25;
+        var bandW = bandStep * (1 - bandPad);
+        var bandOff = bandStep * bandPad / 2;
 
-        g.append('g').attr('transform', 'translate(0,' + ih + ')')
-            .call(d3.axisBottom(x)
-                .tickValues(buckets.map(function(d) { return d.idx; }).filter(function(i) { return i % labelEvery === 0; }))
-                .tickFormat(function(i) { return buckets[i].label; }))
-            .selectAll('text').attr('fill', 'var(--text-dim)').style('font-size', '10px');
-        g.append('g').call(d3.axisLeft(y).ticks(4).tickFormat(d3.format('d')))
-            .selectAll('text').attr('fill', 'var(--text-dim)').style('font-size', '10px');
-        g.selectAll('.domain, .tick line').attr('stroke', 'var(--border-subtle)');
+        // Y axis ticks
+        var yTicks = 4;
+        var yStep = maxCalls / yTicks;
+        for (var t = 0; t <= yTicks; t++) {
+            var tv = Math.round(t * yStep);
+            var ty = linScale(tv, 0, maxCalls, ih, 0);
+            g.appendChild(svgEl('line', { x1: -4, x2: 0, y1: ty, y2: ty, stroke: 'var(--border-subtle)' }));
+            g.appendChild(svgText(-8, ty, String(tv), { 'text-anchor': 'end', 'dominant-baseline': '0.32em', 'font-size': '10' }));
+        }
+        // X axis baseline
+        g.appendChild(svgEl('line', { x1: 0, x2: iw, y1: ih, y2: ih, stroke: 'var(--border-subtle)' }));
+        // X axis labels
+        buckets.forEach(function(d) {
+            if (d.idx % labelEvery !== 0) return;
+            var bx = d.idx * bandStep + bandStep / 2;
+            g.appendChild(svgEl('line', { x1: bx, x2: bx, y1: ih, y2: ih + 4, stroke: 'var(--border-subtle)' }));
+            g.appendChild(svgText(bx, ih + 14, d.label, { 'text-anchor': 'middle', 'font-size': '10' }));
+        });
 
-        // Call bars (cyan)
-        g.selectAll('.tool-bar-calls').data(buckets).enter().append('rect')
-            .attr('class', 'tool-bar-calls')
-            .attr('x', function(d) { return x(d.idx); })
-            .attr('y', function(d) { return d.calls > 0 ? y(d.calls) : ih; })
-            .attr('width', x.bandwidth())
-            .attr('height', function(d) { return d.calls > 0 ? ih - y(d.calls) : 0; })
-            .attr('rx', 2).attr('fill', 'var(--accent-cyan)').attr('opacity', 0.8);
+        // Bars
+        buckets.forEach(function(d) {
+            var bx = d.idx * bandStep + bandOff;
+            if (d.calls > 0) {
+                var barY = linScale(d.calls, 0, maxCalls, ih, 0);
+                g.appendChild(svgEl('rect', { x: bx, y: barY, width: bandW, height: ih - barY, rx: 2, fill: 'var(--accent-cyan)', opacity: '0.8' }));
+            }
+            // Hit area
+            var hit = svgEl('rect', { x: bx - bandW * 0.1, y: 0, width: bandW * 1.2, height: ih, fill: 'transparent' });
+            (function(dd) {
+                hit.addEventListener('mouseover', function(event) {
+                    if (dd.calls === 0) return;
+                    var errLine = dd.errors > 0 ? '<br><span style="color:var(--accent-red)">' + dd.errors + ' error' + (dd.errors === 1 ? '' : 's') + '</span>' : '';
+                    tooltip.innerHTML = '<strong>' + dd.label + '</strong><br>' + dd.calls + ' call' + (dd.calls === 1 ? '' : 's') + errLine;
+                    tooltip.style.display = 'block';
+                    var barX = margin.left + dd.idx * bandStep + bandStep / 2;
+                    var ttLeft = barX + 10;
+                    if (ttLeft + 180 > w) ttLeft = barX - 190;
+                    tooltip.style.left = ttLeft + 'px';
+                    tooltip.style.top = (margin.top + 2) + 'px';
+                });
+                hit.addEventListener('mouseout', function() { tooltip.style.display = 'none'; });
+            })(d);
+            g.appendChild(hit);
 
-        // Transparent hit areas for tooltip
-        g.selectAll('.tool-hit').data(buckets).enter().append('rect')
-            .attr('class', 'tool-hit')
-            .attr('x', function(d) { return x(d.idx) - x.bandwidth() * 0.1; })
-            .attr('y', 0).attr('width', function() { return x.bandwidth() * 1.2; }).attr('height', ih)
-            .attr('fill', 'transparent')
-            .on('mouseover', function(event, d) {
-                if (d.calls === 0) return;
-                var errLine = d.errors > 0 ? '<br><span style="color:var(--accent-red)">' + d.errors + ' error' + (d.errors === 1 ? '' : 's') + '</span>' : '';
-                tooltip.innerHTML = '<strong>' + d.label + '</strong><br>' +
-                    d.calls + ' call' + (d.calls === 1 ? '' : 's') + errLine;
-                tooltip.style.display = 'block';
-                var barX = margin.left + x(d.idx) + x.bandwidth() / 2;
-                var ttLeft = barX + 10;
-                if (ttLeft + 180 > w) ttLeft = barX - 190;
-                tooltip.style.left = ttLeft + 'px';
-                tooltip.style.top = (margin.top + 2) + 'px';
-            })
-            .on('mouseout', function() { tooltip.style.display = 'none'; });
-
-        // Error markers
-        g.selectAll('.tool-err-mark').data(buckets.filter(function(d) { return d.errors > 0; }))
-            .enter().append('circle')
-            .attr('class', 'tool-err-mark')
-            .attr('cx', function(d) { return x(d.idx) + x.bandwidth() / 2; })
-            .attr('cy', function(d) { return y(d.calls) - 5; })
-            .attr('r', 3)
-            .attr('fill', 'var(--accent-red)')
-            .style('pointer-events', 'none');
+            // Error marker
+            if (d.errors > 0) {
+                var ey = linScale(d.calls, 0, maxCalls, ih, 0) - 5;
+                g.appendChild(svgEl('circle', { cx: d.idx * bandStep + bandStep / 2, cy: ey, r: 3, fill: 'var(--accent-red)', 'pointer-events': 'none' }));
+            }
+        });
     }
 
     // ── Keyboard Shortcuts ──
@@ -4672,9 +4472,19 @@
     }
     // ── Forum Communication Layer ──
 
+    async function forumFetch(url, options) {
+        var resp = await fetch(url, options);
+        if (!resp.ok) {
+            var errText = 'HTTP ' + resp.status;
+            try { var d = await resp.json(); if (d.error) errText = d.error; } catch(e) { /* ignore parse errors */ }
+            throw new Error(errText);
+        }
+        return resp;
+    }
+
     async function loadForumIndex() {
         try {
-            var resp = await fetch('/api/v1/forum/categories');
+            var resp = await forumFetch('/api/v1/forum/categories');
             var data = await resp.json();
             state.forumLoaded = true;
             var container = document.getElementById('forumIndex');
@@ -4815,7 +4625,11 @@
                     if (secNames[secId]) loadMemorySection(secId, secNames[secId]);
                 }
             });
-        } catch (e) { console.error('Failed to load forum index:', e); }
+        } catch (e) {
+            console.error('Failed to load forum index:', e);
+            var c = document.getElementById('forumIndex');
+            if (c) c.innerHTML = '<div style="padding:16px;color:var(--text-dim)">Failed to load forum: ' + escapeHtml(e.message) + '</div>';
+        }
     }
 
     window._loadMemSec = function(id) {
@@ -4988,7 +4802,7 @@
         if (compose) compose.style.display = 'none';
 
         try {
-            var resp = await fetch('/api/v1/forum/categories');
+            var resp = await forumFetch('/api/v1/forum/categories');
             var data = await resp.json();
             var cats = (data.categories || []).filter(function(c) { return c.category.type === type; });
             var container = document.getElementById('threadContent');
@@ -5031,7 +4845,11 @@
             }
             html += '</ul></div></div>';
             container.innerHTML = html;
-        } catch (e) { console.error('Failed to load forum group:', e); }
+        } catch (e) {
+            console.error('Failed to load forum group:', e);
+            var c = document.getElementById('threadContent');
+            if (c) c.innerHTML = '<div style="padding:16px;color:var(--text-dim)">Failed to load: ' + escapeHtml(e.message) + '</div>';
+        }
     }
 
     async function loadForumCategory(categoryId, categoryName) {
@@ -5047,7 +4865,7 @@
         var compose = document.getElementById('threadCompose');
         if (compose) compose.style.display = 'none';
         try {
-            var resp = await fetch('/api/v1/forum/threads?category=' + categoryId + '&limit=50');
+            var resp = await forumFetch('/api/v1/forum/threads?category=' + categoryId + '&limit=50');
             var data = await resp.json();
             var threads = data.threads || [];
             var container = document.getElementById('threadContent');
@@ -5063,6 +4881,7 @@
             for (var i = 0; i < threads.length; i++) {
                 var t = threads[i];
                 var rp = t.root_post;
+                if (!rp) continue;
                 var bgClass = i % 2 === 0 ? 'bg1' : 'bg2';
                 var agentKey = rp.author_key || '';
                 var prof = _forumAgentProfiles[agentKey] || { tag: rp.author_name || 'Human', icon: 'HU', color: 'var(--accent-cyan)' };
@@ -5080,13 +4899,18 @@
             }
             html += '</ul></div>';
             container.innerHTML = html;
-        } catch (e) { console.error('Failed to load forum category:', e); }
+        } catch (e) {
+            console.error('Failed to load forum category:', e);
+            var c = document.getElementById('threadContent');
+            if (c) c.innerHTML = '<div style="padding:16px;color:var(--text-dim)">Failed to load category: ' + escapeHtml(e.message) + '</div>';
+        }
     }
 
     async function loadForumThread(threadId) {
         state.currentForumThread = threadId;
         state.currentEpisodeId = ''; // clear — this is a forum thread, not an episode
         state.currentView = 'thread';
+        subscribeToThread(threadId);
         markThreadRead(threadId);
         // Show thread view
         document.querySelectorAll('.view').forEach(function(v) { v.classList.remove('active'); });
@@ -5100,7 +4924,7 @@
         var compose = document.getElementById('threadCompose');
         if (compose) { compose.style.display = ''; ensureMentionAutocomplete('threadReplyContent'); }
         try {
-            var resp = await fetch('/api/v1/forum/threads/' + threadId);
+            var resp = await forumFetch('/api/v1/forum/threads/' + threadId);
             var data = await resp.json();
             var posts = data.posts || [];
             var container = document.getElementById('threadContent');
@@ -5118,7 +4942,20 @@
             }
             html += '</div>';
             container.innerHTML = html;
-        } catch (e) { console.error('Failed to load forum thread:', e); }
+            // Delegated click handler for data-action buttons
+            container.onclick = function(e) {
+                var btn = e.target.closest('[data-action]');
+                if (!btn) return;
+                var action = btn.getAttribute('data-action');
+                if (action === 'quote') quotePostById(btn.getAttribute('data-target'));
+                else if (action === 'internalize') internalizePost(btn.getAttribute('data-post-id'), btn);
+                else if (action === 'insert-tag') insertTagInReply(btn.getAttribute('data-agent-key'));
+            };
+        } catch (e) {
+            console.error('Failed to load forum thread:', e);
+            var c = document.getElementById('threadContent');
+            if (c) c.innerHTML = '<div style="padding:16px;color:var(--text-dim)">Failed to load thread: ' + escapeHtml(e.message) + '</div>';
+        }
     }
 
     function formatForumContent(text) {
@@ -5187,7 +5024,7 @@
         html += '<dt><div class="avatar-container" style="background:color-mix(in srgb, ' + prof.color + ' 15%, transparent);color:' + prof.color + ';border:1px solid color-mix(in srgb, ' + prof.color + ' 25%, transparent)">' + prof.icon + '</div>';
         // Clickable @tag — clicking it inserts @tag into reply box
         if (isAgent && agentKey) {
-            html += '<strong style="color:' + prof.color + ';cursor:pointer" onclick="insertTagInReply(\'' + agentKey + '\')">' + escapeHtml(displayName) + '</strong></dt>';
+            html += '<strong style="color:' + prof.color + ';cursor:pointer" data-action="insert-tag" data-agent-key="' + escapeHtml(agentKey) + '">' + escapeHtml(displayName) + '</strong></dt>';
         } else {
             html += '<strong style="color:' + prof.color + '">' + escapeHtml(displayName) + '</strong></dt>';
         }
@@ -5198,11 +5035,11 @@
         html += '<div class="content">' + contentHtml + '</div>';
         // Action buttons
         html += '<div style="margin-top:6px;display:flex;gap:6px;align-items:center">';
-        html += '<button onclick="quotePostById(\'' + postDataId + '\')" style="font-size:0.7rem;padding:1px 8px;background:transparent;border:1px solid var(--border-subtle);color:var(--text-dim);border-radius:3px;cursor:pointer">quote</button>';
+        html += '<button data-action="quote" data-target="' + postDataId + '" style="font-size:0.7rem;padding:1px 8px;background:transparent;border:1px solid var(--border-subtle);color:var(--text-dim);border-radius:3px;cursor:pointer">quote</button>';
         if (post.state === 'internalized') {
             html += '<span style="font-size:0.7rem;padding:1px 6px;background:color-mix(in srgb, var(--accent-green) 15%, transparent);color:var(--accent-green);border-radius:3px">internalized</span>';
         } else {
-            html += '<button onclick="internalizePost(\'' + post.id + '\', this)" style="font-size:0.7rem;padding:1px 8px;background:transparent;border:1px solid var(--border-subtle);color:var(--text-dim);border-radius:3px;cursor:pointer">internalize</button>';
+            html += '<button data-action="internalize" data-post-id="' + escapeHtml(post.id) + '" style="font-size:0.7rem;padding:1px 8px;background:transparent;border:1px solid var(--border-subtle);color:var(--text-dim);border-radius:3px;cursor:pointer">internalize</button>';
         }
         html += '</div>';
         html += '</div></div></div>';
@@ -5243,7 +5080,7 @@
         var categoryId = catSelect ? catSelect.value : 'discussions';
         textarea.disabled = true;
         try {
-            var resp = await fetch('/api/v1/forum/posts', {
+            var resp = await forumFetch('/api/v1/forum/posts', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ content: content, category_id: categoryId })
@@ -5260,7 +5097,7 @@
             loadForumThread(data.thread_id);
         } catch (e) {
             textarea.disabled = false;
-            showToast('Failed to create thread', 'error');
+            showToast('Failed to create thread: ' + e.message, 'error');
         }
     }
 
@@ -5270,7 +5107,7 @@
         if (!content || !state.currentForumThread) return;
         textarea.disabled = true;
         try {
-            await fetch('/api/v1/forum/posts', {
+            await forumFetch('/api/v1/forum/posts', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ content: content, thread_id: state.currentForumThread, episode_id: state.currentEpisodeId || '' })
@@ -5282,7 +5119,7 @@
             // The WebSocket event will handle live-inserting the post
         } catch (e) {
             textarea.disabled = false;
-            showToast('Failed to post reply', 'error');
+            showToast('Failed to post reply: ' + e.message, 'error');
         }
     }
 
@@ -5634,44 +5471,58 @@
         var iw = w - margin.left - margin.right;
         var ih = h - margin.top - margin.bottom;
 
-        var svg = d3.select(container).append('svg').attr('width', w).attr('height', h);
-        var g = svg.append('g').attr('transform', 'translate(' + margin.left + ',' + margin.top + ')');
+        var svg = svgEl('svg', { width: w, height: h });
+        container.appendChild(svg);
+        var g = svgEl('g', { transform: 'translate(' + margin.left + ',' + margin.top + ')' });
+        svg.appendChild(g);
 
-        var x = d3.scaleBand().domain(buckets.map(function(b) { return b.idx; })).range([0, iw]).padding(0.3);
-        var y = d3.scaleLinear().domain([0, maxTasks]).nice().range([ih, 0]);
+        var nb = buckets.length;
+        var bandStep = iw / nb;
+        var bandPad = 0.3;
+        var bandW = bandStep * (1 - bandPad);
+        var bandOff = bandStep * bandPad / 2;
 
-        g.append('g').attr('transform', 'translate(0,' + ih + ')')
-            .call(d3.axisBottom(x)
-                .tickValues(buckets.filter(function(b) { return b.idx % 7 === 0; }).map(function(b) { return b.idx; }))
-                .tickFormat(function(i) { var d = buckets[i].date; return MONTHS[d.getMonth()] + ' ' + d.getDate(); }))
-            .selectAll('text').attr('fill', 'var(--text-dim)').style('font-size', '10px');
-        g.append('g').call(d3.axisLeft(y).ticks(Math.min(maxTasks, 4)).tickFormat(d3.format('d')))
-            .selectAll('text').attr('fill', 'var(--text-dim)').style('font-size', '10px');
-        g.selectAll('.domain, .tick line').attr('stroke', 'var(--border-subtle)');
+        // Y axis ticks
+        var yTicks = Math.min(maxTasks, 4);
+        var yStep = maxTasks / yTicks;
+        for (var t = 0; t <= yTicks; t++) {
+            var tv = Math.round(t * yStep);
+            var ty = linScale(tv, 0, maxTasks, ih, 0);
+            g.appendChild(svgEl('line', { x1: -4, x2: 0, y1: ty, y2: ty, stroke: 'var(--border-subtle)' }));
+            g.appendChild(svgText(-8, ty, String(tv), { 'text-anchor': 'end', 'dominant-baseline': '0.32em', 'font-size': '10' }));
+        }
+        // X axis baseline
+        g.appendChild(svgEl('line', { x1: 0, x2: iw, y1: ih, y2: ih, stroke: 'var(--border-subtle)' }));
+        // X axis labels (every 7 days)
+        buckets.forEach(function(b) {
+            if (b.idx % 7 !== 0) return;
+            var bx = b.idx * bandStep + bandStep / 2;
+            g.appendChild(svgEl('line', { x1: bx, x2: bx, y1: ih, y2: ih + 4, stroke: 'var(--border-subtle)' }));
+            g.appendChild(svgText(bx, ih + 14, MONTHS[b.date.getMonth()] + ' ' + b.date.getDate(), { 'text-anchor': 'middle', 'font-size': '10' }));
+        });
 
-        g.selectAll('.sdk-bar').data(buckets).enter().append('rect')
-            .attr('class', 'sdk-bar')
-            .attr('x', function(b) { return x(b.idx); })
-            .attr('y', function(b) { return b.tasks > 0 ? y(b.tasks) : ih; })
-            .attr('width', x.bandwidth())
-            .attr('height', function(b) { return b.tasks > 0 ? ih - y(b.tasks) : 0; })
-            .attr('rx', 2).attr('fill', 'var(--accent-green)').attr('opacity', 0.8)
-            .style('pointer-events', 'none');
-
-        g.selectAll('.sdk-hit').data(buckets).enter().append('rect')
-            .attr('x', function(b) { return x(b.idx) - x.bandwidth() * 0.1; })
-            .attr('y', 0).attr('width', function() { return x.bandwidth() * 1.2; }).attr('height', ih)
-            .attr('fill', 'transparent')
-            .on('mouseover', function(event, b) {
-                if (b.tasks === 0) return;
-                tooltip.textContent = MONTHS[b.date.getMonth()] + ' ' + b.date.getDate() + ' · ' + b.tasks + ' task' + (b.tasks === 1 ? '' : 's') + ' · ' + b.turns + ' turns';
-                tooltip.style.display = 'block';
-                var bx = margin.left + x(b.idx) + x.bandwidth() / 2;
-                var ttLeft = bx + 8;
-                if (ttLeft + 200 > w) ttLeft = bx - 210;
-                tooltip.style.left = ttLeft + 'px';
-            })
-            .on('mouseout', function() { tooltip.style.display = 'none'; });
+        // Bars + hit areas
+        buckets.forEach(function(b) {
+            var bx = b.idx * bandStep + bandOff;
+            if (b.tasks > 0) {
+                var barY = linScale(b.tasks, 0, maxTasks, ih, 0);
+                g.appendChild(svgEl('rect', { x: bx, y: barY, width: bandW, height: ih - barY, rx: 2, fill: 'var(--accent-green)', opacity: '0.8', 'pointer-events': 'none' }));
+            }
+            var hit = svgEl('rect', { x: bx - bandW * 0.1, y: 0, width: bandW * 1.2, height: ih, fill: 'transparent' });
+            (function(bb) {
+                hit.addEventListener('mouseover', function() {
+                    if (bb.tasks === 0) return;
+                    tooltip.textContent = MONTHS[bb.date.getMonth()] + ' ' + bb.date.getDate() + ' \u00B7 ' + bb.tasks + ' task' + (bb.tasks === 1 ? '' : 's') + ' \u00B7 ' + bb.turns + ' turns';
+                    tooltip.style.display = 'block';
+                    var cx = margin.left + bb.idx * bandStep + bandStep / 2;
+                    var ttLeft = cx + 8;
+                    if (ttLeft + 200 > w) ttLeft = cx - 210;
+                    tooltip.style.left = ttLeft + 'px';
+                });
+                hit.addEventListener('mouseout', function() { tooltip.style.display = 'none'; });
+            })(b);
+            g.appendChild(hit);
+        });
     }
 
     function renderAgentMemoryBar(sys) {

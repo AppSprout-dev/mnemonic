@@ -142,8 +142,11 @@ func (s *Server) registerRoutes() {
 	// Research analytics
 	s.mux.HandleFunc("GET /api/v1/analytics", routes.HandleAnalytics(s.deps.Store, s.deps.Log))
 
-	// Graph data for D3.js visualization
+	// Graph data for visualization
 	s.mux.HandleFunc("GET /api/v1/graph", routes.HandleGraph(s.deps.Store, s.deps.Log))
+
+	// Associations (for thread view quote blocks)
+	s.mux.HandleFunc("GET /api/v1/associations", routes.HandleListAssociations(s.deps.Store, s.deps.Log))
 
 	// Agent SDK evolution dashboard
 	if s.deps.AgentEvolutionDir != "" {

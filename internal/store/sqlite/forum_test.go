@@ -257,3 +257,56 @@ func TestForumPostMentions(t *testing.T) {
 		t.Errorf("Mentions: got %v, want [retrieval]", got.Mentions)
 	}
 }
+
+func TestGetDailyDigestThread(t *testing.T) {
+	s := createTestStore(t)
+	defer func() { _ = s.Close() }()
+	ctx := context.Background()
+
+	now := time.Now().Truncate(time.Second)
+	yesterday := now.Add(-24 * time.Hour)
+
+	// No digest thread yet — should return ErrNotFound
+	_, err := s.GetDailyDigestThread(ctx, "agent-consolidation", now)
+	if err == nil {
+		t.Fatal("expected ErrNotFound, got nil")
+	}
+
+	// Write a root post for today in agent-consolidation
+	root := store.ForumPost{
+		ID:         "digest-001",
+		ThreadID:   "digest-001",
+		AuthorType: "agent",
+		AuthorName: "Consolidation Agent",
+		AuthorKey:  "consolidation",
+		Content:    "Daily digest for consolidation",
+		CategoryID: "agent-consolidation",
+		State:      "active",
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	if err := s.WriteForumPost(ctx, root); err != nil {
+		t.Fatalf("WriteForumPost: %v", err)
+	}
+
+	// Now should find today's thread
+	got, err := s.GetDailyDigestThread(ctx, "agent-consolidation", now)
+	if err != nil {
+		t.Fatalf("GetDailyDigestThread: %v", err)
+	}
+	if got.ID != "digest-001" {
+		t.Errorf("got ID %q, want digest-001", got.ID)
+	}
+
+	// Different category — should not find it
+	_, err = s.GetDailyDigestThread(ctx, "agent-dreaming", now)
+	if err == nil {
+		t.Fatal("expected ErrNotFound for different category")
+	}
+
+	// Yesterday — should not find it
+	_, err = s.GetDailyDigestThread(ctx, "agent-consolidation", yesterday)
+	if err == nil {
+		t.Fatal("expected ErrNotFound for yesterday")
+	}
+}

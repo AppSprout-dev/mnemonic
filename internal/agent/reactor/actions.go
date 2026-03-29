@@ -113,6 +113,7 @@ func (a *IncrementCounterAction) Execute(_ context.Context, _ events.Event, _ *R
 // CreateForumPostAction writes a forum post from an agent personality template.
 type CreateForumPostAction struct {
 	PerAgentSubforums bool // route to per-agent sub-forums; false = shared category
+	DigestPosting     bool // batch into daily digest threads instead of one-thread-per-event
 	Log               *slog.Logger
 }
 
@@ -140,9 +141,20 @@ func (a *CreateForumPostAction) Execute(ctx context.Context, trigger events.Even
 		categoryID = "system-reports"
 	}
 
+	// Determine thread: reuse today's digest thread or start a new one
+	threadID := postID
+	parentID := ""
+	if a.DigestPosting {
+		if existing, err := state.Store.GetDailyDigestThread(ctx, categoryID, now); err == nil {
+			threadID = existing.ThreadID
+			parentID = existing.ID
+		}
+	}
+
 	post := store.ForumPost{
 		ID:         postID,
-		ThreadID:   postID, // each agent post is a new thread
+		ParentID:   parentID,
+		ThreadID:   threadID,
 		AuthorType: "agent",
 		AuthorName: personality.Name,
 		AuthorKey:  personality.Key,
@@ -160,7 +172,8 @@ func (a *CreateForumPostAction) Execute(ctx context.Context, trigger events.Even
 
 	_ = state.Bus.Publish(ctx, events.ForumPostCreated{
 		PostID:     postID,
-		ThreadID:   postID,
+		ThreadID:   threadID,
+		ParentID:   parentID,
 		AuthorType: "agent",
 		AuthorName: personality.Name,
 		AuthorKey:  personality.Key,

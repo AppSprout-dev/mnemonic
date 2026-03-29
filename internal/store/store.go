@@ -587,6 +587,7 @@ type Store interface {
 	ListForumPostsByThread(ctx context.Context, threadID string, limit int) ([]ForumPost, error)
 	UpdateForumPostState(ctx context.Context, id string, state string) error
 	CountForumPosts(ctx context.Context) (int, error)
+	GetDailyDigestThread(ctx context.Context, categoryID string, date time.Time) (ForumPost, error)
 
 	// --- Lifecycle ---
 	Close() error

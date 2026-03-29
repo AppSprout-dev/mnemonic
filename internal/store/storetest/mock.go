@@ -358,6 +358,9 @@ func (MockStore) ListForumPostsByThread(context.Context, string, int) ([]store.F
 }
 func (MockStore) UpdateForumPostState(context.Context, string, string) error { return nil }
 func (MockStore) CountForumPosts(context.Context) (int, error)               { return 0, nil }
+func (MockStore) GetDailyDigestThread(context.Context, string, time.Time) (store.ForumPost, error) {
+	return store.ForumPost{}, store.ErrNotFound
+}
 
 // --- Lifecycle ---
 

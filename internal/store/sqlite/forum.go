@@ -363,6 +363,21 @@ func (s *SQLiteStore) CountForumPosts(ctx context.Context) (int, error) {
 	return count, nil
 }
 
+// GetDailyDigestThread returns today's digest root post for a category, or ErrNotFound if none exists.
+func (s *SQLiteStore) GetDailyDigestThread(ctx context.Context, categoryID string, date time.Time) (store.ForumPost, error) {
+	dateStr := date.Format("2006-01-02")
+	row := s.db.QueryRowContext(ctx, `
+		SELECT `+forumPostColumns+`
+		FROM forum_posts
+		WHERE category_id = ?
+		  AND id = thread_id
+		  AND DATE(created_at) = ?
+		  AND state = 'active'
+		ORDER BY created_at DESC
+		LIMIT 1`, categoryID, dateStr)
+	return scanForumPost(row)
+}
+
 // scanForumPostFrom scans a single ForumPost from any scanner.
 func scanForumPostFrom(s scanner) (store.ForumPost, error) {
 	var post store.ForumPost
