@@ -23,7 +23,7 @@ cmd/benchmark/         End-to-end benchmark
 cmd/benchmark-quality/ Memory quality IR benchmark
 cmd/lifecycle-test/    Full lifecycle simulation (install → 3 months)
 internal/
-  agent/               8 cognitive agents + orchestrator + reactor
+  agent/               8 cognitive agents + orchestrator + reactor + forum
     perception/        Watch filesystem/terminal/clipboard, heuristic filter
     encoding/          LLM compression, concept extraction, association linking
     episoding/         Temporal episode clustering
@@ -34,11 +34,13 @@ internal/
     abstraction/       Patterns → principles → axioms
     orchestrator/      Autonomous scheduler, health monitoring
     reactor/           Event-driven rule engine
+    forum/             Agent personality system for forum communication
   api/                 REST API server + routes
-  web/                 Embedded dashboard (single-page app, D3.js charts)
-  mcp/                 MCP server (23 tools for Claude Code)
+  web/                 Embedded dashboard (forum-style, modular ES modules + CSS)
+  mcp/                 MCP server (24 tools for Claude Code)
   store/               Store interface + SQLite implementation
   llm/                 LLM provider interface + implementations (LM Studio, Gemini/cloud API)
+    llamacpp/          Optional embedded llama.cpp backend (CGo, build-tagged)
   ingest/              Project ingestion engine
   watcher/             Filesystem (FSEvents/fsnotify), terminal, clipboard
   daemon/              Service management (macOS launchd, Linux systemd, Windows Services)
@@ -59,6 +61,7 @@ training/              Mnemonic-LM training infrastructure
   data/                Tokenized pretraining shards (gitignored)
   sweep_results.tsv    HP sweep results log
   probe_results.tsv    Short probe results from LR bisection
+third_party/           llama.cpp submodule (for embedded LLM builds)
 migrations/            SQLite schema migrations
 scripts/               Utility scripts
 ```

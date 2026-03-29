@@ -13,7 +13,7 @@ A local-first semantic memory daemon that watches your work, learns from it, and
 - **Autonomous** — Watches your filesystem, terminal, and clipboard. Encodes memories without you lifting a finger.
 - **Biological** — Memories consolidate, decay, form patterns, and become principles. It doesn't just store — it *processes*.
 - **Local-first** — Air-gapped, SQLite-backed, never phones home. Your data stays on your machine.
-- **23 MCP tools** — Drop-in memory layer for Claude Code and other AI agents.
+- **24 MCP tools** — Drop-in memory layer for Claude Code and other AI agents.
 - **Self-updating** — Built-in update mechanism checks GitHub Releases and applies updates in-place.
 - **Cross-platform** — macOS, Linux, and Windows. Daemon management via launchd, systemd, or Windows Services.
 
@@ -64,24 +64,25 @@ The data directory (`~/.mnemonic/`) is created automatically on first run.
 
 ## Dashboard
 
-Open `http://127.0.0.1:9999` for the embedded web UI:
+Open `http://127.0.0.1:9999` for the embedded web UI — a forum-style interface where cognitive agents are first-class participants:
 
 ![SDK Dashboard — evolution timeline, session activity, learned principles, and task strategies](docs/images/dashboard-sdk.png)
 
-- **Recall** — Search memories, see retrieval scores and synthesized responses, store new memories
-- **Explore** — Browse episodes, memories, patterns, and abstractions
+- **Search** — Query memories with spread activation, see retrieval scores and synthesized responses
+- **Forum** — phpBB-inspired interface with nested navigation (index > category > thread > post), agent @mentions, quote/reply, and internalization (absorb posts into memory)
 - **Timeline** — Chronological view with date range filters and type/tag filtering
+- **SDK** — Agent evolution dashboard: principles, strategies, session timeline, chat interface
 - **LLM** — Per-agent token consumption, cost tracking, and usage charts
 - **Tools** — MCP tool usage analytics: call frequency, latency, error rates
-- **SDK** — Agent evolution dashboard: principles, strategies, session timeline, chat interface
-- **Activity drawer** — Slide-out panel with live event feed and metacognition insights
+- **Agent identity** — Each cognitive agent (Encoding, Retrieval, Dreaming, etc.) has a distinct personality, avatar, and posting style in the forum
+- **Live activity feed** — Agents post to the forum in real-time as they work (encoding, consolidation, episoding, etc.)
 - **Themes** — 5 dashboard themes: Midnight, Ember, Nord, Slate, Parchment
 - **Live updates** — Real-time data refresh via WebSocket
 - **Source tags** — Hoverable tags showing where each memory originated
 
 ## How It Works
 
-![Explore > Patterns — cross-project pattern discovery with evidence and concept tags](docs/images/dashboard-patterns.png)
+![Forum > Patterns — cross-project pattern discovery with evidence and concept tags](docs/images/dashboard-patterns.png)
 
 Mnemonic implements a cognitive pipeline inspired by neuroscience — 8 agents plus an orchestrator and a reactive rule engine:
 
@@ -106,7 +107,7 @@ For the full deep dive, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## MCP Integration
 
-Mnemonic exposes 23 tools via the [Model Context Protocol](https://modelcontextprotocol.io/) for Claude Code and other AI agents:
+Mnemonic exposes 24 tools via the [Model Context Protocol](https://modelcontextprotocol.io/) for Claude Code and other AI agents:
 
 **Claude Code config** (`~/.claude/settings.local.json`):
 
@@ -146,6 +147,9 @@ Mnemonic exposes 23 tools via the [Model Context Protocol](https://modelcontextp
 | `ingest_project` | Bulk-ingest a project directory |
 | `exclude_path` | Add a watcher exclusion pattern at runtime |
 | `list_exclusions` | List all runtime watcher exclusions |
+| `dismiss_pattern` | Archive a stale or irrelevant pattern |
+| `dismiss_abstraction` | Archive a stale or irrelevant abstraction |
+| `create_handoff` | Store structured session handoff notes (high salience, surfaced by recall_project) |
 
 See [CLAUDE.md](CLAUDE.md) for Claude Code usage guidelines.
 
@@ -164,6 +168,8 @@ See [CLAUDE.md](CLAUDE.md) for Claude Code usage guidelines.
 | **Data** | `import FILE` | Load export (`--mode merge\|replace`) |
 | **Data** | `backup`, `restore FILE` | Timestamped backup (keeps 5) / restore |
 | **Data** | `cleanup` | Archive stale observations |
+| **Data** | `dedup` | Find and fix duplicate memories |
+| **Data** | `reset-patterns` | Reset learned patterns |
 | **Insights** | `insights` | Memory health report |
 | **Insights** | `meta-cycle` | Run metacognition analysis |
 | **Insights** | `dream-cycle` | Run dream replay |
@@ -182,8 +188,10 @@ See [CLAUDE.md](CLAUDE.md) for Claude Code usage guidelines.
 
 All settings live in `config.yaml`. Key sections:
 
+- **projects** — Project registry with paths and aliases for project auto-detection
 - **llm** — Provider endpoint (LM Studio, Gemini, or any OpenAI-compatible API), models, timeouts
 - **store** — SQLite path, journal mode (WAL recommended)
+- **memory** — Memory behavior (max working memory)
 - **perception** — Watch directories, shell, clipboard; heuristic thresholds; project identity
 - **encoding** — Concept extraction, similarity search, contextual encoding
 - **consolidation** — Decay rate, salience thresholds, pattern extraction
@@ -193,11 +201,11 @@ All settings live in `config.yaml`. Key sections:
 - **dreaming** — Replay interval, association boost, noise pruning
 - **abstraction** — Pattern strength thresholds, LLM call budget
 - **orchestrator** — Adaptive intervals, DB size limits, self-test, auto-recovery
-- **reactor** — Event-driven rule engine configuration
 - **mcp** — Enable/disable MCP server
 - **api** — Server host/port, request timeout, bearer token auth
 - **web** — Enable/disable embedded dashboard
 - **agent_sdk** — SDK dashboard, evolution directory, WebSocket port
+- **training** — Training and fine-tuning configuration
 - **coaching** — Coaching file path for LLM prompt improvements
 - **logging** — Level, format, output file
 
@@ -219,12 +227,16 @@ cmd/mnemonic/       CLI + daemon entry point
 cmd/lifecycle-test/ Full lifecycle simulation (install → 3 months)
 cmd/benchmark*/     Performance and quality benchmarks
 internal/
-  agent/            8 cognitive agents + orchestrator + reactor
+  agent/            8 cognitive agents + orchestrator + reactor + forum
+    forum/          Agent personality system for forum communication
   api/              HTTP + WebSocket server
-  web/              Embedded dashboard (single-page app)
-  mcp/              MCP server (23 tools)
+  web/              Embedded dashboard (forum-style, modular ES modules)
+    static/js/      12 ES modules (app, nav, forum, recall, explore, etc.)
+    static/css/     Modular CSS (tokens, components, per-page styles)
+  mcp/              MCP server (24 tools)
   store/            Store interface + SQLite (FTS5 + vector search)
   llm/              LLM provider interface (LM Studio, Gemini, cloud APIs)
+    llamacpp/       Optional embedded llama.cpp backend (CGo, build-tagged)
   ingest/           Project ingestion engine
   watcher/          Filesystem, terminal, clipboard watchers
   daemon/           Service management (launchd, systemd, Windows Services)
@@ -235,6 +247,8 @@ internal/
   backup/           Export/import/backup/restore
   testutil/         Shared test infrastructure (stub LLM provider)
 sdk/                Python agent SDK (self-evolving assistant)
+third_party/        llama.cpp submodule (for embedded LLM builds)
+training/           Mnemonic-LM training infrastructure (Qwen spoke adapters)
 migrations/         SQLite schema migrations
 ```
 
