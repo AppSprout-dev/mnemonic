@@ -22,7 +22,8 @@ type ServerConfig struct {
 	Host              string
 	Port              int
 	RequestTimeoutSec int
-	Token             string // bearer token for API auth (empty = no auth)
+	Token             string   // bearer token for API auth (empty = no auth)
+	AllowedOrigins    []string // CORS/WebSocket allowed origins (empty = defaults)
 }
 
 // ServerDeps holds dependencies injected into the server.
@@ -63,6 +64,7 @@ func NewServer(cfg ServerConfig, deps ServerDeps) *Server {
 		mux:    mux,
 	}
 
+	routes.SetAllowedOrigins(cfg.AllowedOrigins)
 	s.registerRoutes()
 
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)

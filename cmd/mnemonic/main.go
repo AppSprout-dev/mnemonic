@@ -1776,6 +1776,7 @@ func serveCommand(configPath string) {
 			Port:              cfg.API.Port,
 			RequestTimeoutSec: cfg.API.RequestTimeoutSec,
 			Token:             cfg.API.Token,
+			AllowedOrigins:    cfg.API.AllowedOrigins,
 		}, apiDeps)
 
 		if err := apiServer.Start(); err != nil {

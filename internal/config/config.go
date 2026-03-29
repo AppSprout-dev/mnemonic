@@ -426,10 +426,11 @@ type AgentSDKConfig struct {
 
 // APIConfig holds API server settings.
 type APIConfig struct {
-	Host              string `yaml:"host"`
-	Port              int    `yaml:"port"`
-	RequestTimeoutSec int    `yaml:"request_timeout_sec"`
-	Token             string `yaml:"token"` // bearer token for API auth (empty = no auth)
+	Host              string   `yaml:"host"`
+	Port              int      `yaml:"port"`
+	RequestTimeoutSec int      `yaml:"request_timeout_sec"`
+	Token             string   `yaml:"token"`           // bearer token for API auth (empty = no auth)
+	AllowedOrigins    []string `yaml:"allowed_origins"` // CORS/WebSocket allowed origins (empty = defaults)
 }
 
 // WebConfig holds web UI settings.
