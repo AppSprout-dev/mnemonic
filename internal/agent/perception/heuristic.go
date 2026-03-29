@@ -37,6 +37,19 @@ type HeuristicConfig struct {
 	RecallBoostMax     float32       // max recall salience boost (default: 0.2)
 	RecallBoostMinutes int           // minutes recall boost decays over (default: 30)
 	Scoring            ScoringConfig // scoring weights
+
+	// Extra* fields extend the compiled-in filter defaults without replacing them.
+	ExtraIgnoredPatterns    []string
+	ExtraLockfileNames      []string
+	ExtraAppInternalDirs    []string
+	ExtraSensitiveNames     []string
+	ExtraSourceExtensions   []string
+	ExtraTrivialCommands    []string
+	ExtraHighSignalCommands []string
+	ExtraCodeIndicators     []string
+	ExtraHighSignalKeywords []string
+	ExtraMediumKeywords     []string
+	ExtraLowKeywords        []string
 }
 
 // scoringOrDefault returns the scoring config with defaults for any zero values.
@@ -111,6 +124,19 @@ type HeuristicFilter struct {
 	recallMu      sync.RWMutex
 
 	done chan struct{} // signals cleanupLoop to exit
+
+	// Resolved filter lists (compiled defaults + config extras, merged at construction)
+	ignoredPatterns    []string
+	lockfileNames      []string
+	appInternalDirs    []string
+	sensitiveNames     []string
+	sourceExtensions   []string
+	trivialCommands    map[string]bool
+	highSignalCommands map[string]bool
+	codeIndicators     []string
+	highKeywords       []string
+	mediumKeywords     []string
+	lowKeywords        []string
 }
 
 // recentEdit tracks a file edit for batch detection.
@@ -128,6 +154,19 @@ func NewHeuristicFilter(cfg HeuristicConfig, log *slog.Logger) *HeuristicFilter 
 		frequency:     make(map[string][]frequencyEntry),
 		recalledFiles: make(map[string]time.Time),
 		done:          make(chan struct{}),
+
+		// Merge compiled defaults with config extras
+		ignoredPatterns:    append(append([]string{}, defaultIgnoredPatterns...), cfg.ExtraIgnoredPatterns...),
+		lockfileNames:      append(append([]string{}, defaultLockfileNames...), cfg.ExtraLockfileNames...),
+		appInternalDirs:    append(append([]string{}, defaultAppInternalDirs...), cfg.ExtraAppInternalDirs...),
+		sensitiveNames:     append(append([]string{}, defaultSensitiveNames...), cfg.ExtraSensitiveNames...),
+		sourceExtensions:   append(append([]string{}, defaultSourceExtensions...), cfg.ExtraSourceExtensions...),
+		trivialCommands:    mergeToSet(defaultTrivialCommands, cfg.ExtraTrivialCommands),
+		highSignalCommands: mergeToSet(defaultHighSignalCommands, cfg.ExtraHighSignalCommands),
+		codeIndicators:     append(append([]string{}, defaultCodeIndicators...), cfg.ExtraCodeIndicators...),
+		highKeywords:       append(append([]string{}, defaultHighSignalKeywords...), cfg.ExtraHighSignalKeywords...),
+		mediumKeywords:     append(append([]string{}, defaultMediumSignalKeywords...), cfg.ExtraMediumKeywords...),
+		lowKeywords:        append(append([]string{}, defaultLowSignalKeywords...), cfg.ExtraLowKeywords...),
 	}
 
 	// Start a cleanup goroutine to periodically remove old entries
@@ -339,60 +378,35 @@ func (h *HeuristicFilter) evaluateSource(source, eventType, path, content string
 // evaluateFilesystem scores filesystem events.
 func (h *HeuristicFilter) evaluateFilesystem(path, content string) (float32, string, bool) {
 	// Skip if path contains ignored patterns — hard reject, no keyword override
-	ignoredPatterns := []string{".git/", "node_modules/", "__pycache__/", ".DS_Store", "~", ".swp", ".tmp", ".xbel",
-		"venv/", ".venv/", "site-packages/", ".tox/", ".mypy_cache/", ".ruff_cache/", ".pytest_cache/",
-		".egg-info/", ".eggs/"}
-
-	// Hard-reject lockfiles, checksums, and release tooling — deterministic files with zero semantic value
-	lockfileNames := []string{"go.sum", "package-lock.json", "yarn.lock", "Cargo.lock",
-		"poetry.lock", "pnpm-lock.yaml", "Gemfile.lock", "composer.lock",
-		".release-please-manifest.json", "CHANGELOG.md"}
 	baseName := path
 	if idx := strings.LastIndex(baseName, "/"); idx >= 0 {
 		baseName = baseName[idx+1:]
 	}
-	for _, lf := range lockfileNames {
+	for _, lf := range h.lockfileNames {
 		if baseName == lf {
 			return 0.0, fmt.Sprintf("filesystem: lockfile '%s'", lf), true
 		}
 	}
-	for _, pattern := range ignoredPatterns {
+	for _, pattern := range h.ignoredPatterns {
 		if strings.Contains(path, pattern) {
 			return 0.0, fmt.Sprintf("filesystem: ignored path pattern '%s'", pattern), true
 		}
 	}
 
 	// Suppress application-internal state directories — hard reject
-	appInternalDirs := []string{
-		"/google-chrome/", "/chromium/", "/BraveSoftware/",
-		"/LM Studio/", "/lm-studio/",
-		"/Trash/", "/.local/share/Trash/",
-		"/leveldb/", "/IndexedDB/", "/Local Storage/", "/Session Storage/",
-		"/Cache/", "/GPUCache/", "/ShaderCache/", "/Code Cache/",
-		"/dconf/", "/gconf/",
-		"/pulse/", "/pipewire/", "/wireplumber/",
-		"/gvfs-metadata/", "/tracker3/",
-		"session_migration-",
-		"/.copilot/", "/.github-copilot/",
-		"/snap/", "/.snap/",
-		"/.config/gtk-", "/.config/dbus-",
-		"/.mnemonic/", "/.claude/",
-	}
 	lowerPathCheck := strings.ToLower(path)
-	for _, dir := range appInternalDirs {
+	for _, dir := range h.appInternalDirs {
 		if strings.Contains(lowerPathCheck, strings.ToLower(dir)) {
 			return 0.0, fmt.Sprintf("filesystem: application-internal path '%s'", dir), true
 		}
 	}
 
 	// Hard-reject sensitive files (defense-in-depth — watcher should block these first)
-	sensitiveNames := []string{".env", "id_rsa", "id_ed25519", "id_ecdsa", ".pem", ".key",
-		"credentials", "secret", ".keychain", ".keystore", ".netrc", ".htpasswd"}
 	baseName = strings.ToLower(path)
 	if idx := strings.LastIndex(baseName, "/"); idx >= 0 {
 		baseName = baseName[idx+1:]
 	}
-	for _, s := range sensitiveNames {
+	for _, s := range h.sensitiveNames {
 		if strings.Contains(baseName, s) {
 			return 0.0, fmt.Sprintf("filesystem: sensitive file '%s'", s), true
 		}
@@ -414,8 +428,7 @@ func (h *HeuristicFilter) evaluateFilesystem(path, content string) (float32, str
 	}
 
 	// Score boost for source code
-	sourceExtensions := []string{".go", ".py", ".js", ".ts", ".java", ".rs", ".cpp", ".c", ".h"}
-	for _, ext := range sourceExtensions {
+	for _, ext := range h.sourceExtensions {
 		if strings.HasSuffix(lowerPath, ext) {
 			score += h.scoring.BoostSourceCode
 			rationale += "; source code"
@@ -439,23 +452,12 @@ func (h *HeuristicFilter) evaluateTerminal(content string) (float32, string, boo
 	cmd := strings.ToLower(command[0])
 
 	// Skip trivial commands (only if they are just the command itself) — hard reject
-	trivialCommands := map[string]bool{
-		"cd": true, "ls": true, "pwd": true, "clear": true,
-		"exit": true, "history": true, "which": true, "whoami": true,
-		"echo": true,
-	}
-
-	if trivialCommands[cmd] && len(command) == 1 {
+	if h.trivialCommands[cmd] && len(command) == 1 {
 		return 0.0, fmt.Sprintf("terminal: trivial command '%s'", cmd), true
 	}
 
 	// Score boost for high-signal commands
-	highSignalCommands := map[string]bool{
-		"git": true, "make": true, "go": true, "npm": true, "docker": true,
-		"kubectl": true, "ssh": true, "curl": true, "python": true, "node": true,
-	}
-
-	for signalCmd := range highSignalCommands {
+	for signalCmd := range h.highSignalCommands {
 		if strings.HasPrefix(cmd, signalCmd) {
 			score += h.scoring.BoostCommand
 			rationale += fmt.Sprintf("; high-signal command '%s'", cmd)
@@ -480,9 +482,8 @@ func (h *HeuristicFilter) evaluateClipboard(content string) (float32, string, bo
 	}
 
 	// Score boost for code snippets
-	codeIndicators := []string{"{", "}", "function", "def", "class", "import", "package"}
 	foundCodeIndicators := 0
-	for _, indicator := range codeIndicators {
+	for _, indicator := range h.codeIndicators {
 		if strings.Contains(content, indicator) {
 			foundCodeIndicators++
 		}
@@ -503,11 +504,7 @@ func (h *HeuristicFilter) scoreKeywords(content string) (float32, int) {
 	matchCount := 0
 
 	// High signal keywords
-	highSignalKeywords := []string{
-		"error", "bug", "fix", "todo", "hack",
-		"important", "decision", "deadline", "meeting",
-	}
-	for _, keyword := range highSignalKeywords {
+	for _, keyword := range h.highKeywords {
 		if strings.Contains(contentLower, keyword) {
 			score += h.scoring.KeywordHigh
 			matchCount++
@@ -515,11 +512,7 @@ func (h *HeuristicFilter) scoreKeywords(content string) (float32, int) {
 	}
 
 	// Medium signal keywords
-	mediumSignalKeywords := []string{
-		"config", "deploy", "release", "review",
-		"merge", "refactor", "test", "fail",
-	}
-	for _, keyword := range mediumSignalKeywords {
+	for _, keyword := range h.mediumKeywords {
 		if strings.Contains(contentLower, keyword) {
 			score += h.scoring.KeywordMedium
 			matchCount++
@@ -527,10 +520,7 @@ func (h *HeuristicFilter) scoreKeywords(content string) (float32, int) {
 	}
 
 	// Low signal keywords
-	lowSignalKeywords := []string{
-		"update", "change", "add", "remove", "create", "install",
-	}
-	for _, keyword := range lowSignalKeywords {
+	for _, keyword := range h.lowKeywords {
 		if strings.Contains(contentLower, keyword) {
 			score += h.scoring.KeywordLow
 			matchCount++

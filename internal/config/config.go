@@ -164,6 +164,19 @@ type HeuristicsConfig struct {
 	MaxContentLength   int `yaml:"max_content_length"`
 	FrequencyThreshold int `yaml:"frequency_threshold"`
 	FrequencyWindowMin int `yaml:"frequency_window_min"`
+
+	// Extra* fields extend the compiled-in defaults without replacing them.
+	ExtraIgnoredPatterns    []string `yaml:"extra_ignored_patterns"`
+	ExtraLockfileNames      []string `yaml:"extra_lockfile_names"`
+	ExtraAppInternalDirs    []string `yaml:"extra_app_internal_dirs"`
+	ExtraSensitiveNames     []string `yaml:"extra_sensitive_names"`
+	ExtraSourceExtensions   []string `yaml:"extra_source_extensions"`
+	ExtraTrivialCommands    []string `yaml:"extra_trivial_commands"`
+	ExtraHighSignalCommands []string `yaml:"extra_high_signal_commands"`
+	ExtraCodeIndicators     []string `yaml:"extra_code_indicators"`
+	ExtraHighSignalKeywords []string `yaml:"extra_high_signal_keywords"`
+	ExtraMediumKeywords     []string `yaml:"extra_medium_keywords"`
+	ExtraLowKeywords        []string `yaml:"extra_low_keywords"`
 }
 
 // EncodingConfig holds encoding settings.
