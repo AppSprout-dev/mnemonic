@@ -447,3 +447,66 @@ The specific hallucination from EXP-9 is gone, replaced by degenerate repetitive
 - **Verdict:** REFUTED — 4x more data and 5 epochs did NOT fix generalization. The hallucination mode shifted from a specific memorized template to degenerate repetition, but the core failure is the same: the model memorizes the training distribution without learning the encoding function. Eval loss comparison to EXP-9 is not direct (different eval sets: 389 vs 1,564 examples from different corpus sizes).
 
 - **Analysis:** The train-eval gap (0.58 vs 1.12) shows the model memorized training patterns but doesn't generalize. The complete inability to produce even structurally valid JSON on novel inputs — not just wrong content, but broken syntax — suggests something beyond simple overfitting. Possible factors: (1) 100M parameter capacity is fundamentally insufficient for the encoding task on arbitrary text. (2) Potential prompt format sensitivity — the novel input test used a manually constructed prompt that may differ subtly from training prompts. (3) The degenerate repetition pattern (token loops) is characteristic of models pushed past their capacity limit, not just overfitting. (4) **LR was 3.5e-3 (pretrain-level) — should have been ~3.5e-5 for fine-tuning. This likely caused catastrophic forgetting of pretrained capabilities.** This result motivates pivoting from training-from-scratch to fine-tuning a pretrained Qwen 3.5 base with spoke adapters.
+
+---
+
+## Phase 5: Qwen 3.5 2B + Felix Spoke Architecture
+
+Pivot from Felix-LM 100M to Qwen 3.5 2B with Felix spoke layers. The base model is frozen; only spoke parameters (~18.9M, 0.9% overhead) are trainable. This tests whether a pretrained 2B model + lightweight adapters can generalize where the from-scratch 100M model failed.
+
+### EXP-11: Smoke Test — Frozen Qwen 3.5 2B + Spokes Only
+
+- **Date:** 2026-03-28
+- **Status:** REGISTERED
+- **Hypothesis:** A frozen Qwen 3.5 2B base with trainable spoke layers (25.2M params, ~1.3% overhead) will show decreasing loss on the encoding task within 100 optimizer steps, verifying the training pipeline works end-to-end on ROCm.
+- **Variable:** Model architecture (Felix-LM 100M trained from scratch -> Qwen 3.5 2B pretrained + spoke adapters)
+- **Control:** Random loss baseline (untrained spokes, ~ln(vocab_size) ~ 12.4 for Qwen's 248K vocab)
+- **Prediction:** Loss decreases from ~12.4 to below 8.0 within 100 steps. VRAM usage stays below 12 GB with gradient checkpointing.
+- **Config:** Qwen 3.5 2B (frozen, bf16), 4 spokes rank 64 on all 24 layers, batch 1, gradient accumulation 8, seq_len 4096, gradient_checkpointing=True, LR 1e-3 (Muon for spoke matrices, AdamW for gate_bias at 0.1x), 100 optimizer steps
+- **Hardware:** AMD RX 7800 XT (16GB VRAM), ROCm 6.3
+- **Data:** 100 encoding examples from finetune_qwen/ (re-tokenized for Qwen tokenizer)
+
+### EXP-12: Spoke Placement on Hybrid Architecture
+
+- **Date:** 2026-03-28
+- **Status:** REGISTERED
+- **Hypothesis:** Spoke placement strategy significantly affects encoding quality because Qwen 3.5 2B's hybrid architecture has 18 delta-net (linear) layers and 6 full attention layers with fundamentally different representations. Layers 3,7,11,15,19,23 are full attention; all others are delta-net. Pattern: `((i+1) % 4 != 0)` = delta-net.
+- **Variable:** Spoke placement (4 configs):
+  - A) All 24 layers (18.9M params) — baseline
+  - B) Attention-only: layers 3,7,11,15,19,23 (6 layers, 4.7M params)
+  - C) Delta-net-only: 18 layers (14.2M params)
+  - D) Every-other: layers 0,2,4,...,22 (12 layers, 9.4M params)
+- **Control:** Config A (all layers)
+- **Prediction:** A > D > C > B on eval loss. Attention-only (B) will underperform because 6 layers provide insufficient adaptation capacity. All-layers (A) will win but D (every-other) will be within 5% at 50% fewer parameters.
+- **Config:** Same as EXP-11 but 500 optimizer steps per config (4 runs, ~2h total)
+- **Quality gate:** Compare eval loss at step 500 on 200 held-out examples
+
+### EXP-13: Spokes-Only vs Spokes + LoRA
+
+- **Date:** 2026-03-28
+- **Status:** REGISTERED
+- **Hypothesis:** Adding LoRA (rank 16) on Q/V projections of the 6 full attention layers will improve encoding quality beyond spokes alone, because the attention layers can be steered to attend to task-relevant features. LoRA is NOT applied to delta-net layers (they use fused wqkv tensors with different internal structure).
+- **Variable:** Trainable parameters:
+  - A) Frozen base + spokes on best placement from EXP-12 (spokes only)
+  - B) Same + LoRA rank 16 on Q/V of attention layers 3,7,11,15,19,23 (~2.4M additional params)
+- **Control:** Config A (spokes-only, best placement from EXP-12)
+- **Prediction:** Config B beats A by 5-15% on eval loss.
+- **Config:** Best spoke placement from EXP-12, 1000 optimizer steps, PEFT LoraConfig(target_modules=["q_proj", "v_proj"], r=16, lora_alpha=32)
+
+### EXP-14: Full Training Run — Best Config
+
+- **Date:** TBD (after EXP-12/13)
+- **Status:** REGISTERED
+- **Hypothesis:** The best configuration from EXP-12/13, trained to convergence on the full dataset (4000+ encoding + 2000+ compression + 200 synthesis examples), will produce a model that generalizes to novel inputs — unlike Felix-LM 100M (EXP-9/10).
+- **Variable:** Training duration and data scale (short probes -> full run)
+- **Control:**
+  1. Gemini Flash baseline (BASELINE-3: 76% precision)
+  2. Felix-LM 100M (EXP-10: degenerates on novel input)
+- **Prediction:**
+  - Eval loss < 0.8 (vs EXP-10's 1.12 with Felix 100M)
+  - Novel input test: >= 8/10 structurally valid JSON with semantically accurate content
+  - Compression accuracy >= 90% on held-out pairs
+  - No degenerate repetition or template memorization
+- **Config:** Best from EXP-12/13, 5-10 epochs, cosine LR decay with warmup, full training dataset, bf16, gradient_checkpointing=True
+- **Early stopping:** Eval loss increases for 3 consecutive evaluations
+- **Data:** ~6000+ mixed examples: encoding (45%) + compression (30%) + decompression (15%) + synthesis (3%) + general (7%)
