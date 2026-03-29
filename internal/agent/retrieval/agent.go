@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/appsprout-dev/mnemonic/internal/agent/agentutil"
 	"github.com/appsprout-dev/mnemonic/internal/concepts"
 	"github.com/appsprout-dev/mnemonic/internal/events"
 	"github.com/appsprout-dev/mnemonic/internal/llm"
@@ -130,20 +131,6 @@ func DefaultConfig() RetrievalConfig {
 	}
 }
 
-// helpers for zero-value fallback
-func intOr(v, fallback int) int {
-	if v == 0 {
-		return fallback
-	}
-	return v
-}
-
-func f32Or(v, fallback float32) float32 {
-	if v == 0 {
-		return fallback
-	}
-	return v
-}
 
 // QueryRequest is the input for a retrieval query.
 type QueryRequest struct {
@@ -211,8 +198,8 @@ func NewRetrievalAgent(s store.Store, llmProv llm.Provider, cfg RetrievalConfig,
 
 	// Wire up activity-based recall boost if the event bus is available.
 	if bus != nil {
-		windowMin := intOr(cfg.ContextBoostWindowMin, 30)
-		maxBoost := f32Or(cfg.ContextBoostMax, 0.2)
+		windowMin := agentutil.IntOr(cfg.ContextBoostWindowMin, 30)
+		maxBoost := agentutil.Float32Or(cfg.ContextBoostMax, 0.2)
 		ra.activity = newActivityTracker(windowMin, maxBoost)
 		bus.Subscribe(events.TypeWatcherEvent, func(ctx context.Context, event events.Event) error {
 			we, ok := event.(events.WatcherEvent)
@@ -262,8 +249,8 @@ func (ra *RetrievalAgent) SyncActivity(snap map[string]time.Time) {
 	if ra.activity == nil {
 		// Create a tracker on-the-fly for MCP processes that don't have a bus.
 		ra.activity = newActivityTracker(
-			intOr(ra.config.ContextBoostWindowMin, 30),
-			f32Or(ra.config.ContextBoostMax, 0.2),
+			agentutil.IntOr(ra.config.ContextBoostWindowMin, 30),
+			agentutil.Float32Or(ra.config.ContextBoostMax, 0.2),
 		)
 	}
 	ra.activity.loadSnapshot(snap)
@@ -297,7 +284,7 @@ func (ra *RetrievalAgent) Query(ctx context.Context, req QueryRequest) (QueryRes
 	ra.log.Debug("query concepts extracted", "query_id", queryID, "concepts_count", len(concepts))
 
 	// Step 2: Find entry points via full-text search
-	ftsResults, err := ra.store.SearchByFullText(ctx, req.Query, intOr(ra.config.FTSCandidateLimit, 10))
+	ftsResults, err := ra.store.SearchByFullText(ctx, req.Query, agentutil.IntOr(ra.config.FTSCandidateLimit, 10))
 	if err != nil {
 		ra.log.Warn("full-text search failed", "query_id", queryID, "error", err)
 		ftsResults = []store.Memory{}
@@ -310,7 +297,7 @@ func (ra *RetrievalAgent) Query(ctx context.Context, req QueryRequest) (QueryRes
 	if err != nil {
 		ra.log.Warn("embedding generation failed", "query_id", queryID, "error", err)
 	} else {
-		embeddingResults, err = ra.store.SearchByEmbedding(ctx, embedding, intOr(ra.config.EmbeddingCandidateLimit, 10))
+		embeddingResults, err = ra.store.SearchByEmbedding(ctx, embedding, agentutil.IntOr(ra.config.EmbeddingCandidateLimit, 10))
 		if err != nil {
 			ra.log.Warn("embedding search failed", "query_id", queryID, "error", err)
 			embeddingResults = []store.RetrievalResult{}
@@ -334,8 +321,8 @@ func (ra *RetrievalAgent) Query(ctx context.Context, req QueryRequest) (QueryRes
 	entryPoints := ra.mergeEntryPoints(ftsResults, embeddingResults)
 
 	// Inject time-range results as additional entry points with a moderate base score
-	timeBase := f32Or(ra.config.TimeRangeBaseScore, 0.3)
-	timeSalWt := f32Or(ra.config.TimeRangeSalienceWt, 0.2)
+	timeBase := agentutil.Float32Or(ra.config.TimeRangeBaseScore, 0.3)
+	timeSalWt := agentutil.Float32Or(ra.config.TimeRangeSalienceWt, 0.2)
 	for _, mem := range timeRangeResults {
 		if _, exists := entryPoints[mem.ID]; !exists {
 			entryPoints[mem.ID] = timeBase + timeSalWt*mem.Salience
@@ -379,9 +366,9 @@ func (ra *RetrievalAgent) Query(ctx context.Context, req QueryRequest) (QueryRes
 			var patterns []store.Pattern
 			var pErr error
 			if req.Project != "" {
-				patterns, pErr = ra.store.SearchPatternsByEmbeddingInProject(ctx, embedding, req.Project, intOr(ra.config.PatternSearchLimit, 5))
+				patterns, pErr = ra.store.SearchPatternsByEmbeddingInProject(ctx, embedding, req.Project, agentutil.IntOr(ra.config.PatternSearchLimit, 5))
 			} else {
-				patterns, pErr = ra.store.SearchPatternsByEmbedding(ctx, embedding, intOr(ra.config.PatternSearchLimit, 5))
+				patterns, pErr = ra.store.SearchPatternsByEmbedding(ctx, embedding, agentutil.IntOr(ra.config.PatternSearchLimit, 5))
 			}
 			if pErr != nil {
 				ra.log.Warn("pattern search failed", "query_id", queryID, "error", pErr)
@@ -391,7 +378,7 @@ func (ra *RetrievalAgent) Query(ctx context.Context, req QueryRequest) (QueryRes
 		}
 
 		if req.IncludeAbstractions {
-			abs, err := ra.store.SearchAbstractionsByEmbedding(ctx, embedding, intOr(ra.config.AbstractionSearchLimit, 5))
+			abs, err := ra.store.SearchAbstractionsByEmbedding(ctx, embedding, agentutil.IntOr(ra.config.AbstractionSearchLimit, 5))
 			if err != nil {
 				ra.log.Warn("abstraction search failed", "query_id", queryID, "error", err)
 			} else {
@@ -475,9 +462,9 @@ func (ra *RetrievalAgent) mergeEntryPoints(ftsResults []store.Memory, embeddingR
 	// blended with salience as a secondary importance signal.
 	// Before this fix, all FTS results got ~0.49 after consolidation decay,
 	// discarding the BM25 rank-order information entirely.
-	ftsRankWt := f32Or(ra.config.FTSRankWeight, 0.7)
-	ftsSalWt := f32Or(ra.config.FTSSalienceWeight, 0.3)
-	defaultSal := f32Or(ra.config.DefaultSalience, 0.5)
+	ftsRankWt := agentutil.Float32Or(ra.config.FTSRankWeight, 0.7)
+	ftsSalWt := agentutil.Float32Or(ra.config.FTSSalienceWeight, 0.3)
+	defaultSal := agentutil.Float32Or(ra.config.DefaultSalience, 0.5)
 	for i, mem := range ftsResults {
 		rankScore := float32(1.0) / float32(i+1) // reciprocal rank: 1.0, 0.5, 0.33, ...
 		salience := mem.Salience
@@ -654,7 +641,7 @@ func (ra *RetrievalAgent) rankResults(ctx context.Context, activated map[string]
 		ra.log.Warn("failed to fetch feedback scores for ranking", "error", err)
 		feedbackScores = nil
 	}
-	feedbackWt := f32Or(ra.config.FeedbackWeight, 0.15)
+	feedbackWt := agentutil.Float32Or(ra.config.FeedbackWeight, 0.15)
 
 	scored := make([]scoredMemory, 0, len(activated))
 
@@ -672,13 +659,13 @@ func (ra *RetrievalAgent) rankResults(ctx context.Context, activated map[string]
 		} else {
 			daysSinceAccess = float32(time.Since(mem.LastAccessed).Hours() / 24)
 		}
-		recencyWt := f32Or(ra.config.RecencyBoostWeight, 0.2)
-		recencyHL := f32Or(ra.config.RecencyHalfLifeDays, 30)
+		recencyWt := agentutil.Float32Or(ra.config.RecencyBoostWeight, 0.2)
+		recencyHL := agentutil.Float32Or(ra.config.RecencyHalfLifeDays, 30)
 		recencyBonus := recencyWt * float32(math.Exp(float64(-daysSinceAccess/recencyHL)))
 
 		// Hebbian activity bonus — frequently traversed associations indicate relevance
-		actMax := float64(f32Or(ra.config.ActivityBonusMax, 0.2))
-		actScale := float64(f32Or(ra.config.ActivityBonusScale, 0.02))
+		actMax := float64(agentutil.Float32Or(ra.config.ActivityBonusMax, 0.2))
+		actScale := float64(agentutil.Float32Or(ra.config.ActivityBonusScale, 0.02))
 		activityBonus := float32(math.Min(actMax, actScale*math.Log1p(float64(state.activationCount))))
 
 		// Context boost from recent watcher activity (only for eligible sources)
@@ -698,9 +685,9 @@ func (ra *RetrievalAgent) rankResults(ctx context.Context, activated map[string]
 		if attrErr == nil {
 			switch attrs.Significance {
 			case "critical":
-				baseScore *= f32Or(ra.config.CriticalBoost, 1.2)
+				baseScore *= agentutil.Float32Or(ra.config.CriticalBoost, 1.2)
 			case "important":
-				baseScore *= f32Or(ra.config.ImportantBoost, 1.1)
+				baseScore *= agentutil.Float32Or(ra.config.ImportantBoost, 1.1)
 			}
 		}
 
@@ -1213,23 +1200,6 @@ func hasAnyConcept(memoryConcepts, excluded []string) bool {
 	return false
 }
 
-// cosineSimilarity computes the cosine similarity between two embedding vectors.
-// Returns 0.0 if either vector is empty or has zero magnitude.
-func cosineSimilarity(a, b []float32) float32 {
-	if len(a) != len(b) || len(a) == 0 {
-		return 0.0
-	}
-	var dot, normA, normB float64
-	for i := range a {
-		dot += float64(a[i]) * float64(b[i])
-		normA += float64(a[i]) * float64(a[i])
-		normB += float64(b[i]) * float64(b[i])
-	}
-	if normA == 0 || normB == 0 {
-		return 0.0
-	}
-	return float32(dot / (math.Sqrt(normA) * math.Sqrt(normB)))
-}
 
 // applyDiversityFilter reranks results using Maximal Marginal Relevance (MMR).
 // It iteratively selects results that balance relevance (original score) against
@@ -1240,8 +1210,8 @@ func (ra *RetrievalAgent) applyDiversityFilter(results []store.RetrievalResult) 
 		return results
 	}
 
-	lambda := f32Or(ra.config.DiversityLambda, 0.7)
-	threshold := f32Or(ra.config.DiversityThreshold, 0.85)
+	lambda := agentutil.Float32Or(ra.config.DiversityLambda, 0.7)
+	threshold := agentutil.Float32Or(ra.config.DiversityThreshold, 0.85)
 
 	// Normalize scores to [0,1] for fair MMR blending
 	maxScore := results[0].Score // results are pre-sorted by score descending
@@ -1279,7 +1249,7 @@ func (ra *RetrievalAgent) applyDiversityFilter(results []store.RetrievalResult) 
 				if len(sel.Memory.Embedding) == 0 {
 					continue
 				}
-				sim := cosineSimilarity(candidate.Memory.Embedding, sel.Memory.Embedding)
+				sim := agentutil.CosineSimilarity(candidate.Memory.Embedding, sel.Memory.Embedding)
 				if sim > maxSim {
 					maxSim = sim
 				}

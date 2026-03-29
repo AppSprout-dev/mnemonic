@@ -103,29 +103,6 @@ func DefaultConfig() ConsolidationConfig {
 	}
 }
 
-// cfgFloat64 returns val if non-zero, else fallback.
-func cfgFloat64(val, fallback float64) float64 {
-	if val != 0 {
-		return val
-	}
-	return fallback
-}
-
-// cfgFloat32 returns val if non-zero, else fallback.
-func cfgFloat32(val, fallback float32) float32 {
-	if val != 0 {
-		return val
-	}
-	return fallback
-}
-
-// cfgInt returns val if non-zero, else fallback.
-func cfgInt(val, fallback int) int {
-	if val != 0 {
-		return val
-	}
-	return fallback
-}
 
 // ConsolidationAgent performs periodic memory consolidation — the "sleeping brain."
 // Each cycle: decay salience → transition states → prune associations → merge clusters → delete expired.
@@ -435,14 +412,14 @@ func (ca *ConsolidationAgent) decaySalience(ctx context.Context) (decayed, proce
 		// Recency protection: recently accessed memories use reduced decay exponent
 		recencyFactor := 1.0
 		if hoursSinceAccess < 24 {
-			recencyFactor = cfgFloat64(ca.config.RecencyProtection24h, 0.8)
+			recencyFactor = agentutil.Float64Or(ca.config.RecencyProtection24h, 0.8)
 		} else if hoursSinceAccess < 168 { // 7 days
-			recencyFactor = cfgFloat64(ca.config.RecencyProtection168h, 0.9)
+			recencyFactor = agentutil.Float64Or(ca.config.RecencyProtection168h, 0.9)
 		}
 
 		// Access count bonus: frequently accessed memories resist decay
-		resistScale := cfgFloat64(ca.config.AccessResistanceScale, 0.02)
-		resistCap := cfgFloat64(ca.config.AccessResistanceCap, 0.3)
+		resistScale := agentutil.Float64Or(ca.config.AccessResistanceScale, 0.02)
+		resistCap := agentutil.Float64Or(ca.config.AccessResistanceCap, 0.3)
 		accessBonus := 1.0 - math.Min(float64(mem.AccessCount)*resistScale, resistCap)
 
 		// Apply decay: new_salience = old * decay_rate^(recency * access_factor)
@@ -607,7 +584,7 @@ func (ca *ConsolidationAgent) findClusters(memories []store.Memory) [][]store.Me
 		return nil
 	}
 
-	similarityThreshold := float32(cfgFloat64(ca.config.MergeSimilarityThreshold, 0.85))
+	similarityThreshold := float32(agentutil.Float64Or(ca.config.MergeSimilarityThreshold, 0.85))
 	used := make(map[string]bool)
 	var clusters [][]store.Memory
 
@@ -876,7 +853,7 @@ func (ca *ConsolidationAgent) extractPatterns(ctx context.Context) (int, error) 
 // processPatternClusters handles the common logic for evaluating a set of memory clusters
 // as potential patterns: strengthening existing matches or identifying new ones via LLM.
 func (ca *ConsolidationAgent) processPatternClusters(ctx context.Context, clusters [][]store.Memory, project string, budget int) int {
-	minSalience := cfgFloat32(ca.config.MinEvidenceSalience, 0.5)
+	minSalience := agentutil.Float32Or(ca.config.MinEvidenceSalience, 0.5)
 	extracted := 0
 	for _, cluster := range clusters {
 		if extracted >= budget {
@@ -907,18 +884,18 @@ func (ca *ConsolidationAgent) processPatternClusters(ctx context.Context, cluste
 			}
 			if newEvidence > 0 {
 				// Scale strength increment logarithmically to prevent saturation with large evidence counts
-				increment := cfgFloat32(ca.config.PatternStrengthIncrement, 0.03) * float32(math.Log2(1+float64(newEvidence)))
-				if len(cluster) >= cfgInt(ca.config.LargeClusterMinSize, 5) {
-					increment *= cfgFloat32(ca.config.LargeClusterBonus, 1.3)
+				increment := agentutil.Float32Or(ca.config.PatternStrengthIncrement, 0.03) * float32(math.Log2(1+float64(newEvidence)))
+				if len(cluster) >= agentutil.IntOr(ca.config.LargeClusterMinSize, 5) {
+					increment *= agentutil.Float32Or(ca.config.LargeClusterBonus, 1.3)
 				}
-				incrementCap := cfgFloat32(ca.config.PatternIncrementCap, 0.15)
+				incrementCap := agentutil.Float32Or(ca.config.PatternIncrementCap, 0.15)
 				if increment > incrementCap {
 					increment = incrementCap
 				}
 				// Cap at ceiling unless pattern has strong evidence
-				maxStrength := cfgFloat32(ca.config.PatternStrengthCeiling, 0.95)
-				if len(existing.EvidenceIDs) > cfgInt(ca.config.StrongEvidenceMinCount, 10) {
-					maxStrength = cfgFloat32(ca.config.StrongEvidenceCeiling, 1.0)
+				maxStrength := agentutil.Float32Or(ca.config.PatternStrengthCeiling, 0.95)
+				if len(existing.EvidenceIDs) > agentutil.IntOr(ca.config.StrongEvidenceMinCount, 10) {
+					maxStrength = agentutil.Float32Or(ca.config.StrongEvidenceCeiling, 1.0)
 				}
 				existing.Strength = min32(existing.Strength+increment, maxStrength)
 			}
@@ -1137,7 +1114,7 @@ func (ca *ConsolidationAgent) findMatchingPattern(ctx context.Context, cluster [
 	}
 
 	// Check if the top match is close enough
-	threshold := float32(cfgFloat64(ca.config.PatternMatchThreshold, 0.70))
+	threshold := float32(agentutil.Float64Or(ca.config.PatternMatchThreshold, 0.70))
 	if len(patterns[0].Embedding) > 0 {
 		sim := agentutil.CosineSimilarity(avgEmb, patterns[0].Embedding)
 		if sim >= threshold {
@@ -1569,26 +1546,26 @@ func (ca *ConsolidationAgent) decayPatterns(ctx context.Context) (int, error) {
 		}
 
 		// Apply baseline decay — self-sustaining requires healthy evidence
-		minEvidence := cfgInt(ca.config.SelfSustainingMinEvidence, 10)
-		minStrength := cfgFloat32(ca.config.SelfSustainingMinStrength, 0.9)
+		minEvidence := agentutil.IntOr(ca.config.SelfSustainingMinEvidence, 10)
+		minStrength := agentutil.Float32Or(ca.config.SelfSustainingMinStrength, 0.9)
 		if len(p.EvidenceIDs) >= minEvidence && p.Strength >= minStrength && evidenceRatio >= 0.5 {
-			p.Strength *= cfgFloat32(ca.config.SelfSustainingDecay, 0.9999)
+			p.Strength *= agentutil.Float32Or(ca.config.SelfSustainingDecay, 0.9999)
 		} else {
-			p.Strength *= cfgFloat32(ca.config.PatternBaselineDecay, 0.998)
+			p.Strength *= agentutil.Float32Or(ca.config.PatternBaselineDecay, 0.998)
 		}
 
 		// Evidence-based decay applies to all patterns (not just stale ones).
 		// Patterns with dead evidence should decay regardless of access recency.
 		if totalEvidence == 0 {
-			p.Strength *= cfgFloat32(ca.config.StaleDecayAggressive, 0.90)
+			p.Strength *= agentutil.Float32Or(ca.config.StaleDecayAggressive, 0.90)
 		} else {
 			switch {
 			case evidenceRatio >= 0.5:
 				// Healthy evidence — no additional decay beyond baseline
 			case evidenceRatio >= 0.2:
-				p.Strength *= cfgFloat32(ca.config.StaleDecayModerate, 0.95)
+				p.Strength *= agentutil.Float32Or(ca.config.StaleDecayModerate, 0.95)
 			default:
-				p.Strength *= cfgFloat32(ca.config.StaleDecayAggressive, 0.90)
+				p.Strength *= agentutil.Float32Or(ca.config.StaleDecayAggressive, 0.90)
 			}
 		}
 

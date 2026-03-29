@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/appsprout-dev/mnemonic/internal/mathutil"
 	store "github.com/appsprout-dev/mnemonic/internal/store"
 )
 
@@ -156,7 +157,7 @@ func (s *SQLiteStore) SearchAbstractionsByEmbedding(ctx context.Context, embeddi
 		if len(emb) == 0 {
 			continue
 		}
-		score := cosineSimilarity(embedding, emb)
+		score := mathutil.CosineSimilarity(embedding, emb)
 		candidates = append(candidates, candidate{id: id, score: score})
 	}
 

@@ -333,6 +333,10 @@ func (ea *EncodingAgent) Name() string {
 // Start begins the encoding agent's work.
 // It subscribes to RawMemoryCreated events and starts a polling fallback loop.
 func (ea *EncodingAgent) Start(ctx context.Context, bus events.Bus) error {
+	// Cancel the constructor's default context before replacing it
+	if ea.cancel != nil {
+		ea.cancel()
+	}
 	ea.ctx, ea.cancel = context.WithCancel(ctx)
 	ea.bus = bus
 
@@ -705,22 +709,30 @@ func (ea *EncodingAgent) compressRawMemory(ctx context.Context, raw store.RawMem
 	return compression, embeddingText, nil
 }
 
-// finalizeEncodedMemory handles steps 4-7 of encoding: association creation, store write, etc.
-func (ea *EncodingAgent) finalizeEncodedMemory(ctx context.Context, raw store.RawMemory, compression *compressionResponse, embedding []float32) error {
+// persistResult describes the outcome of persistEncodedMemory.
+type persistResult struct {
+	deduplicated bool   // near-duplicate found and boosted — no new memory created
+	raceDedup    bool   // another process encoded this raw concurrently
+	memoryID     string // set only when a new memory was created
+}
+
+// persistEncodedMemory handles the shared finalization path: dedup check,
+// memory write, resolution/concept/attribute writes, association creation,
+// and event publishing. Both finalizeEncodedMemory and encodeMemory delegate here.
+func (ea *EncodingAgent) persistEncodedMemory(ctx context.Context, raw store.RawMemory, compression *compressionResponse, embedding []float32) (*persistResult, error) {
+	// Search for similar memories and check for duplicates
 	var associations []store.Association
 	if len(embedding) > 0 {
 		similar, err := ea.store.SearchByEmbedding(ctx, embedding, ea.config.MaxSimilarSearchResults)
 		if err != nil {
 			ea.log.Warn("failed to search for similar memories", "raw_id", raw.ID, "error", err)
 		} else {
-			// Check for near-duplicate before creating a new memory
 			dc := ea.buildDedupContext(raw)
 			if dup := findDuplicate(similar, dc); dup != nil {
 				ea.log.Info("dedup: boosting existing memory instead of creating duplicate",
 					"raw_id", raw.ID,
 					"existing_id", dup.Memory.ID,
 					"similarity", dup.Score)
-				// Boost existing memory's salience (capped at 1.0)
 				newSalience := dup.Memory.Salience + 0.05
 				if newSalience > 1.0 {
 					newSalience = 1.0
@@ -731,8 +743,7 @@ func (ea *EncodingAgent) finalizeEncodedMemory(ctx context.Context, raw store.Ra
 				if err := ea.store.IncrementAccess(ctx, dup.Memory.ID); err != nil {
 					ea.log.Warn("dedup: failed to increment access", "memory_id", dup.Memory.ID, "error", err)
 				}
-				// Raw was already claimed — no MarkRawProcessed needed.
-				return nil
+				return &persistResult{deduplicated: true}, nil
 			}
 
 			for _, result := range similar {
@@ -776,9 +787,9 @@ func (ea *EncodingAgent) finalizeEncodedMemory(ctx context.Context, raw store.Ra
 	if err := ea.store.WriteMemory(ctx, memory); err != nil {
 		if errors.Is(err, store.ErrDuplicateRawID) {
 			ea.log.Info("dedup: another process already encoded this raw memory", "raw_id", raw.ID)
-			return nil
+			return &persistResult{raceDedup: true}, nil
 		}
-		return fmt.Errorf("failed to write encoded memory: %w", err)
+		return nil, fmt.Errorf("failed to write encoded memory: %w", err)
 	}
 
 	ea.log.Debug("memory written to store", "memory_id", memoryID, "raw_id", raw.ID)
@@ -885,29 +896,37 @@ func (ea *EncodingAgent) finalizeEncodedMemory(ctx context.Context, raw store.Ra
 		}
 	}
 
-	// Raw was already claimed (processed=1) by pollAndProcessRawMemories before
-	// compression started. No additional MarkRawProcessed needed.
-
 	// Publish events
 	if ea.bus != nil {
-		_ = ea.bus.Publish(ctx, events.MemoryEncoded{
+		if err := ea.bus.Publish(ctx, events.MemoryEncoded{
 			MemoryID:            memoryID,
 			RawID:               raw.ID,
 			Concepts:            memory.Concepts,
 			AssociationsCreated: associationsCreated,
 			Ts:                  time.Now(),
-		})
+		}); err != nil {
+			ea.log.Warn("failed to publish MemoryEncoded event", "memory_id", memoryID, "error", err)
+		}
 		if len(classificationCandidates) > 0 {
-			_ = ea.bus.Publish(ctx, events.AssociationsPendingClassification{
+			if err := ea.bus.Publish(ctx, events.AssociationsPendingClassification{
 				Candidates: classificationCandidates,
 				Ts:         time.Now(),
-			})
+			}); err != nil {
+				ea.log.Warn("failed to publish classification event", "memory_id", memoryID, "error", err)
+			}
 		}
 	}
 
 	ea.log.Info("memory encoding completed", "memory_id", memoryID, "raw_id", raw.ID,
 		"concepts", len(memory.Concepts), "associations_created", associationsCreated)
-	return nil
+	return &persistResult{memoryID: memoryID}, nil
+}
+
+// finalizeEncodedMemory handles steps 4-7 of encoding for the batch processing path.
+// Delegates to persistEncodedMemory for the actual work.
+func (ea *EncodingAgent) finalizeEncodedMemory(ctx context.Context, raw store.RawMemory, compression *compressionResponse, embedding []float32) error {
+	_, err := ea.persistEncodedMemory(ctx, raw, compression, embedding)
+	return err
 }
 
 // handleEncodingFailure tracks failures and applies backoff when needed.
@@ -1031,229 +1050,18 @@ func (ea *EncodingAgent) encodeMemory(ctx context.Context, rawID string) error {
 		ea.log.Debug("embedding generated successfully", "raw_id", raw.ID, "dims", len(embedding))
 	}
 
-	// Step 4: Search for similar memories and check for duplicates
-	var associations []store.Association
-	associationsCreated := 0
-	if len(embedding) > 0 {
-		similar, err := ea.store.SearchByEmbedding(ctx, embedding, ea.config.MaxSimilarSearchResults)
-		if err != nil {
-			ea.log.Warn("failed to search for similar memories", "raw_id", raw.ID, "error", err)
-		} else {
-			ea.log.Debug("similarity search completed", "raw_id", raw.ID, "results", len(similar))
-
-			// Dedup check: if a near-duplicate already exists, boost it instead of creating a new memory
-			dc := ea.buildDedupContext(raw)
-			if dup := findDuplicate(similar, dc); dup != nil {
-				ea.log.Info("dedup: boosting existing memory instead of creating duplicate",
-					"raw_id", raw.ID, "existing_id", dup.Memory.ID, "similarity", dup.Score)
-				newSalience := dup.Memory.Salience + 0.05
-				if newSalience > 1.0 {
-					newSalience = 1.0
-				}
-				if err := ea.store.UpdateSalience(ctx, dup.Memory.ID, newSalience); err != nil {
-					ea.log.Warn("dedup: failed to boost salience", "memory_id", dup.Memory.ID, "error", err)
-				}
-				if err := ea.store.IncrementAccess(ctx, dup.Memory.ID); err != nil {
-					ea.log.Warn("dedup: failed to increment access", "memory_id", dup.Memory.ID, "error", err)
-				}
-				// Raw was already claimed in Step 0 — no MarkRawProcessed needed.
-				claimed = false // dedup success — don't unclaim
-				return nil
-			}
-
-			// Step 5: Create associations for similar memories above threshold
-			for _, result := range similar {
-				if result.Score > ea.config.SimilarityThreshold {
-					// Classify the relationship type
-					relationType := ea.classifyRelationship(ctx, compression, result.Memory, raw)
-
-					assoc := store.Association{
-						SourceID:      raw.ID, // Will be replaced with memory ID after storage
-						TargetID:      result.Memory.ID,
-						Strength:      result.Score,
-						RelationType:  relationType,
-						CreatedAt:     time.Now(),
-						LastActivated: time.Now(),
-					}
-					associations = append(associations, assoc)
-				}
-			}
-		}
+	// Steps 4-8: Persist the encoded memory (dedup, write, associations, events)
+	result, err := ea.persistEncodedMemory(ctx, raw, compression, embedding)
+	if err != nil {
+		return err
 	}
-
-	// Generate memory ID
-	memoryID := uuid.New().String()
-
-	// Step 6: Write the encoded Memory to the store
-	memory := store.Memory{
-		ID:           memoryID,
-		RawID:        raw.ID,
-		Timestamp:    raw.Timestamp,
-		Type:         raw.Type,
-		Content:      compression.Content,
-		Summary:      compression.Summary,
-		Concepts:     compression.Concepts,
-		Embedding:    embedding,
-		Salience:     compression.Salience,
-		AccessCount:  0,
-		LastAccessed: time.Time{},
-		State:        "active",
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
-		EpisodeID:    getEpisodeIDForRaw(ea, ctx, raw),
-		Source:       raw.Source,
-		Project:      raw.Project,
-		SessionID:    raw.SessionID,
+	// Dedup or race dedup — encoding is handled, don't unclaim
+	if result.deduplicated || result.raceDedup {
+		claimed = false
+		return nil
 	}
-
-	if err := ea.store.WriteMemory(ctx, memory); err != nil {
-		// UNIQUE constraint on raw_id: another process encoded this raw memory
-		// between our claim and our write. Treat as successful dedup.
-		if errors.Is(err, store.ErrDuplicateRawID) {
-			ea.log.Info("dedup: another process already encoded this raw memory", "raw_id", raw.ID)
-			claimed = false // don't unclaim — encoding succeeded elsewhere
-			return nil
-		}
-		return fmt.Errorf("failed to write encoded memory: %w", err)
-	}
-
-	// Encoding succeeded — don't unclaim on defer.
+	// Encoding succeeded — don't unclaim on defer
 	claimed = false
-
-	ea.log.Debug("memory written to store", "memory_id", memoryID, "raw_id", raw.ID)
-
-	// Store multi-resolution data
-	resolution := store.MemoryResolution{
-		MemoryID:     memoryID,
-		Gist:         compression.Gist,
-		Narrative:    compression.Narrative,
-		DetailRawIDs: []string{raw.ID},
-		CreatedAt:    time.Now(),
-	}
-	if err := ea.store.WriteMemoryResolution(ctx, resolution); err != nil {
-		ea.log.Warn("failed to write memory resolution", "error", err)
-	}
-
-	// Store structured concepts
-	if compression.StructuredConcepts != nil {
-		cs := store.ConceptSet{
-			MemoryID:     memoryID,
-			Significance: compression.Significance,
-			CreatedAt:    time.Now(),
-		}
-		for _, t := range compression.StructuredConcepts.Topics {
-			cs.Topics = append(cs.Topics, store.Topic{Label: t.Label, Path: t.Path})
-		}
-		for _, e := range compression.StructuredConcepts.Entities {
-			cs.Entities = append(cs.Entities, store.Entity{Name: e.Name, Type: e.Type, Context: e.Context})
-		}
-		for _, a := range compression.StructuredConcepts.Actions {
-			cs.Actions = append(cs.Actions, store.Action{Verb: a.Verb, Object: a.Object, Details: a.Details})
-		}
-		for _, c := range compression.StructuredConcepts.Causality {
-			cs.Causality = append(cs.Causality, store.CausalLink{Relation: c.Relation, Description: c.Description})
-		}
-		if err := ea.store.WriteConceptSet(ctx, cs); err != nil {
-			ea.log.Warn("failed to write concept set", "error", err)
-		}
-	}
-
-	// Store memory attributes
-	attrs := store.MemoryAttributes{
-		MemoryID:      memoryID,
-		Significance:  compression.Significance,
-		EmotionalTone: compression.EmotionalTone,
-		Outcome:       compression.Outcome,
-		CreatedAt:     time.Now(),
-	}
-	if err := ea.store.WriteMemoryAttributes(ctx, attrs); err != nil {
-		ea.log.Warn("failed to write memory attributes", "error", err)
-	}
-
-	// Now update associations with the actual memory ID and collect candidates for LLM reclassification
-	var classificationCandidates []events.AssocCandidate
-	for i := range associations {
-		associations[i].SourceID = memoryID
-		if err := ea.store.CreateAssociation(ctx, associations[i]); err != nil {
-			ea.log.Warn("failed to create association", "source_id", associations[i].SourceID,
-				"target_id", associations[i].TargetID, "error", err)
-		} else {
-			associationsCreated++
-			// Collect "similar" (catch-all) associations for potential LLM reclassification
-			if ea.config.EnableLLMClassification && associations[i].RelationType == "similar" {
-				targetMem, err := ea.store.GetMemory(ctx, associations[i].TargetID)
-				if err == nil {
-					classificationCandidates = append(classificationCandidates, events.AssocCandidate{
-						SourceID: memoryID,
-						TargetID: associations[i].TargetID,
-						Summary1: compression.Summary,
-						Summary2: targetMem.Summary,
-					})
-				}
-			}
-		}
-	}
-
-	// Create explicit associations from metadata (set via MCP remember associate_with param).
-	if rawAssoc, ok := raw.Metadata["explicit_associations"]; ok {
-		if assocList, ok := rawAssoc.([]interface{}); ok {
-			for _, entry := range assocList {
-				if m, ok := entry.(map[string]interface{}); ok {
-					targetID, _ := m["memory_id"].(string)
-					relation, _ := m["relation"].(string)
-					if targetID == "" || relation == "" {
-						continue
-					}
-					assoc := store.Association{
-						SourceID:        memoryID,
-						TargetID:        targetID,
-						Strength:        0.9,
-						RelationType:    relation,
-						CreatedAt:       time.Now(),
-						LastActivated:   time.Now(),
-						ActivationCount: 1,
-					}
-					if err := ea.store.CreateAssociation(ctx, assoc); err != nil {
-						ea.log.Warn("failed to create explicit association",
-							"source_id", memoryID, "target_id", targetID, "error", err)
-					} else {
-						associationsCreated++
-					}
-				}
-			}
-		}
-	}
-
-	// Step 7: Raw was already claimed (processed=1) in Step 0. No additional mark needed.
-
-	// Step 8: Publish MemoryEncoded event
-	encodedEvent := events.MemoryEncoded{
-		MemoryID:            memoryID,
-		RawID:               raw.ID,
-		Concepts:            memory.Concepts,
-		AssociationsCreated: associationsCreated,
-		Ts:                  time.Now(),
-	}
-
-	if ea.bus != nil {
-		if err := ea.bus.Publish(ctx, encodedEvent); err != nil {
-			ea.log.Warn("failed to publish MemoryEncoded event", "memory_id", memoryID, "error", err)
-		}
-	}
-
-	// Publish classification candidates for background LLM reclassification
-	if ea.bus != nil && len(classificationCandidates) > 0 {
-		classEvent := events.AssociationsPendingClassification{
-			Candidates: classificationCandidates,
-			Ts:         time.Now(),
-		}
-		if err := ea.bus.Publish(ctx, classEvent); err != nil {
-			ea.log.Warn("failed to publish classification event", "memory_id", memoryID, "error", err)
-		}
-	}
-
-	ea.log.Info("memory encoding completed", "memory_id", memoryID, "raw_id", raw.ID,
-		"concepts", len(memory.Concepts), "associations_created", associationsCreated)
 
 	return nil
 }
