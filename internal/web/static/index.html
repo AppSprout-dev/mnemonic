@@ -1580,7 +1580,14 @@
         <div class="toast-container" id="toastContainer"></div>
     </div>
 
-    <script src="/js/app.js"></script>
+    <script>
+    // Apply theme before first paint to prevent FOUC
+    (function() {
+        var saved = localStorage.getItem('mnemonic-theme');
+        document.documentElement.setAttribute('data-theme', saved || 'midnight');
+    })();
+    </script>
+    <script type="module" src="/js/app.js"></script>
 
     <div class="foot" id="forumFooter">
         <span id="footVersion">mnemonic</span>
