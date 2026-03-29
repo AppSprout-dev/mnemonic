@@ -4,6 +4,15 @@ All notable changes to Mnemonic will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.34.1](https://github.com/AppSprout-dev/mnemonic/compare/v0.34.0...v0.34.1) (2026-03-29)
+
+
+### Bug Fixes
+
+* add cancellation to HeuristicFilter cleanup goroutine ([c8848cd](https://github.com/AppSprout-dev/mnemonic/commit/c8848cdf425b25148a375bffb0f9740068d404da))
+* cancel constructor context in encoding agent Start() ([6a77042](https://github.com/AppSprout-dev/mnemonic/commit/6a77042aba014e9c20530e7fc965e4fdcb0ae5bc))
+* remediate all 9 yield audit findings (issue [#355](https://github.com/AppSprout-dev/mnemonic/issues/355)) ([0af0268](https://github.com/AppSprout-dev/mnemonic/commit/0af0268726051fd9af7eb05fb342fbcaf943e347))
+
 ## [0.34.0](https://github.com/AppSprout-dev/mnemonic/compare/v0.33.0...v0.34.0) (2026-03-29)
 
 
