@@ -1237,38 +1237,26 @@ func (s *SQLiteStore) SearchByEmbedding(ctx context.Context, embedding []float32
 	return results, nil
 }
 
-// SearchByConcepts searches for memories by concepts.
+// SearchByConcepts searches for memories by concepts using FTS5.
 func (s *SQLiteStore) SearchByConcepts(ctx context.Context, concepts []string, limit int) ([]store.Memory, error) {
 	if len(concepts) == 0 {
 		return []store.Memory{}, nil
 	}
 
-	// Build LIKE conditions for concept matching
+	ftsQuery := buildConceptFTSQuery(concepts)
+	if ftsQuery == "" {
+		return []store.Memory{}, nil
+	}
+
 	query := `
 	SELECT ` + memoryColumns + `
-	FROM memories
-	WHERE `
+	FROM memories m
+	JOIN memories_fts ON m.rowid = memories_fts.rowid
+	WHERE memories_fts MATCH ?
+	ORDER BY m.salience DESC
+	LIMIT ?`
 
-	args := make([]interface{}, 0)
-	conditions := make([]string, 0)
-
-	for _, concept := range concepts {
-		conditions = append(conditions, "concepts LIKE ?")
-		args = append(args, "%"+concept+"%")
-	}
-
-	// Join conditions with OR
-	for i, cond := range conditions {
-		query += cond
-		if i < len(conditions)-1 {
-			query += " OR "
-		}
-	}
-
-	query += ` ORDER BY salience DESC LIMIT ?`
-	args = append(args, limit)
-
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.db.QueryContext(ctx, query, ftsQuery, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search by concepts: %w", err)
 	}
@@ -1282,28 +1270,24 @@ func (s *SQLiteStore) SearchByConceptsInProject(ctx context.Context, concepts []
 		return []store.Memory{}, nil
 	}
 
-	query := `
-	SELECT ` + memoryColumns + `
-	FROM memories
-	WHERE (`
-
-	args := make([]interface{}, 0)
-	for i, concept := range concepts {
-		if i > 0 {
-			query += " OR "
-		}
-		query += "concepts LIKE ?"
-		args = append(args, "%"+concept+"%")
+	ftsQuery := buildConceptFTSQuery(concepts)
+	if ftsQuery == "" {
+		return []store.Memory{}, nil
 	}
 
-	query += ")"
+	args := []interface{}{ftsQuery}
+	query := `
+	SELECT ` + memoryColumns + `
+	FROM memories m
+	JOIN memories_fts ON m.rowid = memories_fts.rowid
+	WHERE memories_fts MATCH ?`
 
 	if project != "" {
-		query += " AND project = ?"
+		query += " AND m.project = ?"
 		args = append(args, project)
 	}
 
-	query += ` ORDER BY salience DESC LIMIT ?`
+	query += ` ORDER BY m.salience DESC LIMIT ?`
 	args = append(args, limit)
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -1312,6 +1296,30 @@ func (s *SQLiteStore) SearchByConceptsInProject(ctx context.Context, concepts []
 	}
 
 	return scanMemoryRows(rows)
+}
+
+// buildConceptFTSQuery builds an FTS5 MATCH expression scoped to the concepts column.
+// Each concept is sanitized and joined with OR. Uses prefix matching for substring-like behavior.
+func buildConceptFTSQuery(concepts []string) string {
+	terms := make([]string, 0, len(concepts))
+	for _, c := range concepts {
+		cleaned := strings.Map(func(r rune) rune {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+				return r
+			}
+			return -1
+		}, c)
+		cleaned = strings.ToLower(cleaned)
+		if cleaned == "" || len(cleaned) < 2 {
+			continue
+		}
+		// Scope to the concepts column with prefix matching
+		terms = append(terms, "concepts:"+cleaned+"*")
+	}
+	if len(terms) == 0 {
+		return ""
+	}
+	return strings.Join(terms, " OR ")
 }
 
 // Association Operations
