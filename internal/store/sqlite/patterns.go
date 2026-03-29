@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/appsprout-dev/mnemonic/internal/mathutil"
 	store "github.com/appsprout-dev/mnemonic/internal/store"
 )
 
@@ -154,7 +155,7 @@ func (s *SQLiteStore) SearchPatternsByEmbedding(ctx context.Context, embedding [
 		if len(emb) == 0 {
 			continue
 		}
-		score := cosineSimilarity(embedding, emb)
+		score := mathutil.CosineSimilarity(embedding, emb)
 		candidates = append(candidates, candidate{id: id, score: score})
 	}
 
@@ -292,7 +293,7 @@ func (s *SQLiteStore) SearchPatternsByEmbeddingInProject(ctx context.Context, em
 		if len(emb) == 0 {
 			continue
 		}
-		score := cosineSimilarity(embedding, emb)
+		score := mathutil.CosineSimilarity(embedding, emb)
 		candidates = append(candidates, candidate{id: id, score: score})
 	}
 
@@ -340,4 +341,3 @@ func (s *SQLiteStore) ArchiveAllPatterns(ctx context.Context) (int, error) {
 	return int(n), nil
 }
 
-// cosineSimilarity and sqrt32 are defined in embindex.go

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/appsprout-dev/mnemonic/internal/agent/agentutil"
 	"github.com/appsprout-dev/mnemonic/internal/concepts"
 	"github.com/appsprout-dev/mnemonic/internal/events"
 	"github.com/appsprout-dev/mnemonic/internal/llm"
@@ -1213,23 +1214,6 @@ func hasAnyConcept(memoryConcepts, excluded []string) bool {
 	return false
 }
 
-// cosineSimilarity computes the cosine similarity between two embedding vectors.
-// Returns 0.0 if either vector is empty or has zero magnitude.
-func cosineSimilarity(a, b []float32) float32 {
-	if len(a) != len(b) || len(a) == 0 {
-		return 0.0
-	}
-	var dot, normA, normB float64
-	for i := range a {
-		dot += float64(a[i]) * float64(b[i])
-		normA += float64(a[i]) * float64(a[i])
-		normB += float64(b[i]) * float64(b[i])
-	}
-	if normA == 0 || normB == 0 {
-		return 0.0
-	}
-	return float32(dot / (math.Sqrt(normA) * math.Sqrt(normB)))
-}
 
 // applyDiversityFilter reranks results using Maximal Marginal Relevance (MMR).
 // It iteratively selects results that balance relevance (original score) against
@@ -1279,7 +1263,7 @@ func (ra *RetrievalAgent) applyDiversityFilter(results []store.RetrievalResult) 
 				if len(sel.Memory.Embedding) == 0 {
 					continue
 				}
-				sim := cosineSimilarity(candidate.Memory.Embedding, sel.Memory.Embedding)
+				sim := agentutil.CosineSimilarity(candidate.Memory.Embedding, sel.Memory.Embedding)
 				if sim > maxSim {
 					maxSim = sim
 				}

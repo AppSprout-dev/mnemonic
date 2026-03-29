@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/appsprout-dev/mnemonic/internal/agent/agentutil"
 	"github.com/appsprout-dev/mnemonic/internal/config"
 	"github.com/appsprout-dev/mnemonic/internal/daemon"
 	"github.com/appsprout-dev/mnemonic/internal/events"
@@ -3101,7 +3102,7 @@ func dedupCommand(configPath string, dryRun bool) {
 	comparisons := 0
 	for i := 0; i < len(withEmbeddings); i++ {
 		for j := i + 1; j < len(withEmbeddings); j++ {
-			sim := cosineSim(withEmbeddings[i].Embedding, withEmbeddings[j].Embedding)
+			sim := agentutil.CosineSimilarity(withEmbeddings[i].Embedding, withEmbeddings[j].Embedding)
 			comparisons++
 			if sim >= threshold {
 				union(withEmbeddings[i].ID, withEmbeddings[j].ID)
@@ -3301,7 +3302,7 @@ func resetPatternsCommand(configPath string, dryRun bool) {
 	for ai := 0; ai < len(active); ai++ {
 		for bi := ai + 1; bi < len(active); bi++ {
 			i, j := active[ai], active[bi]
-			sim := cosineSim(patterns[i].Embedding, patterns[j].Embedding)
+			sim := agentutil.CosineSimilarity(patterns[i].Embedding, patterns[j].Embedding)
 			if sim >= mergeThreshold {
 				ri, rj := findRoot(i), findRoot(j)
 				if ri != rj {
@@ -3384,22 +3385,6 @@ func resetPatternsCommand(configPath string, dryRun bool) {
 	}
 }
 
-// cosineSim computes cosine similarity between two float32 vectors.
-func cosineSim(a, b []float32) float32 {
-	if len(a) != len(b) || len(a) == 0 {
-		return 0
-	}
-	var dot, na, nb float64
-	for i := range a {
-		dot += float64(a[i]) * float64(b[i])
-		na += float64(a[i]) * float64(a[i])
-		nb += float64(b[i]) * float64(b[i])
-	}
-	if na == 0 || nb == 0 {
-		return 0
-	}
-	return float32(dot / (math.Sqrt(na) * math.Sqrt(nb)))
-}
 
 // truncate shortens a string to maxLen with ellipsis.
 func truncate(s string, maxLen int) string {
