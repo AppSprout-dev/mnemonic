@@ -1,5 +1,6 @@
 import { state, CONFIG } from './state.js';
-import { apiFetch, fetchJSON, escapeHtml, showToast, relativeTime } from './utils.js';
+import { apiFetch, fetchJSON, escapeHtml, showToast } from './utils.js';
+import { relativeTime } from './forum.js';
 
 // ── Activity Drawer ──
 var _conceptsInterval = null;

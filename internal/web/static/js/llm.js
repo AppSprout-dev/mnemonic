@@ -1,5 +1,5 @@
 import { state, CONFIG } from './state.js';
-import { fetchJSON, escapeHtml, svgEl, linScale, svgText, fmtNum, formatBytes } from './utils.js';
+import { fetchJSON, escapeHtml, svgEl, linScale, svgText, fmtNum } from './utils.js';
 
 // ── LLM Usage ──
 var _llmRange = '24h';

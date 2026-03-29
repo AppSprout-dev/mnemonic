@@ -1,5 +1,5 @@
 import { state } from './state.js';
-import { fetchJSON, escapeHtml, showToast, relativeTime } from './utils.js';
+import { fetchJSON, escapeHtml, showToast } from './utils.js';
 
 // ── Forum Communication Layer ──
 

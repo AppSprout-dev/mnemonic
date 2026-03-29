@@ -1,5 +1,6 @@
 import { state, CONFIG } from './state.js';
-import { apiFetch, fetchJSON, escapeHtml, showToast, relativeTime, memoryType, agentProfile, safeSalience, memoryTypeAbbr, memoryTypeIcon } from './utils.js';
+import { apiFetch, fetchJSON, escapeHtml, showToast, memoryType, agentProfile, safeSalience, memoryTypeAbbr, memoryTypeIcon } from './utils.js';
+import { relativeTime } from './forum.js';
 
 // ── Thread View (episode detail as forum posts) ──
 export async function loadThread(episodeId) {

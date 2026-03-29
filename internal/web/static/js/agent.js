@@ -1,5 +1,5 @@
 import { state, CONFIG, MONTHS } from './state.js';
-import { apiFetch, fetchJSON, escapeHtml, showToast, makeDayBuckets, simpleMarkdown, svgEl, linScale, svgText, renderMarkdown } from './utils.js';
+import { apiFetch, fetchJSON, escapeHtml, showToast, makeDayBuckets, simpleMarkdown, svgEl, linScale, svgText } from './utils.js';
 
 // ── Agent ──
 export async function loadAgentData() {
