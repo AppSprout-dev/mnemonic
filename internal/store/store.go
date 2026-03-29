@@ -537,6 +537,7 @@ type Store interface {
 	ListAbstractions(ctx context.Context, level int, limit int) ([]Abstraction, error)
 	ListAbstractionsByState(ctx context.Context, state string, limit int) ([]Abstraction, error)
 	SearchAbstractionsByEmbedding(ctx context.Context, embedding []float32, limit int) ([]Abstraction, error)
+	ArchiveAbstraction(ctx context.Context, id string) error
 	ArchiveAllAbstractions(ctx context.Context) (int, error)
 
 	// --- Scoped queries ---
