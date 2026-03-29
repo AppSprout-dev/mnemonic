@@ -109,6 +109,8 @@ type HeuristicFilter struct {
 	// Recall-aware salience: files recently recalled via MCP get a boost
 	recalledFiles map[string]time.Time // path -> last recall time
 	recallMu      sync.RWMutex
+
+	done chan struct{} // signals cleanupLoop to exit
 }
 
 // recentEdit tracks a file edit for batch detection.
@@ -125,6 +127,7 @@ func NewHeuristicFilter(cfg HeuristicConfig, log *slog.Logger) *HeuristicFilter 
 		log:           log,
 		frequency:     make(map[string][]frequencyEntry),
 		recalledFiles: make(map[string]time.Time),
+		done:          make(chan struct{}),
 	}
 
 	// Start a cleanup goroutine to periodically remove old entries
@@ -133,13 +136,23 @@ func NewHeuristicFilter(cfg HeuristicConfig, log *slog.Logger) *HeuristicFilter 
 	return hf
 }
 
+// Close stops the cleanup goroutine. Call this when the filter is no longer needed.
+func (h *HeuristicFilter) Close() {
+	close(h.done)
+}
+
 // cleanupLoop periodically removes frequency entries older than the window.
 func (h *HeuristicFilter) cleanupLoop() {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		h.cleanup()
+	for {
+		select {
+		case <-ticker.C:
+			h.cleanup()
+		case <-h.done:
+			return
+		}
 	}
 }
 

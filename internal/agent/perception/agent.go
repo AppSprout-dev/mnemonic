@@ -202,6 +202,11 @@ func (pa *PerceptionAgent) Stop() error {
 	// Wait for all processing goroutines to finish
 	pa.processingWg.Wait()
 
+	// Stop the heuristic filter's cleanup goroutine
+	if pa.heuristicFilter != nil {
+		pa.heuristicFilter.Close()
+	}
+
 	pa.log.Info("perception agent stopped")
 	return nil
 }
