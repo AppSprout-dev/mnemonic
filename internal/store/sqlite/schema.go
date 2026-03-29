@@ -6,6 +6,12 @@ import (
 	"strings"
 )
 
+// SchemaVersion is the current target schema version. Bump this whenever a new
+// migration is added. It is written to PRAGMA user_version after InitSchema
+// completes, and read by the pre-migration backup logic to skip backups when
+// the schema is already current.
+const SchemaVersion = 15
+
 const schema = `
 -- Raw observations before encoding
 CREATE TABLE IF NOT EXISTS raw_memories (
@@ -560,6 +566,11 @@ INSERT OR IGNORE INTO forum_categories (id, name, slug, description, icon, color
 
 	// Episode-memory backfill is handled by the episoding agent on episode close.
 	// No startup SQL backfill — the JSON LIKE scan is too slow on large DBs.
+
+	// Record the schema version so pre-migration backups can skip when current.
+	if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", SchemaVersion)); err != nil {
+		return fmt.Errorf("failed to set user_version: %w", err)
+	}
 
 	return nil
 }

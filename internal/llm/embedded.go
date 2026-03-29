@@ -49,9 +49,11 @@ type BackendCompletionRequest struct {
 
 // BackendCompletionResponse is the output of a backend completion call.
 type BackendCompletionResponse struct {
-	Text             string // generated text
-	PromptTokens     int    // tokens in the prompt
-	CompletionTokens int    // tokens generated
+	Text             string  // generated text
+	PromptTokens     int     // tokens in the prompt
+	CompletionTokens int     // tokens generated
+	MeanProb         float32 // mean probability of chosen tokens (0-1)
+	MinProb          float32 // minimum probability of any chosen token (0-1)
 }
 
 // EmbeddedProvider implements the Provider interface using in-process inference
@@ -165,18 +167,18 @@ func (p *EmbeddedProvider) release() {
 	<-p.sem
 }
 
-// formatPrompt converts a slice of Messages into a single prompt string
-// using the ChatML format that most GGUF models support.
+// formatPrompt converts a slice of Messages into a single prompt string.
+// Uses the Felix-LM fine-tuning format: <|system|>\n...\n<|user|>\n...\n<|assistant|>\n
 func formatPrompt(messages []Message) string {
 	var b strings.Builder
 	for _, msg := range messages {
-		b.WriteString("<|im_start|>")
+		b.WriteString("<|")
 		b.WriteString(msg.Role)
-		b.WriteByte('\n')
+		b.WriteString("|>\n")
 		b.WriteString(msg.Content)
-		b.WriteString("<|im_end|>\n")
+		b.WriteByte('\n')
 	}
-	b.WriteString("<|im_start|>assistant\n")
+	b.WriteString("<|assistant|>\n")
 	return b.String()
 }
 
@@ -214,13 +216,25 @@ func (p *EmbeddedProvider) Complete(ctx context.Context, req CompletionRequest) 
 		grammar = GBNFJSONObject
 	}
 	if req.ResponseFormat != nil && req.ResponseFormat.Type == "json_schema" && req.ResponseFormat.JSONSchema != nil {
-		// For json_schema, we'd generate a GBNF grammar from the JSON schema.
-		// For now, fall back to generic JSON constraint.
-		grammar = GBNFJSONObject
+		if req.ResponseFormat.JSONSchema.Name == "encoding_response" {
+			grammar = GBNFEncodingResponse
+		} else {
+			grammar = GBNFJSONObject
+		}
+	}
+
+	// Warn if prompt likely exceeds context window (bridge will hard-truncate)
+	prompt := formatPrompt(req.Messages)
+	if estimatedTokens := len(prompt) / 4; estimatedTokens > p.opts.ContextSize-maxTokens {
+		slog.Warn("prompt likely exceeds context window, bridge will truncate",
+			"estimated_tokens", estimatedTokens,
+			"context_size", p.opts.ContextSize,
+			"max_tokens", maxTokens,
+			"prompt_chars", len(prompt))
 	}
 
 	backendReq := BackendCompletionRequest{
-		Prompt:      formatPrompt(req.Messages),
+		Prompt:      prompt,
 		MaxTokens:   maxTokens,
 		Temperature: temp,
 		TopP:        req.TopP,
@@ -239,6 +253,8 @@ func (p *EmbeddedProvider) Complete(ctx context.Context, req CompletionRequest) 
 		TokensUsed:       backendResp.PromptTokens + backendResp.CompletionTokens,
 		PromptTokens:     backendResp.PromptTokens,
 		CompletionTokens: backendResp.CompletionTokens,
+		MeanProb:         backendResp.MeanProb,
+		MinProb:          backendResp.MinProb,
 	}, nil
 }
 
@@ -267,7 +283,8 @@ func (p *EmbeddedProvider) BatchEmbed(ctx context.Context, texts []string) ([][]
 
 	p.mu.RLock()
 	backend := p.embedBackend
-	// Fall back to chat backend for embeddings if no dedicated embedding model
+	// Fall back to chat backend for embeddings if no dedicated embedding model.
+	// The llama.cpp bridge creates a separate embedding context with mean pooling.
 	if backend == nil {
 		backend = p.chatBackend
 	}

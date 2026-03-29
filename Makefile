@@ -44,6 +44,60 @@ build:
 	@mkdir -p $(BUILD_DIR)
 	go build $(TAGS) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY) ./cmd/mnemonic
 
+# --- Embedded LLM (llama.cpp + Felix architecture) ---
+LLAMACPP_DIR=third_party/llama.cpp
+LLAMACPP_BUILD=$(LLAMACPP_DIR)/build
+BRIDGE_DIR=internal/llm/llamacpp/csrc
+
+build-llamacpp:
+	@if [ ! -f $(LLAMACPP_BUILD)/src/libllama.a ]; then \
+		cmake -B $(LLAMACPP_BUILD) -S $(LLAMACPP_DIR) \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DBUILD_SHARED_LIBS=OFF \
+			-DGGML_NATIVE=ON; \
+		cmake --build $(LLAMACPP_BUILD) --target llama -j$$(nproc); \
+	fi
+
+build-llamacpp-rocm:
+	@if [ ! -f $(LLAMACPP_BUILD)/src/libllama.a ]; then \
+		cmake -B $(LLAMACPP_BUILD) -S $(LLAMACPP_DIR) \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DBUILD_SHARED_LIBS=OFF \
+			-DGGML_NATIVE=ON \
+			-DGGML_HIP=ON; \
+		cmake --build $(LLAMACPP_BUILD) --target llama -j$$(nproc); \
+	fi
+
+build-bridge:
+	@if [ ! -f $(BRIDGE_DIR)/bridge.o ] || [ $(BRIDGE_DIR)/bridge.cpp -nt $(BRIDGE_DIR)/bridge.o ]; then \
+		g++ -std=c++17 -O2 -c $(BRIDGE_DIR)/bridge.cpp -o $(BRIDGE_DIR)/bridge.o \
+			-I$(BRIDGE_DIR) \
+			-I$(LLAMACPP_DIR)/include \
+			-I$(LLAMACPP_DIR)/ggml/include; \
+	fi
+
+ifdef ROCM
+build-embedded: build-llamacpp-rocm build-bridge
+	@mkdir -p $(BUILD_DIR)
+	CGO_ENABLED=1 go build -tags "llamacpp rocm" $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY) ./cmd/mnemonic
+else
+build-embedded: build-llamacpp build-bridge
+	@mkdir -p $(BUILD_DIR)
+	CGO_ENABLED=1 go build -tags llamacpp $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY) ./cmd/mnemonic
+endif
+
+build-quantize: build-llamacpp
+	cmake --build $(LLAMACPP_BUILD) --target llama-quantize -j$$(nproc)
+
+quantize: build-quantize
+	@for f in models/*-v1.gguf; do \
+		q8="$${f%.gguf}-q8_0.gguf"; \
+		if [ ! -f "$$q8" ]; then \
+			echo "Quantizing $$f -> $$q8"; \
+			$(LLAMACPP_BUILD)/bin/llama-quantize "$$f" "$$q8" q8_0; \
+		fi; \
+	done
+
 run: build
 	./$(BUILD_DIR)/$(BINARY) --config config.yaml serve
 

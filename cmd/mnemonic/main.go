@@ -24,6 +24,7 @@ import (
 	"github.com/appsprout-dev/mnemonic/internal/daemon"
 	"github.com/appsprout-dev/mnemonic/internal/events"
 	"github.com/appsprout-dev/mnemonic/internal/llm"
+	"github.com/appsprout-dev/mnemonic/internal/llm/llamacpp"
 	"github.com/appsprout-dev/mnemonic/internal/logger"
 	"github.com/appsprout-dev/mnemonic/internal/store/sqlite"
 	"github.com/appsprout-dev/mnemonic/internal/watcher"
@@ -1230,18 +1231,30 @@ func serveCommand(configPath string) {
 		die(exitPermission, fmt.Sprintf("creating data directory: %v", err), "check permissions on ~/.mnemonic/")
 	}
 
-	// Pre-migration safety backup (only if DB already exists)
+	// Pre-migration safety backup (only if DB exists AND schema is outdated)
 	if _, statErr := os.Stat(cfg.Store.DBPath); statErr == nil {
-		backupDir, bdErr := backup.EnsureBackupDir()
-		if bdErr != nil {
-			log.Warn("could not create backup directory for pre-migration backup", "error", bdErr)
-		} else {
-			bkPath, bkErr := backup.BackupSQLiteFile(cfg.Store.DBPath, backupDir)
-			if bkErr != nil {
-				log.Warn("pre-migration backup failed", "error", bkErr)
-			} else if bkPath != "" {
-				log.Info("pre-migration backup created", "path", bkPath)
+		currentVer, verErr := backup.ReadSchemaVersion(cfg.Store.DBPath)
+		if verErr != nil {
+			log.Warn("could not read schema version, will back up defensively", "error", verErr)
+			currentVer = -1 // force backup
+		}
+		if currentVer < sqlite.SchemaVersion {
+			backupDir, bdErr := backup.EnsureBackupDir()
+			if bdErr != nil {
+				log.Warn("could not create backup directory for pre-migration backup", "error", bdErr)
+			} else {
+				bkPath, bkErr := backup.BackupSQLiteFile(cfg.Store.DBPath, backupDir)
+				if bkErr != nil {
+					log.Warn("pre-migration backup failed", "error", bkErr)
+				} else if bkPath != "" {
+					log.Info("pre-migration backup created", "path", bkPath)
+				}
+				if pruneErr := backup.PruneOldBackups(backupDir, 3); pruneErr != nil {
+					log.Warn("failed to prune old backups", "error", pruneErr)
+				}
 			}
+		} else {
+			log.Debug("schema is current, skipping pre-migration backup")
 		}
 	}
 
@@ -1371,8 +1384,12 @@ func serveCommand(configPath string) {
 
 	// Instrumented provider wrapper — gives each agent its own usage tracking.
 	// If training data capture is enabled, wrap with TrainingCaptureProvider too.
+	modelLabel := cfg.LLM.ChatModel
+	if cfg.LLM.Provider == "embedded" && cfg.LLM.Embedded.ChatModelFile != "" {
+		modelLabel = cfg.LLM.Embedded.ChatModelFile
+	}
 	wrap := func(caller string) llm.Provider {
-		var p llm.Provider = llm.NewInstrumentedProvider(llmProvider, memStore, caller, cfg.LLM.ChatModel)
+		var p llm.Provider = llm.NewInstrumentedProvider(llmProvider, memStore, caller, modelLabel)
 		if cfg.Training.CaptureEnabled && cfg.Training.CaptureDir != "" {
 			p = llm.NewTrainingCaptureProvider(p, caller, cfg.Training.CaptureDir)
 		}
@@ -2964,9 +2981,16 @@ func newLLMProvider(cfg *config.Config) llm.Provider {
 			Temperature:    float32(cfg.LLM.Temperature),
 			MaxConcurrent:  cfg.LLM.MaxConcurrent,
 		})
-		// Note: LoadModels must be called with a backend factory before use.
-		// Until llama.cpp bindings are integrated, the provider will return
-		// ErrProviderUnavailable on all inference calls.
+		backend := llamacpp.NewBackend()
+		if backend != nil {
+			if err := ep.LoadModels(func() llm.Backend {
+				return llamacpp.NewBackend()
+			}); err != nil {
+				slog.Error("failed to load embedded models", "error", err)
+			}
+		} else {
+			slog.Warn("embedded provider selected but llama.cpp not compiled in (build with: make build-embedded)")
+		}
 		return ep
 	default: // "api" or ""
 		timeout := time.Duration(cfg.LLM.TimeoutSec) * time.Second
