@@ -333,6 +333,10 @@ func (ea *EncodingAgent) Name() string {
 // Start begins the encoding agent's work.
 // It subscribes to RawMemoryCreated events and starts a polling fallback loop.
 func (ea *EncodingAgent) Start(ctx context.Context, bus events.Bus) error {
+	// Cancel the constructor's default context before replacing it
+	if ea.cancel != nil {
+		ea.cancel()
+	}
 	ea.ctx, ea.cancel = context.WithCancel(ctx)
 	ea.bus = bus
 
