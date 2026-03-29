@@ -214,6 +214,27 @@ def train(args):
 
     # Freeze base
     model.freeze_base()
+
+    # Optional LoRA on attention Q/V projections
+    if args.lora_rank > 0:
+        from peft import LoraConfig, get_peft_model
+
+        # Only apply to full attention layers (not delta-net layers which use fused wqkv)
+        # Qwen 3.5 attention layers: q_proj, v_proj
+        lora_config = LoraConfig(
+            r=args.lora_rank,
+            lora_alpha=args.lora_alpha,
+            target_modules=["q_proj", "v_proj"],
+            lora_dropout=0.0,
+            bias="none",
+        )
+        model.base_model = get_peft_model(model.base_model, lora_config)
+
+        lora_params = sum(p.numel() for p in model.base_model.parameters() if p.requires_grad)
+        print(f"LoRA: rank {args.lora_rank}, alpha {args.lora_alpha}, on q_proj/v_proj")
+        print(f"LoRA params: {lora_params:,}")
+        print(f"Total trainable: {lora_params + sum(p.numel() for p in model.spokes.parameters()):,}")
+
     model.to(device)
 
     # Resume from checkpoint if provided
@@ -313,24 +334,25 @@ def train(args):
             labels = labels.to(device)
             attention_mask = attention_mask.to(device)
 
-            outputs = model(input_ids=input_ids, labels=labels, attention_mask=attention_mask)
+            with torch.amp.autocast("cuda", dtype=torch.bfloat16, enabled=args.autocast):
+                outputs = model(input_ids=input_ids, labels=labels, attention_mask=attention_mask)
 
-            # Loss in fp32 for stability
-            logits = outputs.logits.float()
-            shift_logits = logits[..., :-1, :].contiguous()
-            shift_labels = labels[..., 1:].contiguous()
+                # Loss in fp32 for stability
+                logits = outputs.logits.float()
+                shift_logits = logits[..., :-1, :].contiguous()
+                shift_labels = labels[..., 1:].contiguous()
 
-            # Skip if all labels are masked (truncated examples with no completion)
-            if (shift_labels == -100).all():
-                global_step += 1
-                continue
+                # Skip if all labels are masked (truncated examples with no completion)
+                if (shift_labels == -100).all():
+                    global_step += 1
+                    continue
 
-            loss = F.cross_entropy(
-                shift_logits.view(-1, shift_logits.size(-1)),
-                shift_labels.view(-1),
-                ignore_index=-100,
-            )
-            loss = loss / args.grad_accum
+                loss = F.cross_entropy(
+                    shift_logits.view(-1, shift_logits.size(-1)),
+                    shift_labels.view(-1),
+                    ignore_index=-100,
+                )
+                loss = loss / args.grad_accum
 
             loss.backward()
 
@@ -505,8 +527,12 @@ def main():
     parser.add_argument("--warmup-steps", type=int, default=0, help="0=auto (10%% of total)")
     parser.add_argument("--use-muon", action="store_true", default=True, help="Use Muon for matrices")
     parser.add_argument("--no-muon", action="store_true", help="Disable Muon, use AdamW only")
-    parser.add_argument("--gradient-checkpointing", action="store_true", default=False)
+    parser.add_argument("--gradient-checkpointing", action="store_true", default=True)
     parser.add_argument("--no-gradient-checkpointing", dest="gradient_checkpointing", action="store_false")
+    parser.add_argument("--autocast", action="store_true", default=False, help="Use bf16 autocast")
+    parser.add_argument("--no-autocast", dest="autocast", action="store_false")
+    parser.add_argument("--lora-rank", type=int, default=0, help="LoRA rank on Q/V (0=disabled)")
+    parser.add_argument("--lora-alpha", type=int, default=32, help="LoRA alpha scaling")
 
     # Eval / checkpointing
     parser.add_argument("--eval-interval", type=int, default=200)
