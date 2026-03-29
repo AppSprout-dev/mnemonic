@@ -1593,7 +1593,6 @@
         localStorage.setItem('mnemonic-theme', name);
         var sel = document.getElementById('themeSelect');
         if (sel) sel.value = name;
-        if (state.mindLoaded) updateMindColors();
     }
 
     // Sync dropdown to current theme on load
@@ -1626,13 +1625,6 @@
         forumLoaded: false,
         currentForumThread: null,
         currentEpisodeId: '',
-        mindLoaded: false,
-        mindSimulation: null,
-        mindData: null,
-        mindSelectedNode: null,
-        mindSearchTerm: '',
-        mindView: 'memories',
-        mindAdjacency: null,
     };
 
     const CONFIG = {
@@ -1702,7 +1694,6 @@
         if (name === 'agent' && !state.agentLoaded) loadAgentData();
         if (name === 'llm' && !state.llmLoaded) loadLLMUsage();
         if (name === 'tools' && !state.toolsLoaded) loadToolUsage();
-        // mind view removed (Epic #339)
     }
 
     function switchExploreTab(tab) {
@@ -6133,8 +6124,6 @@
             setTimeout(function() { badge.textContent = 'v' + _updateInfo.latest_version + ' available'; }, 3000);
         }
     }
-
-    // ── Mind View — REMOVED (Epic #339) ──
 
     // ── Init ──
     async function initializeApp() {
