@@ -240,6 +240,42 @@ func TestEmbeddedProviderGrammarRouting(t *testing.T) {
 	if capturedGrammar != GBNFJSONObject {
 		t.Errorf("expected GBNF JSON grammar for json_object request")
 	}
+
+	// json_schema with encoding_response name — should use encoding-specific grammar
+	_, err = p.Complete(ctx, CompletionRequest{
+		Messages: []Message{{Role: "user", Content: "hello"}},
+		ResponseFormat: &ResponseFormat{
+			Type: "json_schema",
+			JSONSchema: &JSONSchema{
+				Name:   "encoding_response",
+				Strict: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Complete failed: %v", err)
+	}
+	if capturedGrammar != GBNFEncodingResponse {
+		t.Errorf("expected encoding-specific GBNF grammar for encoding_response schema, got generic")
+	}
+
+	// json_schema with other name — should fall back to generic JSON grammar
+	_, err = p.Complete(ctx, CompletionRequest{
+		Messages: []Message{{Role: "user", Content: "hello"}},
+		ResponseFormat: &ResponseFormat{
+			Type: "json_schema",
+			JSONSchema: &JSONSchema{
+				Name:   "other_schema",
+				Strict: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Complete failed: %v", err)
+	}
+	if capturedGrammar != GBNFJSONObject {
+		t.Errorf("expected generic GBNF JSON grammar for non-encoding schema")
+	}
 }
 
 func TestFormatPrompt(t *testing.T) {
@@ -248,7 +284,7 @@ func TestFormatPrompt(t *testing.T) {
 		{Role: "user", Content: "Hello"},
 	}
 	got := formatPrompt(messages)
-	expected := "<|im_start|>system\nYou are helpful.<|im_end|>\n<|im_start|>user\nHello<|im_end|>\n<|im_start|>assistant\n"
+	expected := "<|system|>\nYou are helpful.\n<|user|>\nHello\n<|assistant|>\n"
 	if got != expected {
 		t.Errorf("formatPrompt mismatch:\ngot:  %q\nwant: %q", got, expected)
 	}
