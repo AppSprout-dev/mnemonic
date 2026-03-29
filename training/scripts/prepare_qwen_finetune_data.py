@@ -181,9 +181,11 @@ def load_validated_data(
     max_seq_len: int,
 ) -> tuple[list[dict], dict]:
     """Process validated JSONL files and return tokenized records."""
-    jsonl_files = sorted(input_dir.glob("capture_*.jsonl"))
+    jsonl_files = sorted(input_dir.glob("*.jsonl"))
+    # Exclude files handled by other loaders
+    jsonl_files = [f for f in jsonl_files if "synthesis_converted" not in f.name]
     if not jsonl_files:
-        print(f"No capture JSONL files found in {input_dir}")
+        print(f"No JSONL files found in {input_dir}")
         return [], {}
 
     print(f"\nValidated data: {len(jsonl_files)} files")
