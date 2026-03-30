@@ -51,18 +51,27 @@ func HandleBackfillEmbeddings(s store.Store, provider embedding.Provider, log *s
 		targetDims := len(testEmb)
 		log.Info("backfill: starting", "mode", mode, "target_dims", targetDims, "limit", limit)
 
-		// Fetch memories and filter to those needing re-embedding
-		memories, err := s.ListMemories(ctx, "", limit, 0)
-		if err != nil {
-			log.Error("backfill: failed to list memories", "error", err)
-			writeError(w, http.StatusInternalServerError, "failed to list memories", "STORE_ERROR")
-			return
-		}
-
+		// Scan memories in pages to find those needing re-embedding.
+		// Always skip memories that already have the target dimensions.
 		var targets []store.Memory
-		for _, m := range memories {
-			if mode == "all" || len(m.Embedding) == 0 || len(m.Embedding) != targetDims {
-				targets = append(targets, m)
+		pageSize := 5000
+		for offset := 0; len(targets) < limit; offset += pageSize {
+			page, err := s.ListMemories(ctx, "", pageSize, offset)
+			if err != nil {
+				log.Error("backfill: failed to list memories", "error", err)
+				writeError(w, http.StatusInternalServerError, "failed to list memories", "STORE_ERROR")
+				return
+			}
+			if len(page) == 0 {
+				break // no more memories
+			}
+			for _, m := range page {
+				if len(m.Embedding) != targetDims {
+					targets = append(targets, m)
+					if len(targets) >= limit {
+						break
+					}
+				}
 			}
 		}
 
