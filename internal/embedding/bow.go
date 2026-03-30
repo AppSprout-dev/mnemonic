@@ -225,8 +225,10 @@ func ClassifyRelationship(text1, text2 string) string {
 
 // GenerateEncodingResponse produces a heuristic encoding for raw memory content.
 // This replaces the LLM compression step with deterministic extraction.
+// Concepts are extracted using RAKE (multi-word phrases) supplemented by
+// vocabulary-based single-word terms for consistent tagging.
 func GenerateEncodingResponse(content, source, memType string) EncodingResult {
-	concepts := ExtractTopConcepts(content, 8)
+	concepts := ExtractConcepts(content, 8)
 	if len(concepts) == 0 {
 		concepts = []string{"general"}
 	}
@@ -537,6 +539,37 @@ type AxiomResult struct {
 	Axiom      string
 	Concepts   []string
 	Confidence float64
+}
+
+// ExtractConcepts combines RAKE keyword extraction with vocabulary-based terms.
+// RAKE provides multi-word domain phrases; vocabulary provides consistent single-word
+// tags for association and pattern detection. Returns up to n unique concepts.
+func ExtractConcepts(text string, n int) []string {
+	seen := make(map[string]bool)
+	var result []string
+
+	// Phase 1: RAKE keywords (multi-word phrases, domain-adaptive)
+	rakeResults := ExtractKeywords(text, n)
+	for _, kw := range rakeResults {
+		if !seen[kw] {
+			seen[kw] = true
+			result = append(result, kw)
+		}
+	}
+
+	// Phase 2: Vocabulary terms (single-word, consistent tagging)
+	vocabResults := ExtractTopConcepts(text, n)
+	for _, v := range vocabResults {
+		if !seen[v] && len(result) < n {
+			seen[v] = true
+			result = append(result, v)
+		}
+	}
+
+	if len(result) > n {
+		result = result[:n]
+	}
+	return result
 }
 
 func truncateStr(s string, n int) string {
