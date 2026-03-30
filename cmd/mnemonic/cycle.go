@@ -22,14 +22,14 @@ import (
 
 // metaCycleCommand runs a single metacognition cycle and displays results.
 func metaCycleCommand(configPath string) {
-	cfg, db, llmProvider, log := initRuntime(configPath)
+	cfg, db, embProvider, log := initEmbeddingRuntime(configPath)
 	defer func() { _ = db.Close() }()
 
 	ctx := context.Background()
 	bus := events.NewInMemoryBus(100)
 	defer func() { _ = bus.Close() }()
 
-	agent := metacognition.NewMetacognitionAgent(db, llmProvider, metacognition.MetacognitionConfig{
+	agent := metacognition.NewMetacognitionAgent(db, embProvider, metacognition.MetacognitionConfig{
 		Interval:           24 * time.Hour, // doesn't matter for RunOnce
 		ReflectionLookback: cfg.Metacognition.ReflectionLookback,
 		DeadMemoryWindow:   cfg.Metacognition.DeadMemoryWindow,
@@ -76,14 +76,14 @@ func metaCycleCommand(configPath string) {
 
 // dreamCycleCommand runs a single dream cycle and displays results.
 func dreamCycleCommand(configPath string) {
-	cfg, db, llmProvider, log := initRuntime(configPath)
+	cfg, db, embProvider, log := initEmbeddingRuntime(configPath)
 	defer func() { _ = db.Close() }()
 
 	ctx := context.Background()
 	bus := events.NewInMemoryBus(100)
 	defer func() { _ = bus.Close() }()
 
-	agent := dreaming.NewDreamingAgent(db, llmProvider, dreaming.DreamingConfig{
+	agent := dreaming.NewDreamingAgent(db, embProvider, dreaming.DreamingConfig{
 		Interval:               3 * time.Hour, // doesn't matter for RunOnce
 		BatchSize:              cfg.Dreaming.BatchSize,
 		SalienceThreshold:      cfg.Dreaming.SalienceThreshold,
@@ -111,7 +111,7 @@ func dreamCycleCommand(configPath string) {
 
 // mcpCommand runs the MCP server on stdin/stdout for AI agent integration.
 func mcpCommand(configPath string) {
-	cfg, db, llmProvider, log := initRuntime(configPath)
+	cfg, db, embProvider, log := initEmbeddingRuntime(configPath)
 	defer func() { _ = db.Close() }()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -126,14 +126,14 @@ func mcpCommand(configPath string) {
 	// MCP processes from independently encoding the same unprocessed raw memories.
 	mcpEncodingCfg := buildEncodingConfig(cfg)
 	mcpEncodingCfg.DisablePolling = true
-	encoder := encoding.NewEncodingAgentWithConfig(db, llmProvider, log, mcpEncodingCfg)
+	encoder := encoding.NewEncodingAgentWithConfig(db, embProvider, log, mcpEncodingCfg)
 	if err := encoder.Start(ctx, bus); err != nil {
 		log.Error("failed to start encoding agent for MCP", "error", err)
 	}
 	defer func() { _ = encoder.Stop() }()
 
 	// Create retrieval agent for recall
-	retriever := retrieval.NewRetrievalAgent(db, llmProvider, buildRetrievalConfig(cfg), log, bus)
+	retriever := retrieval.NewRetrievalAgent(db, embProvider, buildRetrievalConfig(cfg), log, bus)
 
 	mcpResolver := config.NewProjectResolver(cfg.Projects)
 	daemonURL := fmt.Sprintf("http://%s:%d", cfg.API.Host, cfg.API.Port)

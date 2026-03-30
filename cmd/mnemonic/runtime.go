@@ -116,6 +116,14 @@ func initRuntime(configPath string) (*config.Config, *sqlite.SQLiteStore, llm.Pr
 	return cfg, db, provider, log
 }
 
+// initEmbeddingRuntime is like initRuntime but returns an embedding.Provider
+// instead of llm.Provider. Used by CLI commands that create agents.
+func initEmbeddingRuntime(configPath string) (*config.Config, *sqlite.SQLiteStore, embedding.Provider, *slog.Logger) {
+	cfg, db, _, log := initRuntime(configPath)
+	embProv := newEmbeddingProvider(cfg)
+	return cfg, db, embProv, log
+}
+
 // toConsolidationConfig converts the global config's consolidation settings to the agent's config.
 func toConsolidationConfig(cfg *config.Config) consolidation.ConsolidationConfig {
 	return consolidation.ConsolidationConfig{

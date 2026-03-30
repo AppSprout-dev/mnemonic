@@ -27,7 +27,7 @@ func rememberCommand(configPath, text string) {
 		os.Exit(1)
 	}
 
-	cfg, db, llmProvider, log := initRuntime(configPath)
+	cfg, db, embProvider, log := initEmbeddingRuntime(configPath)
 	defer func() { _ = db.Close() }()
 
 	ctx := context.Background()
@@ -68,7 +68,7 @@ func rememberCommand(configPath, text string) {
 	bus := events.NewInMemoryBus(100)
 	defer func() { _ = bus.Close() }()
 
-	encoder := encoding.NewEncodingAgentWithConfig(db, llmProvider, log, buildEncodingConfig(cfg))
+	encoder := encoding.NewEncodingAgentWithConfig(db, embProvider, log, buildEncodingConfig(cfg))
 	if err := encoder.Start(encodeCtx, bus); err != nil {
 		fmt.Fprintf(os.Stderr, "Error starting encoder: %v\n", err)
 		os.Exit(1)
@@ -107,12 +107,12 @@ func rememberCommand(configPath, text string) {
 
 // recallCommand retrieves memories matching a query.
 func recallCommand(configPath, query string) {
-	cfg, db, llmProvider, log := initRuntime(configPath)
+	cfg, db, embProvider, log := initEmbeddingRuntime(configPath)
 	defer func() { _ = db.Close() }()
 
 	ctx := context.Background()
 
-	retriever := retrieval.NewRetrievalAgent(db, llmProvider, buildRetrievalConfig(cfg), log, nil)
+	retriever := retrieval.NewRetrievalAgent(db, embProvider, buildRetrievalConfig(cfg), log, nil)
 
 	resp, err := retriever.Query(ctx, retrieval.QueryRequest{
 		Query:      query,
@@ -144,14 +144,14 @@ func recallCommand(configPath, query string) {
 
 // consolidateCommand runs a single memory consolidation cycle.
 func consolidateCommand(configPath string) {
-	cfg, db, llmProvider, log := initRuntime(configPath)
+	cfg, db, embProvider, log := initEmbeddingRuntime(configPath)
 	defer func() { _ = db.Close() }()
 
 	ctx := context.Background()
 	bus := events.NewInMemoryBus(100)
 	defer func() { _ = bus.Close() }()
 
-	consolidator := consolidation.NewConsolidationAgent(db, llmProvider, toConsolidationConfig(cfg), log)
+	consolidator := consolidation.NewConsolidationAgent(db, embProvider, toConsolidationConfig(cfg), log)
 
 	fmt.Println("Running consolidation cycle...")
 
