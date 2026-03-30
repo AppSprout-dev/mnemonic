@@ -244,6 +244,20 @@ func newEmbeddingProvider(cfg *config.Config) embedding.Provider {
 		return embedding.NewBowProvider()
 	}
 
+	// Explicit "hugot" selection — pure Go transformer embeddings (MiniLM-L6-v2, 384-dim)
+	if provider == "hugot" {
+		hugotCfg := embedding.HugotConfig{
+			ModelDir:     cfg.Embedding.Model, // repurpose model field as dir path
+			AutoDownload: true,
+		}
+		hp, err := embedding.NewHugotProvider(hugotCfg, slog.Default())
+		if err != nil {
+			slog.Error("failed to create hugot provider, falling back to bow", "error", err)
+			return embedding.NewBowProvider()
+		}
+		return hp
+	}
+
 	// Explicit "api" selection — use embedding-specific config or fall back to LLM config
 	if provider == "api" {
 		endpoint := cfg.Embedding.Endpoint

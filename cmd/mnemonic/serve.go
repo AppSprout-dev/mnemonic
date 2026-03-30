@@ -241,8 +241,15 @@ func serveCommand(configPath string) {
 
 	// Instrumented embedding provider wrapper — gives each agent its own usage tracking.
 	modelLabel := cfg.LLM.EmbeddingModel
-	if cfg.Embedding.Provider == "bow" || modelLabel == "" {
+	switch cfg.Embedding.Provider {
+	case "bow":
 		modelLabel = "bow-128"
+	case "hugot":
+		modelLabel = "hugot-MiniLM-384"
+	default:
+		if modelLabel == "" {
+			modelLabel = "bow-128"
+		}
 	}
 	wrapEmb := func(caller string) embedding.Provider {
 		return embedding.NewInstrumentedProvider(embProvider, memStore, caller, modelLabel)
