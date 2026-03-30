@@ -26,7 +26,9 @@ type BackfillResponse struct {
 // The ?limit parameter controls batch size (default 500, max 5000).
 func HandleBackfillEmbeddings(s store.Store, provider embedding.Provider, log *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Minute)
+		// Use a background context with generous timeout — backfill is a long operation
+		// that should not be bounded by the API server's request timeout.
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 		defer cancel()
 
 		mode := r.URL.Query().Get("mode")     // "all" or "" (default: mismatched only)
