@@ -104,12 +104,23 @@ func NewHugotProvider(cfg HugotConfig, log *slog.Logger) (*HugotProvider, error)
 	}, nil
 }
 
+// maxChars limits input text length to avoid exceeding the model's token limit.
+// MiniLM-L6-v2 supports 256 tokens. At ~4 chars/token, 900 chars is safe.
+const maxChars = 900
+
+func truncateText(s string) string {
+	if len(s) <= maxChars {
+		return s
+	}
+	return s[:maxChars]
+}
+
 // Embed generates an embedding for a single text.
 func (p *HugotProvider) Embed(_ context.Context, text string) ([]float32, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	result, err := p.pipeline.RunPipeline([]string{text})
+	result, err := p.pipeline.RunPipeline([]string{truncateText(text)})
 	if err != nil {
 		return nil, fmt.Errorf("embedding failed: %w", err)
 	}
@@ -128,7 +139,11 @@ func (p *HugotProvider) BatchEmbed(_ context.Context, texts []string) ([][]float
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	result, err := p.pipeline.RunPipeline(texts)
+	truncated := make([]string, len(texts))
+	for i, t := range texts {
+		truncated[i] = truncateText(t)
+	}
+	result, err := p.pipeline.RunPipeline(truncated)
 	if err != nil {
 		return nil, fmt.Errorf("batch embedding failed: %w", err)
 	}
