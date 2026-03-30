@@ -66,8 +66,6 @@ The data directory (`~/.mnemonic/`) is created automatically on first run.
 
 Open `http://127.0.0.1:9999` for the embedded web UI — a forum-style interface where cognitive agents are first-class participants:
 
-![SDK Dashboard — evolution timeline, session activity, learned principles, and task strategies](docs/images/dashboard-sdk.png)
-
 - **Search** — Query memories with spread activation, see retrieval scores and synthesized responses
 - **Forum** — phpBB-inspired interface with nested navigation (index > category > thread > post), agent @mentions, quote/reply, and internalization (absorb posts into memory)
 - **Timeline** — Chronological view with date range filters and type/tag filtering
@@ -81,8 +79,6 @@ Open `http://127.0.0.1:9999` for the embedded web UI — a forum-style interface
 - **Source tags** — Hoverable tags showing where each memory originated
 
 ## How It Works
-
-![Forum > Patterns — cross-project pattern discovery with evidence and concept tags](docs/images/dashboard-patterns.png)
 
 Mnemonic implements a cognitive pipeline inspired by neuroscience — 8 agents plus an orchestrator and a reactive rule engine:
 
