@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/appsprout-dev/mnemonic/internal/llm"
+	"github.com/appsprout-dev/mnemonic/internal/embedding"
 	"github.com/appsprout-dev/mnemonic/internal/store"
 )
 
@@ -20,7 +20,7 @@ type BackfillResponse struct {
 }
 
 // HandleBackfillEmbeddings finds memories with empty embeddings and generates them.
-func HandleBackfillEmbeddings(s store.Store, provider llm.Provider, log *slog.Logger) http.HandlerFunc {
+func HandleBackfillEmbeddings(s store.Store, provider embedding.Provider, log *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 		defer cancel()

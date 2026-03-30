@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/appsprout-dev/mnemonic/internal/events"
-	"github.com/appsprout-dev/mnemonic/internal/llm"
 	"gopkg.in/yaml.v3"
 )
 
@@ -28,7 +27,7 @@ type ChainDeps struct {
 	ForumMentionTemp       float64      // temperature for @mention LLM responses
 	ForumPerAgentSubforums bool         // route to per-agent sub-forums (true) or shared (false)
 	ForumDigestPosting     bool         // batch agent posts into daily digest threads
-	MentionLLM             llm.Provider // for @mention LLM responses (can be nil)
+	MentionLLM             interface{}  // unused; kept for serve.go compatibility
 	MentionQuery           ForumQuerier // for @retrieval recall queries (can be nil)
 }
 
@@ -328,14 +327,6 @@ func NewChainRegistry(deps ChainDeps) []*Chain {
 
 	// Forum @mention response chain
 	if deps.ForumMentionResponses {
-		mentionMaxTokens := deps.ForumMentionMaxTokens
-		if mentionMaxTokens <= 0 {
-			mentionMaxTokens = 512
-		}
-		mentionTemp := deps.ForumMentionTemp
-		if mentionTemp <= 0 {
-			mentionTemp = 0.7
-		}
 		chains = append(chains, &Chain{
 			ID:          "forum_mention_response",
 			Name:        "Forum: Respond to @Mention",
@@ -350,10 +341,7 @@ func NewChainRegistry(deps ChainDeps) []*Chain {
 			},
 			Actions: []Action{
 				&RespondToMentionAction{
-					LLM:          deps.MentionLLM,
 					ForumQuerier: deps.MentionQuery,
-					MaxTokens:    mentionMaxTokens,
-					Temperature:  mentionTemp,
 					Log:          log,
 				},
 			},

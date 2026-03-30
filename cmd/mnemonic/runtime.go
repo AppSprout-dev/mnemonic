@@ -9,6 +9,7 @@ import (
 	"github.com/appsprout-dev/mnemonic/internal/agent/encoding"
 	"github.com/appsprout-dev/mnemonic/internal/agent/retrieval"
 	"github.com/appsprout-dev/mnemonic/internal/config"
+	"github.com/appsprout-dev/mnemonic/internal/embedding"
 	"github.com/appsprout-dev/mnemonic/internal/llm"
 	"github.com/appsprout-dev/mnemonic/internal/llm/llamacpp"
 	"github.com/appsprout-dev/mnemonic/internal/logger"
@@ -230,4 +231,52 @@ func newLLMProvider(cfg *config.Config) llm.Provider {
 			cfg.LLM.MaxConcurrent,
 		)
 	}
+}
+
+// newEmbeddingProvider creates an embedding.Provider based on config.
+// Priority: explicit embedding config > fallback to LLM config > default BowProvider.
+func newEmbeddingProvider(cfg *config.Config) embedding.Provider {
+	provider := cfg.Embedding.Provider
+
+	// Explicit "bow" selection — air-gapped mode
+	if provider == "bow" {
+		slog.Info("embedding provider: bow (128-dim bag-of-words, air-gapped)")
+		return embedding.NewBowProvider()
+	}
+
+	// Explicit "api" selection — use embedding-specific config or fall back to LLM config
+	if provider == "api" {
+		endpoint := cfg.Embedding.Endpoint
+		model := cfg.Embedding.Model
+		if endpoint == "" {
+			endpoint = cfg.LLM.Endpoint
+		}
+		if model == "" {
+			model = cfg.LLM.EmbeddingModel
+		}
+		if endpoint == "" || model == "" {
+			slog.Warn("embedding provider 'api' selected but no endpoint/model configured, falling back to bow")
+			return embedding.NewBowProvider()
+		}
+		timeout := time.Duration(cfg.LLM.TimeoutSec) * time.Second
+		if timeout == 0 {
+			timeout = 30 * time.Second
+		}
+		slog.Info("embedding provider: api", "endpoint", endpoint, "model", model)
+		return embedding.NewAPIProvider(endpoint, model, cfg.LLM.APIKey, timeout, cfg.LLM.MaxConcurrent)
+	}
+
+	// No explicit provider — auto-detect from LLM config for backward compat
+	if cfg.LLM.Endpoint != "" && cfg.LLM.EmbeddingModel != "" {
+		timeout := time.Duration(cfg.LLM.TimeoutSec) * time.Second
+		if timeout == 0 {
+			timeout = 30 * time.Second
+		}
+		slog.Info("embedding provider: api (auto-detected from llm config)", "endpoint", cfg.LLM.Endpoint, "model", cfg.LLM.EmbeddingModel)
+		return embedding.NewAPIProvider(cfg.LLM.Endpoint, cfg.LLM.EmbeddingModel, cfg.LLM.APIKey, timeout, cfg.LLM.MaxConcurrent)
+	}
+
+	// Default: bag-of-words (zero config, always works, fully air-gapped)
+	slog.Info("embedding provider: bow (default, 128-dim bag-of-words)")
+	return embedding.NewBowProvider()
 }

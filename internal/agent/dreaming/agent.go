@@ -2,7 +2,6 @@ package dreaming
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -11,8 +10,8 @@ import (
 	"time"
 
 	"github.com/appsprout-dev/mnemonic/internal/agent/agentutil"
+	"github.com/appsprout-dev/mnemonic/internal/embedding"
 	"github.com/appsprout-dev/mnemonic/internal/events"
-	"github.com/appsprout-dev/mnemonic/internal/llm"
 	"github.com/appsprout-dev/mnemonic/internal/store"
 )
 
@@ -29,9 +28,9 @@ type DreamingConfig struct {
 }
 
 type DreamingAgent struct {
-	store       store.Store
-	llmProvider llm.Provider
-	config      DreamingConfig
+	store    store.Store
+	embedder embedding.Provider
+	config   DreamingConfig
 	log         *slog.Logger
 	bus         events.Bus
 	ctx         context.Context
@@ -52,13 +51,13 @@ type DreamReport struct {
 	NoisyMemoriesDemoted     int
 }
 
-func NewDreamingAgent(s store.Store, llmProv llm.Provider, cfg DreamingConfig, log *slog.Logger) *DreamingAgent {
+func NewDreamingAgent(s store.Store, embedder embedding.Provider, cfg DreamingConfig, log *slog.Logger) *DreamingAgent {
 	return &DreamingAgent{
-		store:       s,
-		llmProvider: llmProv,
-		config:      cfg,
-		log:         log,
-		triggerCh:   make(chan struct{}, 1),
+		store:     s,
+		embedder:  embedder,
+		config:    cfg,
+		log:       log,
+		triggerCh: make(chan struct{}, 1),
 	}
 }
 
@@ -143,15 +142,6 @@ func (da *DreamingAgent) loop() {
 }
 
 func (da *DreamingAgent) runCycle(ctx context.Context) (*DreamReport, error) {
-	// Gate on LLM availability — without LLM, dreaming blindly strengthens
-	// associations without being able to generate insights or judge quality.
-	if da.llmProvider != nil {
-		if err := da.llmProvider.Health(ctx); err != nil {
-			da.log.Warn("skipping dream cycle: LLM unavailable", "error", err)
-			return nil, nil
-		}
-	}
-
 	startTime := time.Now()
 	report := &DreamReport{}
 
@@ -484,7 +474,7 @@ func (da *DreamingAgent) linkToPatterns(ctx context.Context, replayed []store.Me
 // generateInsights clusters the most-accessed replayed memories and asks LLM for higher-order insights.
 // Stores results as Abstractions with level=2. Budget: max 2 per dream cycle.
 func (da *DreamingAgent) generateInsights(ctx context.Context, replayed []store.Memory, report *DreamReport) error {
-	if da.llmProvider == nil || len(replayed) < 3 {
+	if len(replayed) < 3 {
 		return nil
 	}
 
@@ -575,81 +565,27 @@ func clusterByConceptOverlap(memories []store.Memory) [][]store.Memory {
 	return clusters
 }
 
-type insightResponse struct {
-	Title      string   `json:"title"`
-	Insight    string   `json:"insight"`
-	Concepts   []string `json:"concepts"`
-	Confidence float64  `json:"confidence"`
-	HasInsight bool     `json:"has_insight"`
-}
-
-// synthesizeInsight asks the LLM to identify a higher-order insight from a cluster of memories.
+// synthesizeInsight identifies higher-order insights from a cluster of memories
+// using concept bridge detection instead of LLM synthesis.
 func (da *DreamingAgent) synthesizeInsight(ctx context.Context, cluster []store.Memory) (*store.Abstraction, error) {
-	var summaries strings.Builder
 	var memoryIDs []string
 	var allConcepts []string
+	memoryConcepts := make([][]string, len(cluster))
 
 	for i, mem := range cluster {
-		fmt.Fprintf(&summaries, "%d. [%s] %s\n   Concepts: %s\n",
-			i+1, mem.Project, mem.Summary, strings.Join(mem.Concepts, ", "))
 		memoryIDs = append(memoryIDs, mem.ID)
 		allConcepts = append(allConcepts, mem.Concepts...)
+		memoryConcepts[i] = mem.Concepts
 	}
 
-	prompt := fmt.Sprintf(`These memories keep surfacing — they're the ones this person's mind returns to most often. When you look at them together, what do they teach?
-
-Is there a lesson here that's bigger than any single memory? A principle that connects them? Something this person has been learning, perhaps without realizing it?
-
-Memories:
-%s
-
-Respond with ONLY a JSON object:
-{
-  "has_insight": true/false,
-  "title": "a clear name for this insight",
-  "insight": "the deeper lesson or principle, in 1-2 sentences — something genuinely useful",
-  "concepts": ["key", "concepts"],
-  "confidence": 0.0-1.0
-}
-
-Only share an insight if it's genuinely illuminating — something that makes you think "oh, that's interesting." If these memories are just individually notable without a connecting thread, set has_insight to false.`, summaries.String())
-
-	req := llm.CompletionRequest{
-		Messages: []llm.Message{
-			{Role: "system", Content: "You are an insight generator. Find connections between memories. Output JSON only."},
-			{Role: "user", Content: prompt},
-		},
-		MaxTokens:   200,
-		Temperature: 0.4,
-		ResponseFormat: &llm.ResponseFormat{
-			Type: "json_schema",
-			JSONSchema: &llm.JSONSchema{
-				Name:   "insight_response",
-				Strict: true,
-				Schema: json.RawMessage(`{"type":"object","properties":{"has_insight":{"type":"boolean"},"title":{"type":"string"},"insight":{"type":"string"},"concepts":{"type":"array","items":{"type":"string"}},"confidence":{"type":"number"}},"required":["has_insight","title","insight","concepts","confidence"],"additionalProperties":false}`),
-			},
-		},
-	}
-
-	resp, err := da.llmProvider.Complete(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("LLM insight generation failed: %w", err)
-	}
-
-	jsonStr := agentutil.ExtractJSON(resp.Content)
-	var result insightResponse
-	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
-		return nil, fmt.Errorf("failed to parse insight response: %w", err)
-	}
-
-	if !result.HasInsight || result.Title == "" || result.Insight == "" {
+	result := embedding.GenerateInsight(memoryConcepts)
+	if result == nil {
 		return nil, nil
 	}
 
 	// Compute average embedding from cluster memories
-	embedding := averageMemoryEmbedding(cluster)
+	emb := averageMemoryEmbedding(cluster)
 
-	// Deduplicate concepts
 	concepts := result.Concepts
 	if len(concepts) == 0 {
 		concepts = agentutil.DeduplicateConcepts(allConcepts)
@@ -672,7 +608,7 @@ Only share an insight if it's genuinely illuminating — something that makes yo
 		SourceMemoryIDs: memoryIDs,
 		Confidence:      confidence,
 		Concepts:        concepts,
-		Embedding:       embedding,
+		Embedding:       emb,
 		State:           "active",
 		CreatedAt:       time.Now(),
 		UpdatedAt:       time.Now(),

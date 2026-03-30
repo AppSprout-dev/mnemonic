@@ -13,7 +13,6 @@ import (
 
 	"github.com/appsprout-dev/mnemonic/internal/agent/agentutil"
 	"github.com/appsprout-dev/mnemonic/internal/events"
-	"github.com/appsprout-dev/mnemonic/internal/llm"
 	"github.com/appsprout-dev/mnemonic/internal/store"
 	"github.com/appsprout-dev/mnemonic/internal/store/storetest"
 )
@@ -119,38 +118,32 @@ func (m *mockStore) WriteMemoryAttributes(ctx context.Context, attrs store.Memor
 }
 
 // ---------------------------------------------------------------------------
-// Mock LLM provider
+// Mock embedding provider (implements embedding.Provider)
 // ---------------------------------------------------------------------------
 
-type mockLLMProvider struct {
-	completeFn func(ctx context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error)
-	embedFn    func(ctx context.Context, text string) ([]float32, error)
-	healthFn   func(ctx context.Context) error
+type mockEmbeddingProvider struct {
+	embedFn      func(ctx context.Context, text string) ([]float32, error)
+	batchEmbedFn func(ctx context.Context, texts []string) ([][]float32, error)
+	healthFn     func(ctx context.Context) error
 }
 
-func (p *mockLLMProvider) Complete(ctx context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
-	if p.completeFn != nil {
-		return p.completeFn(ctx, req)
-	}
-	return llm.CompletionResponse{Content: `{}`}, nil
-}
-func (p *mockLLMProvider) Embed(ctx context.Context, text string) ([]float32, error) {
+func (p *mockEmbeddingProvider) Embed(ctx context.Context, text string) ([]float32, error) {
 	if p.embedFn != nil {
 		return p.embedFn(ctx, text)
 	}
 	return []float32{0.1, 0.2, 0.3}, nil
 }
-func (p *mockLLMProvider) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
+func (p *mockEmbeddingProvider) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
+	if p.batchEmbedFn != nil {
+		return p.batchEmbedFn(ctx, texts)
+	}
 	return nil, nil
 }
-func (p *mockLLMProvider) Health(ctx context.Context) error {
+func (p *mockEmbeddingProvider) Health(ctx context.Context) error {
 	if p.healthFn != nil {
 		return p.healthFn(ctx)
 	}
 	return nil
-}
-func (p *mockLLMProvider) ModelInfo(ctx context.Context) (llm.ModelMetadata, error) {
-	return llm.ModelMetadata{Name: "mock"}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -199,8 +192,8 @@ func testLogger() *slog.Logger {
 
 func TestNewEncodingAgent(t *testing.T) {
 	ms := &mockStore{}
-	llmProv := &mockLLMProvider{}
-	agent := NewEncodingAgent(ms, llmProv, testLogger())
+	ep := &mockEmbeddingProvider{}
+	agent := NewEncodingAgent(ms, ep, testLogger())
 
 	if agent == nil {
 		t.Fatal("expected non-nil agent")
@@ -219,7 +212,7 @@ func TestNewEncodingAgentWithConfig(t *testing.T) {
 		SimilarityThreshold:     0.5,
 		MaxSimilarSearchResults: 10,
 	}
-	agent := NewEncodingAgentWithConfig(&mockStore{}, &mockLLMProvider{}, testLogger(), cfg)
+	agent := NewEncodingAgentWithConfig(&mockStore{}, &mockEmbeddingProvider{}, testLogger(), cfg)
 
 	if agent == nil {
 		t.Fatal("expected non-nil agent")
@@ -775,7 +768,7 @@ func TestDetectContradiction(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestFallbackCompression(t *testing.T) {
-	agent := NewEncodingAgent(&mockStore{}, &mockLLMProvider{}, testLogger())
+	agent := NewEncodingAgent(&mockStore{}, &mockEmbeddingProvider{}, testLogger())
 
 	t.Run("short content", func(t *testing.T) {
 		raw := store.RawMemory{
@@ -838,8 +831,8 @@ func TestFallbackCompression(t *testing.T) {
 
 func TestStartStop(t *testing.T) {
 	ms := &mockStore{}
-	llmProv := &mockLLMProvider{}
-	agent := NewEncodingAgent(ms, llmProv, testLogger())
+	ep := &mockEmbeddingProvider{}
+	agent := NewEncodingAgent(ms, ep, testLogger())
 	bus := newMockBus()
 
 	if err := agent.Start(context.Background(), bus); err != nil {
@@ -867,33 +860,33 @@ func TestStartStop(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestHealth(t *testing.T) {
-	t.Run("healthy when both LLM and store are ok", func(t *testing.T) {
+	t.Run("healthy when both embedding provider and store are ok", func(t *testing.T) {
 		ms := &mockStore{
 			countMemoriesFn: func(_ context.Context) (int, error) { return 10, nil },
 		}
-		llmProv := &mockLLMProvider{}
-		agent := NewEncodingAgent(ms, llmProv, testLogger())
+		ep := &mockEmbeddingProvider{}
+		agent := NewEncodingAgent(ms, ep, testLogger())
 
 		if err := agent.Health(context.Background()); err != nil {
 			t.Errorf("expected healthy, got error: %v", err)
 		}
 	})
 
-	t.Run("unhealthy when LLM is down", func(t *testing.T) {
+	t.Run("unhealthy when embedding provider is down", func(t *testing.T) {
 		ms := &mockStore{
 			countMemoriesFn: func(_ context.Context) (int, error) { return 10, nil },
 		}
-		llmProv := &mockLLMProvider{
+		ep := &mockEmbeddingProvider{
 			healthFn: func(_ context.Context) error { return fmt.Errorf("connection refused") },
 		}
-		agent := NewEncodingAgent(ms, llmProv, testLogger())
+		agent := NewEncodingAgent(ms, ep, testLogger())
 
 		err := agent.Health(context.Background())
 		if err == nil {
-			t.Error("expected error when LLM is down")
+			t.Error("expected error when embedding provider is down")
 		}
-		if !strings.Contains(err.Error(), "llm provider unhealthy") {
-			t.Errorf("expected 'llm provider unhealthy' in error, got %q", err.Error())
+		if !strings.Contains(err.Error(), "embedding provider unhealthy") {
+			t.Errorf("expected 'embedding provider unhealthy' in error, got %q", err.Error())
 		}
 	})
 
@@ -901,8 +894,8 @@ func TestHealth(t *testing.T) {
 		ms := &mockStore{
 			countMemoriesFn: func(_ context.Context) (int, error) { return 0, fmt.Errorf("db error") },
 		}
-		llmProv := &mockLLMProvider{}
-		agent := NewEncodingAgent(ms, llmProv, testLogger())
+		ep := &mockEmbeddingProvider{}
+		agent := NewEncodingAgent(ms, ep, testLogger())
 
 		err := agent.Health(context.Background())
 		if err == nil {
@@ -928,18 +921,6 @@ func TestEncodeMemory(t *testing.T) {
 			Type:      "explicit",
 			Timestamp: now,
 		}
-
-		compressionJSON := `{
-			"gist": "fixed auth bug",
-			"summary": "Fixed authentication module bug",
-			"content": "Fixed a bug in the authentication module that was causing login failures",
-			"narrative": "A bug was found and fixed in the auth module.",
-			"concepts": ["authentication", "bug-fix", "security"],
-			"significance": "notable",
-			"emotional_tone": "satisfying",
-			"outcome": "success",
-			"salience": 0.8
-		}`
 
 		var writtenMemory store.Memory
 		var markedProcessed bool
@@ -973,17 +954,14 @@ func TestEncodeMemory(t *testing.T) {
 			},
 		}
 
-		llmProv := &mockLLMProvider{
-			completeFn: func(_ context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
-				return llm.CompletionResponse{Content: compressionJSON}, nil
-			},
+		ep := &mockEmbeddingProvider{
 			embedFn: func(_ context.Context, text string) ([]float32, error) {
 				return []float32{0.5, 0.6, 0.7}, nil
 			},
 		}
 
 		bus := newMockBus()
-		agent := NewEncodingAgent(ms, llmProv, testLogger())
+		agent := NewEncodingAgent(ms, ep, testLogger())
 		agent.bus = bus
 
 		err := agent.encodeMemory(context.Background(), "raw-1")
@@ -998,11 +976,13 @@ func TestEncodeMemory(t *testing.T) {
 		if writtenMemory.State != "active" {
 			t.Errorf("expected state 'active', got %q", writtenMemory.State)
 		}
-		if writtenMemory.Summary != "Fixed authentication module bug" {
-			t.Errorf("expected summary from LLM, got %q", writtenMemory.Summary)
+
+		// Heuristic summary = first 100 chars of content (then truncated to 80 in heuristicCompression)
+		if writtenMemory.Summary == "" {
+			t.Error("expected non-empty summary from heuristic encoding")
 		}
-		if len(writtenMemory.Concepts) != 3 {
-			t.Errorf("expected 3 concepts, got %d", len(writtenMemory.Concepts))
+		if len(writtenMemory.Concepts) == 0 {
+			t.Error("expected at least one concept from heuristic encoding")
 		}
 		if len(writtenMemory.Embedding) != 3 {
 			t.Errorf("expected 3-dim embedding, got %d", len(writtenMemory.Embedding))
@@ -1013,17 +993,14 @@ func TestEncodeMemory(t *testing.T) {
 			t.Error("expected raw memory to be marked as processed")
 		}
 
-		// Verify resolution was written
-		if writtenResolution.Gist != "fixed auth bug" {
-			t.Errorf("expected gist 'fixed auth bug', got %q", writtenResolution.Gist)
+		// Verify resolution was written with a non-empty gist
+		if writtenResolution.Gist == "" {
+			t.Error("expected non-empty gist in resolution")
 		}
 
-		// Verify attributes were written
-		if writtenAttrs.Significance != "notable" {
-			t.Errorf("expected significance 'notable', got %q", writtenAttrs.Significance)
-		}
-		if writtenAttrs.EmotionalTone != "satisfying" {
-			t.Errorf("expected emotional_tone 'satisfying', got %q", writtenAttrs.EmotionalTone)
+		// Verify attributes were written with heuristic defaults
+		if writtenAttrs.EmotionalTone != "neutral" {
+			t.Errorf("expected emotional_tone 'neutral' from heuristic, got %q", writtenAttrs.EmotionalTone)
 		}
 
 		// Verify event was published
@@ -1036,54 +1013,6 @@ func TestEncodeMemory(t *testing.T) {
 		}
 		if evt.RawID != "raw-1" {
 			t.Errorf("expected event raw_id 'raw-1', got %q", evt.RawID)
-		}
-	})
-
-	t.Run("fallback when LLM compression fails", func(t *testing.T) {
-		raw := store.RawMemory{
-			ID:        "raw-2",
-			Content:   "some terminal output",
-			Source:    "terminal",
-			Type:      "command",
-			Timestamp: time.Now(),
-		}
-
-		var writtenMemory store.Memory
-
-		ms := &mockStore{
-			getRawFn: func(_ context.Context, id string) (store.RawMemory, error) {
-				return raw, nil
-			},
-			writeMemoryFn: func(_ context.Context, mem store.Memory) error {
-				writtenMemory = mem
-				return nil
-			},
-		}
-
-		llmProv := &mockLLMProvider{
-			completeFn: func(_ context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
-				return llm.CompletionResponse{}, fmt.Errorf("LLM offline")
-			},
-			embedFn: func(_ context.Context, text string) ([]float32, error) {
-				return []float32{0.1, 0.2}, nil
-			},
-		}
-
-		bus := newMockBus()
-		agent := NewEncodingAgent(ms, llmProv, testLogger())
-		agent.bus = bus
-
-		err := agent.encodeMemory(context.Background(), "raw-2")
-		if err != nil {
-			t.Fatalf("encodeMemory should not fail when LLM fails (fallback): %v", err)
-		}
-
-		// Verify fallback was used
-		if writtenMemory.Summary != "some terminal output" {
-			t.Errorf("expected fallback summary from raw content, got %q", writtenMemory.Summary)
-		}
-		if writtenMemory.State != "active" {
-			t.Errorf("expected state 'active', got %q", writtenMemory.State)
 		}
 	})
 
@@ -1108,19 +1037,14 @@ func TestEncodeMemory(t *testing.T) {
 			},
 		}
 
-		compressionJSON := `{"summary": "test", "content": "test content", "concepts": ["test"], "salience": 0.5}`
-
-		llmProv := &mockLLMProvider{
-			completeFn: func(_ context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
-				return llm.CompletionResponse{Content: compressionJSON}, nil
-			},
+		ep := &mockEmbeddingProvider{
 			embedFn: func(_ context.Context, text string) ([]float32, error) {
 				return nil, fmt.Errorf("embedding model not loaded")
 			},
 		}
 
 		bus := newMockBus()
-		agent := NewEncodingAgent(ms, llmProv, testLogger())
+		agent := NewEncodingAgent(ms, ep, testLogger())
 		agent.bus = bus
 
 		err := agent.encodeMemory(context.Background(), "raw-3")
@@ -1161,22 +1085,14 @@ func TestEncodeMemory(t *testing.T) {
 			},
 		}
 
-		compressionJSON := `{"summary": "auth update", "content": "updated auth", "concepts": ["auth"], "salience": 0.6}`
-		llmProv := &mockLLMProvider{
-			completeFn: func(_ context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
-				// Check if it's a classification request
-				if strings.Contains(req.Messages[0].Content, "Classify the relationship") {
-					return llm.CompletionResponse{Content: `{"relation_type":"reinforces"}`}, nil
-				}
-				return llm.CompletionResponse{Content: compressionJSON}, nil
-			},
+		ep := &mockEmbeddingProvider{
 			embedFn: func(_ context.Context, text string) ([]float32, error) {
 				return []float32{0.5, 0.6, 0.7}, nil
 			},
 		}
 
 		bus := newMockBus()
-		agent := NewEncodingAgent(ms, llmProv, testLogger())
+		agent := NewEncodingAgent(ms, ep, testLogger())
 		agent.bus = bus
 
 		err := agent.encodeMemory(context.Background(), "raw-4")
@@ -1201,7 +1117,7 @@ func TestEncodeMemory(t *testing.T) {
 		}
 
 		bus := newMockBus()
-		agent := NewEncodingAgent(ms, &mockLLMProvider{}, testLogger())
+		agent := NewEncodingAgent(ms, &mockEmbeddingProvider{}, testLogger())
 		agent.bus = bus
 
 		err := agent.encodeMemory(context.Background(), "nonexistent")
@@ -1230,15 +1146,10 @@ func TestEncodeMemory(t *testing.T) {
 			},
 		}
 
-		compressionJSON := `{"summary": "test", "content": "test", "concepts": ["test"], "salience": 0.5}`
-		llmProv := &mockLLMProvider{
-			completeFn: func(_ context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
-				return llm.CompletionResponse{Content: compressionJSON}, nil
-			},
-		}
+		ep := &mockEmbeddingProvider{}
 
 		bus := newMockBus()
-		agent := NewEncodingAgent(ms, llmProv, testLogger())
+		agent := NewEncodingAgent(ms, ep, testLogger())
 		agent.bus = bus
 
 		err := agent.encodeMemory(context.Background(), "raw-5")
@@ -1275,15 +1186,10 @@ func TestHandleRawMemoryCreated(t *testing.T) {
 			},
 		}
 
-		compressionJSON := `{"summary": "test", "content": "test", "concepts": ["test"], "salience": 0.5}`
-		llmProv := &mockLLMProvider{
-			completeFn: func(_ context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
-				return llm.CompletionResponse{Content: compressionJSON}, nil
-			},
-		}
+		ep := &mockEmbeddingProvider{}
 
 		bus := newMockBus()
-		agent := NewEncodingAgent(ms, llmProv, testLogger())
+		agent := NewEncodingAgent(ms, ep, testLogger())
 		agent.bus = bus
 
 		evt := events.RawMemoryCreated{
@@ -1306,7 +1212,7 @@ func TestHandleRawMemoryCreated(t *testing.T) {
 	})
 
 	t.Run("rejects invalid event type", func(t *testing.T) {
-		agent := NewEncodingAgent(&mockStore{}, &mockLLMProvider{}, testLogger())
+		agent := NewEncodingAgent(&mockStore{}, &mockEmbeddingProvider{}, testLogger())
 		agent.bus = newMockBus()
 
 		// Pass a different event type
@@ -1338,15 +1244,10 @@ func TestHandleRawMemoryCreated(t *testing.T) {
 			},
 		}
 
-		compressionJSON := `{"summary": "test", "content": "test", "concepts": ["test"], "salience": 0.5}`
-		llmProv := &mockLLMProvider{
-			completeFn: func(_ context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
-				return llm.CompletionResponse{Content: compressionJSON}, nil
-			},
-		}
+		ep := &mockEmbeddingProvider{}
 
 		bus := newMockBus()
-		agent := NewEncodingAgent(ms, llmProv, testLogger())
+		agent := NewEncodingAgent(ms, ep, testLogger())
 		agent.bus = bus
 
 		evt := events.RawMemoryCreated{
@@ -1385,12 +1286,12 @@ func TestPollAndProcessRawMemories(t *testing.T) {
 		ms := &mockStore{
 			listRawUnprocessedFn: func(_ context.Context, limit int) ([]store.RawMemory, error) {
 				return []store.RawMemory{
-					{ID: "poll-1", Content: "content 1", Source: "user", Type: "explicit"},
-					{ID: "poll-2", Content: "content 2", Source: "user", Type: "explicit"},
+					{ID: "poll-1", Content: "debugging go authentication error", Source: "mcp", Type: "decision"},
+					{ID: "poll-2", Content: "fixed database migration schema", Source: "mcp", Type: "decision"},
 				}, nil
 			},
 			getRawFn: func(_ context.Context, id string) (store.RawMemory, error) {
-				return store.RawMemory{ID: id, Content: "content", Source: "user", Type: "explicit"}, nil
+				return store.RawMemory{ID: id, Content: "debugging go code", Source: "mcp", Type: "decision"}, nil
 			},
 			writeMemoryFn: func(_ context.Context, mem store.Memory) error {
 				mu.Lock()
@@ -1400,15 +1301,10 @@ func TestPollAndProcessRawMemories(t *testing.T) {
 			},
 		}
 
-		compressionJSON := `{"summary": "test", "content": "test", "concepts": ["test"], "salience": 0.5}`
-		llmProv := &mockLLMProvider{
-			completeFn: func(_ context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
-				return llm.CompletionResponse{Content: compressionJSON}, nil
-			},
-		}
+		ep := &mockEmbeddingProvider{}
 
 		bus := newMockBus()
-		agent := NewEncodingAgent(ms, llmProv, testLogger())
+		agent := NewEncodingAgent(ms, ep, testLogger())
 		agent.bus = bus
 
 		err := agent.pollAndProcessRawMemories(context.Background())
@@ -1438,7 +1334,7 @@ func TestPollAndProcessRawMemories(t *testing.T) {
 			},
 		}
 
-		agent := NewEncodingAgent(ms, &mockLLMProvider{}, testLogger())
+		agent := NewEncodingAgent(ms, &mockEmbeddingProvider{}, testLogger())
 		agent.bus = newMockBus()
 
 		err := agent.pollAndProcessRawMemories(context.Background())
@@ -1454,7 +1350,7 @@ func TestPollAndProcessRawMemories(t *testing.T) {
 			},
 		}
 
-		agent := NewEncodingAgent(ms, &mockLLMProvider{}, testLogger())
+		agent := NewEncodingAgent(ms, &mockEmbeddingProvider{}, testLogger())
 		agent.bus = newMockBus()
 
 		err := agent.pollAndProcessRawMemories(context.Background())
@@ -1502,15 +1398,10 @@ func TestPollAndProcessRawMemories_SkipsExcludedPaths(t *testing.T) {
 		},
 	}
 
-	compressionJSON := `{"summary": "test", "content": "test", "concepts": ["test"], "salience": 0.5}`
-	llmProv := &mockLLMProvider{
-		completeFn: func(_ context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
-			return llm.CompletionResponse{Content: compressionJSON}, nil
-		},
-	}
+	ep := &mockEmbeddingProvider{}
 
 	bus := newMockBus()
-	agent := NewEncodingAgentWithConfig(ms, llmProv, testLogger(), EncodingConfig{
+	agent := NewEncodingAgentWithConfig(ms, ep, testLogger(), EncodingConfig{
 		ExcludePatterns: []string{"venv/", ".venv/", "site-packages/", "node_modules/"},
 	})
 	agent.bus = bus
@@ -1540,31 +1431,14 @@ func TestPollAndProcessRawMemories_SkipsExcludedPaths(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Tests for compressAndExtractConcepts
+// Tests for compressAndExtractConcepts (heuristic pipeline)
 // ---------------------------------------------------------------------------
 
 func TestCompressAndExtractConcepts(t *testing.T) {
-	t.Run("parses valid LLM JSON response", func(t *testing.T) {
-		compressionJSON := `{
-			"gist": "test gist",
-			"summary": "test summary",
-			"content": "test content",
-			"concepts": ["concept1", "concept2"],
-			"significance": "notable",
-			"emotional_tone": "satisfying",
-			"outcome": "success",
-			"salience": 0.75
-		}`
-
-		llmProv := &mockLLMProvider{
-			completeFn: func(_ context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
-				return llm.CompletionResponse{Content: compressionJSON}, nil
-			},
-		}
-
-		agent := NewEncodingAgent(&mockStore{}, llmProv, testLogger())
+	t.Run("produces heuristic encoding", func(t *testing.T) {
+		agent := NewEncodingAgent(&mockStore{}, &mockEmbeddingProvider{}, testLogger())
 		raw := store.RawMemory{
-			Content:   "test raw content",
+			Content:   "debugging the authentication module for error handling",
 			Source:    "user",
 			Type:      "explicit",
 			Timestamp: time.Now(),
@@ -1575,30 +1449,21 @@ func TestCompressAndExtractConcepts(t *testing.T) {
 			t.Fatalf("compressAndExtractConcepts failed: %v", err)
 		}
 
-		if result.Gist != "test gist" {
-			t.Errorf("expected gist 'test gist', got %q", result.Gist)
+		// Summary should be based on content (first 100 chars, then truncated to 80)
+		if result.Summary == "" {
+			t.Error("expected non-empty summary")
 		}
-		if result.Summary != "test summary" {
-			t.Errorf("expected summary 'test summary', got %q", result.Summary)
+		// Salience should be a valid value from heuristic computation
+		if result.Salience <= 0.0 || result.Salience > 1.0 {
+			t.Errorf("expected valid salience, got %v", result.Salience)
 		}
-		if result.Salience != 0.75 {
-			t.Errorf("expected salience 0.75, got %v", result.Salience)
-		}
-		if len(result.Concepts) != 2 {
-			t.Errorf("expected 2 concepts, got %d", len(result.Concepts))
+		if len(result.Concepts) == 0 {
+			t.Error("expected at least one concept from vocabulary-based extraction")
 		}
 	})
 
-	t.Run("fills in missing summary from raw content", func(t *testing.T) {
-		compressionJSON := `{"gist": "gist", "summary": "", "content": "some content", "concepts": ["c"], "salience": 0.5}`
-
-		llmProv := &mockLLMProvider{
-			completeFn: func(_ context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
-				return llm.CompletionResponse{Content: compressionJSON}, nil
-			},
-		}
-
-		agent := NewEncodingAgent(&mockStore{}, llmProv, testLogger())
+	t.Run("fills summary from raw content", func(t *testing.T) {
+		agent := NewEncodingAgent(&mockStore{}, &mockEmbeddingProvider{}, testLogger())
 		raw := store.RawMemory{Content: "raw content fallback", Source: "user", Type: "explicit", Timestamp: time.Now()}
 
 		result, err := agent.compressAndExtractConcepts(context.Background(), raw)
@@ -1611,39 +1476,22 @@ func TestCompressAndExtractConcepts(t *testing.T) {
 		}
 	})
 
-	t.Run("truncates long summary to 100 chars", func(t *testing.T) {
-		longSummary := strings.Repeat("x", 200)
-		compressionJSON := fmt.Sprintf(`{"summary": %q, "content": "c", "concepts": ["c"], "salience": 0.5}`, longSummary)
-
-		llmProv := &mockLLMProvider{
-			completeFn: func(_ context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
-				return llm.CompletionResponse{Content: compressionJSON}, nil
-			},
-		}
-
-		agent := NewEncodingAgent(&mockStore{}, llmProv, testLogger())
-		raw := store.RawMemory{Content: "test", Source: "user", Type: "explicit", Timestamp: time.Now()}
+	t.Run("truncates long summary to 80 chars", func(t *testing.T) {
+		agent := NewEncodingAgent(&mockStore{}, &mockEmbeddingProvider{}, testLogger())
+		raw := store.RawMemory{Content: strings.Repeat("x", 200), Source: "user", Type: "explicit", Timestamp: time.Now()}
 
 		result, err := agent.compressAndExtractConcepts(context.Background(), raw)
 		if err != nil {
 			t.Fatalf("failed: %v", err)
 		}
 
-		if len(result.Summary) > 100 {
-			t.Errorf("expected summary <= 100 chars, got %d", len(result.Summary))
+		if len(result.Summary) > 80 {
+			t.Errorf("expected summary <= 80 chars, got %d", len(result.Summary))
 		}
 	})
 
-	t.Run("uses heuristic salience when out of range", func(t *testing.T) {
-		compressionJSON := `{"summary": "test", "content": "c", "concepts": ["c"], "salience": -5.0}`
-
-		llmProv := &mockLLMProvider{
-			completeFn: func(_ context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
-				return llm.CompletionResponse{Content: compressionJSON}, nil
-			},
-		}
-
-		agent := NewEncodingAgent(&mockStore{}, llmProv, testLogger())
+	t.Run("salience is valid for user source", func(t *testing.T) {
+		agent := NewEncodingAgent(&mockStore{}, &mockEmbeddingProvider{}, testLogger())
 		raw := store.RawMemory{Content: "test", Source: "user", Type: "explicit", Timestamp: time.Now()}
 
 		result, err := agent.compressAndExtractConcepts(context.Background(), raw)
@@ -1656,127 +1504,70 @@ func TestCompressAndExtractConcepts(t *testing.T) {
 		}
 	})
 
-	t.Run("returns error for non-JSON LLM response", func(t *testing.T) {
-		llmProv := &mockLLMProvider{
-			completeFn: func(_ context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
-				return llm.CompletionResponse{Content: "I don't understand the request."}, nil
-			},
-		}
-
-		agent := NewEncodingAgent(&mockStore{}, llmProv, testLogger())
-		raw := store.RawMemory{Content: "test", Source: "user", Type: "explicit", Timestamp: time.Now()}
+	t.Run("heuristic never returns error", func(t *testing.T) {
+		agent := NewEncodingAgent(&mockStore{}, &mockEmbeddingProvider{}, testLogger())
+		raw := store.RawMemory{Content: "I don't understand the request.", Source: "user", Type: "explicit", Timestamp: time.Now()}
 
 		_, err := agent.compressAndExtractConcepts(context.Background(), raw)
-		if err == nil {
-			t.Fatal("expected error for non-JSON response")
+		if err != nil {
+			t.Fatalf("heuristic compression should never error, got: %v", err)
 		}
 	})
 
-	t.Run("parses structured concepts", func(t *testing.T) {
-		compressionJSON := `{
-			"summary": "test",
-			"content": "test content",
-			"concepts": ["go"],
-			"structured_concepts": {
-				"topics": [{"label": "Go", "path": "programming/go"}],
-				"entities": [{"name": "main.go", "type": "file", "context": "modified"}],
-				"actions": [{"verb": "modified", "object": "file", "details": "added tests"}],
-				"causality": [{"relation": "led_to", "description": "test coverage improved"}]
-			},
-			"salience": 0.6
-		}`
-
-		llmProv := &mockLLMProvider{
-			completeFn: func(_ context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
-				return llm.CompletionResponse{Content: compressionJSON}, nil
-			},
-		}
-
-		agent := NewEncodingAgent(&mockStore{}, llmProv, testLogger())
-		raw := store.RawMemory{Content: "test", Source: "user", Type: "explicit", Timestamp: time.Now()}
+	t.Run("heuristic does not produce structured concepts", func(t *testing.T) {
+		agent := NewEncodingAgent(&mockStore{}, &mockEmbeddingProvider{}, testLogger())
+		raw := store.RawMemory{Content: "modified main.go to add authentication", Source: "user", Type: "explicit", Timestamp: time.Now()}
 
 		result, err := agent.compressAndExtractConcepts(context.Background(), raw)
 		if err != nil {
 			t.Fatalf("failed: %v", err)
 		}
 
-		if result.StructuredConcepts == nil {
-			t.Fatal("expected non-nil structured concepts")
-		}
-		if len(result.StructuredConcepts.Topics) != 1 {
-			t.Errorf("expected 1 topic, got %d", len(result.StructuredConcepts.Topics))
-		}
-		if result.StructuredConcepts.Topics[0].Label != "Go" {
-			t.Errorf("expected topic label 'Go', got %q", result.StructuredConcepts.Topics[0].Label)
-		}
-		if len(result.StructuredConcepts.Entities) != 1 {
-			t.Errorf("expected 1 entity, got %d", len(result.StructuredConcepts.Entities))
+		// Heuristic compression does not produce structured concepts
+		if result.StructuredConcepts != nil {
+			t.Error("expected nil structured concepts from heuristic encoding")
 		}
 	})
 }
 
 // ---------------------------------------------------------------------------
-// Tests for llmClassifyRelationship
+// Tests for llmClassifyRelationship (now keyword-based heuristic)
 // ---------------------------------------------------------------------------
 
 func TestLLMClassifyRelationship(t *testing.T) {
-	t.Run("valid classification", func(t *testing.T) {
-		llmProv := &mockLLMProvider{
-			completeFn: func(_ context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
-				return llm.CompletionResponse{Content: `{"relation_type":"caused_by"}`}, nil
-			},
-		}
+	t.Run("classifies caused_by from keywords", func(t *testing.T) {
+		agent := NewEncodingAgent(&mockStore{}, &mockEmbeddingProvider{}, testLogger())
 
-		agent := NewEncodingAgent(&mockStore{}, llmProv, testLogger())
-
-		result := agent.llmClassifyRelationship(context.Background(), "memory A summary", "memory B summary")
+		result := agent.llmClassifyRelationship(context.Background(), "this caused the crash", "memory B summary")
 		if result != "caused_by" {
 			t.Errorf("expected 'caused_by', got %q", result)
 		}
 	})
 
-	t.Run("invalid relation type returns empty", func(t *testing.T) {
-		llmProv := &mockLLMProvider{
-			completeFn: func(_ context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
-				return llm.CompletionResponse{Content: `{"relation_type":"unknown_type"}`}, nil
-			},
-		}
+	t.Run("defaults to similar when no specific keywords match", func(t *testing.T) {
+		agent := NewEncodingAgent(&mockStore{}, &mockEmbeddingProvider{}, testLogger())
 
-		agent := NewEncodingAgent(&mockStore{}, llmProv, testLogger())
-
-		result := agent.llmClassifyRelationship(context.Background(), "A", "B")
-		if result != "" {
-			t.Errorf("expected empty string for invalid relation type, got %q", result)
+		result := agent.llmClassifyRelationship(context.Background(), "simple update", "another simple update")
+		if result != "similar" {
+			t.Errorf("expected 'similar' as default for no keyword match, got %q", result)
 		}
 	})
 
-	t.Run("LLM error returns empty", func(t *testing.T) {
-		llmProv := &mockLLMProvider{
-			completeFn: func(_ context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
-				return llm.CompletionResponse{}, fmt.Errorf("timeout")
-			},
-		}
+	t.Run("classifies contradicts from keywords", func(t *testing.T) {
+		agent := NewEncodingAgent(&mockStore{}, &mockEmbeddingProvider{}, testLogger())
 
-		agent := NewEncodingAgent(&mockStore{}, llmProv, testLogger())
-
-		result := agent.llmClassifyRelationship(context.Background(), "A", "B")
-		if result != "" {
-			t.Errorf("expected empty string for LLM error, got %q", result)
+		result := agent.llmClassifyRelationship(context.Background(), "this contradicts the previous approach", "other summary")
+		if result != "contradicts" {
+			t.Errorf("expected 'contradicts', got %q", result)
 		}
 	})
 
-	t.Run("non-JSON response returns empty", func(t *testing.T) {
-		llmProv := &mockLLMProvider{
-			completeFn: func(_ context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
-				return llm.CompletionResponse{Content: "I think they are similar."}, nil
-			},
-		}
+	t.Run("classifies temporal from keywords", func(t *testing.T) {
+		agent := NewEncodingAgent(&mockStore{}, &mockEmbeddingProvider{}, testLogger())
 
-		agent := NewEncodingAgent(&mockStore{}, llmProv, testLogger())
-
-		result := agent.llmClassifyRelationship(context.Background(), "A", "B")
-		if result != "" {
-			t.Errorf("expected empty string for non-JSON response, got %q", result)
+		result := agent.llmClassifyRelationship(context.Background(), "before the migration", "after the migration")
+		if result != "temporal" {
+			t.Errorf("expected 'temporal', got %q", result)
 		}
 	})
 }
@@ -1788,8 +1579,8 @@ func TestLLMClassifyRelationship(t *testing.T) {
 func TestClassifyRelationship(t *testing.T) {
 	t.Run("temporal relationship takes priority", func(t *testing.T) {
 		now := time.Now()
-		llmProv := &mockLLMProvider{}
-		agent := NewEncodingAgent(&mockStore{}, llmProv, testLogger())
+		ep := &mockEmbeddingProvider{}
+		agent := NewEncodingAgent(&mockStore{}, ep, testLogger())
 
 		compression := &compressionResponse{
 			Summary:  "new memory",
@@ -1817,8 +1608,8 @@ func TestClassifyRelationship(t *testing.T) {
 	})
 
 	t.Run("reinforces for overlapping concepts", func(t *testing.T) {
-		llmProv := &mockLLMProvider{}
-		agent := NewEncodingAgent(&mockStore{}, llmProv, testLogger())
+		ep := &mockEmbeddingProvider{}
+		agent := NewEncodingAgent(&mockStore{}, ep, testLogger())
 
 		compression := &compressionResponse{
 			Summary:  "auth update",
@@ -1844,8 +1635,8 @@ func TestClassifyRelationship(t *testing.T) {
 	})
 
 	t.Run("contradicts for opposing content", func(t *testing.T) {
-		llmProv := &mockLLMProvider{}
-		agent := NewEncodingAgent(&mockStore{}, llmProv, testLogger())
+		ep := &mockEmbeddingProvider{}
+		agent := NewEncodingAgent(&mockStore{}, ep, testLogger())
 
 		compression := &compressionResponse{
 			Summary:  "build succeeded",
@@ -1871,13 +1662,9 @@ func TestClassifyRelationship(t *testing.T) {
 		}
 	})
 
-	t.Run("falls back to similar when no heuristic matches and LLM fails", func(t *testing.T) {
-		llmProv := &mockLLMProvider{
-			completeFn: func(_ context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
-				return llm.CompletionResponse{}, fmt.Errorf("offline")
-			},
-		}
-		agent := NewEncodingAgent(&mockStore{}, llmProv, testLogger())
+	t.Run("falls back to similar when no heuristic matches", func(t *testing.T) {
+		ep := &mockEmbeddingProvider{}
+		agent := NewEncodingAgent(&mockStore{}, ep, testLogger())
 
 		compression := &compressionResponse{
 			Summary:  "something",
@@ -1905,35 +1692,20 @@ func TestClassifyRelationship(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Tests for structured concepts in encodeMemory
+// Tests for heuristic encoding in encodeMemory (no structured concepts)
 // ---------------------------------------------------------------------------
 
-func TestEncodeMemoryWithStructuredConcepts(t *testing.T) {
+func TestEncodeMemoryWithHeuristicEncoding(t *testing.T) {
 	raw := store.RawMemory{
-		ID:        "raw-sc-1",
+		ID:        "raw-heur-1",
 		Content:   "modified main.go to add authentication",
 		Source:    "user",
 		Type:      "explicit",
 		Timestamp: time.Now(),
 	}
 
-	compressionJSON := `{
-		"summary": "added auth to main.go",
-		"content": "modified main.go for auth",
-		"concepts": ["go", "auth"],
-		"structured_concepts": {
-			"topics": [{"label": "Auth", "path": "security/auth"}],
-			"entities": [{"name": "main.go", "type": "file", "context": "modified"}],
-			"actions": [{"verb": "modified", "object": "file", "details": "added auth"}],
-			"causality": [{"relation": "led_to", "description": "improved security"}]
-		},
-		"significance": "important",
-		"emotional_tone": "neutral",
-		"outcome": "success",
-		"salience": 0.7
-	}`
-
-	var writtenCS store.ConceptSet
+	var writtenCS *store.ConceptSet
+	var writtenAttrs store.MemoryAttributes
 
 	ms := &mockStore{
 		getRawFn: func(_ context.Context, id string) (store.RawMemory, error) {
@@ -1941,40 +1713,38 @@ func TestEncodeMemoryWithStructuredConcepts(t *testing.T) {
 		},
 		writeMemoryFn: func(_ context.Context, mem store.Memory) error { return nil },
 		writeConceptSetFn: func(_ context.Context, cs store.ConceptSet) error {
-			writtenCS = cs
+			writtenCS = &cs
+			return nil
+		},
+		writeMemoryAttrsFn: func(_ context.Context, attrs store.MemoryAttributes) error {
+			writtenAttrs = attrs
 			return nil
 		},
 	}
 
-	llmProv := &mockLLMProvider{
-		completeFn: func(_ context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
-			return llm.CompletionResponse{Content: compressionJSON}, nil
-		},
-	}
+	ep := &mockEmbeddingProvider{}
 
 	bus := newMockBus()
-	agent := NewEncodingAgent(ms, llmProv, testLogger())
+	agent := NewEncodingAgent(ms, ep, testLogger())
 	agent.bus = bus
 
-	err := agent.encodeMemory(context.Background(), "raw-sc-1")
+	err := agent.encodeMemory(context.Background(), "raw-heur-1")
 	if err != nil {
 		t.Fatalf("encodeMemory failed: %v", err)
 	}
 
-	if len(writtenCS.Topics) != 1 {
-		t.Fatalf("expected 1 topic, got %d", len(writtenCS.Topics))
+	// Heuristic encoding does not produce structured concepts, so WriteConceptSet
+	// should not be called
+	if writtenCS != nil {
+		t.Error("expected no concept set to be written (heuristic encoding has no structured concepts)")
 	}
-	if writtenCS.Topics[0].Label != "Auth" {
-		t.Errorf("expected topic label 'Auth', got %q", writtenCS.Topics[0].Label)
+
+	// Attributes should still be written with heuristic defaults
+	if writtenAttrs.EmotionalTone != "neutral" {
+		t.Errorf("expected emotional_tone 'neutral', got %q", writtenAttrs.EmotionalTone)
 	}
-	if len(writtenCS.Entities) != 1 {
-		t.Fatalf("expected 1 entity, got %d", len(writtenCS.Entities))
-	}
-	if writtenCS.Entities[0].Name != "main.go" {
-		t.Errorf("expected entity name 'main.go', got %q", writtenCS.Entities[0].Name)
-	}
-	if writtenCS.Significance != "important" {
-		t.Errorf("expected significance 'important', got %q", writtenCS.Significance)
+	if writtenAttrs.Outcome != "ongoing" {
+		t.Errorf("expected outcome 'ongoing', got %q", writtenAttrs.Outcome)
 	}
 }
 
@@ -2014,7 +1784,7 @@ func TestGetEpisodeIDForRaw(t *testing.T) {
 			},
 		}
 
-		agent := NewEncodingAgent(ms, &mockLLMProvider{}, testLogger())
+		agent := NewEncodingAgent(ms, &mockEmbeddingProvider{}, testLogger())
 		raw := store.RawMemory{ID: "raw-b"}
 
 		result := getEpisodeIDForRaw(agent, context.Background(), raw)
@@ -2033,7 +1803,7 @@ func TestGetEpisodeIDForRaw(t *testing.T) {
 			},
 		}
 
-		agent := NewEncodingAgent(ms, &mockLLMProvider{}, testLogger())
+		agent := NewEncodingAgent(ms, &mockEmbeddingProvider{}, testLogger())
 		raw := store.RawMemory{ID: "raw-z"}
 
 		result := getEpisodeIDForRaw(agent, context.Background(), raw)
@@ -2045,7 +1815,7 @@ func TestGetEpisodeIDForRaw(t *testing.T) {
 	t.Run("returns empty when no open episode", func(t *testing.T) {
 		ms := &mockStore{} // default returns error
 
-		agent := NewEncodingAgent(ms, &mockLLMProvider{}, testLogger())
+		agent := NewEncodingAgent(ms, &mockEmbeddingProvider{}, testLogger())
 		raw := store.RawMemory{ID: "raw-1"}
 
 		result := getEpisodeIDForRaw(agent, context.Background(), raw)

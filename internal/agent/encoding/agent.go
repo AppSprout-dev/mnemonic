@@ -2,22 +2,19 @@ package encoding
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
-	"gopkg.in/yaml.v3"
 
 	"github.com/appsprout-dev/mnemonic/internal/agent/agentutil"
 	"github.com/appsprout-dev/mnemonic/internal/agent/retrieval"
+	"github.com/appsprout-dev/mnemonic/internal/embedding"
 	"github.com/appsprout-dev/mnemonic/internal/events"
-	"github.com/appsprout-dev/mnemonic/internal/llm"
 	"github.com/appsprout-dev/mnemonic/internal/store"
 	"github.com/appsprout-dev/mnemonic/internal/watcher/filesystem"
 )
@@ -28,25 +25,23 @@ const defaultMaxRetries = 3
 // EncodingAgent transforms raw memories into encoded, searchable memory units.
 // It performs compression, concept extraction, embedding generation, and association creation.
 type EncodingAgent struct {
-	store                store.Store
-	llmProvider          llm.Provider
-	log                  *slog.Logger
-	bus                  events.Bus
-	config               EncodingConfig
-	name                 string
-	ctx                  context.Context
-	cancel               context.CancelFunc
-	wg                   sync.WaitGroup
-	subscriptionID       string
-	classificationSubID  string
-	pollingStopChan      chan struct{}
-	stopOnce             sync.Once
-	processingMutex      sync.Mutex
-	processingMemories   map[string]bool // Prevent duplicate processing
-	encodingSem          chan struct{}   // limits concurrent LLM encoding calls
-	failureCounts        map[string]int  // tracks retry count per raw memory ID
-	backoffUntil         time.Time       // when non-zero, skip polling until this time
-	coachingInstructions string          // loaded from coaching.yaml at startup
+	store              store.Store
+	embedder           embedding.Provider
+	log                *slog.Logger
+	bus                events.Bus
+	config             EncodingConfig
+	name               string
+	ctx                context.Context
+	cancel             context.CancelFunc
+	wg                 sync.WaitGroup
+	subscriptionID     string
+	pollingStopChan    chan struct{}
+	stopOnce           sync.Once
+	processingMutex    sync.Mutex
+	processingMemories map[string]bool // Prevent duplicate processing
+	encodingSem        chan struct{}   // limits concurrent embedding calls
+	failureCounts      map[string]int  // tracks retry count per raw memory ID
+	backoffUntil       time.Time       // when non-zero, skip polling until this time
 }
 
 // EncodingConfig holds configurable parameters for the encoding agent.
@@ -176,46 +171,13 @@ type causalEntry struct {
 	Description string `json:"description"`
 }
 
-// encodingResponseSchema returns the JSON schema for structured output enforcement.
-// When passed to LM Studio via response_format, this forces the model to produce
-// valid JSON matching the compressionResponse struct — no prose, no markdown fences.
-func encodingResponseSchema() json.RawMessage {
-	return json.RawMessage(`{
-  "type": "object",
-  "properties": {
-    "gist":              { "type": "string" },
-    "summary":           { "type": "string" },
-    "content":           { "type": "string" },
-    "narrative":         { "type": "string" },
-    "concepts":          { "type": "array", "items": { "type": "string" } },
-    "structured_concepts": {
-      "type": "object",
-      "properties": {
-        "topics":    { "type": "array", "items": { "type": "object", "properties": { "label": { "type": "string" }, "path": { "type": "string" } }, "required": ["label", "path"], "additionalProperties": false } },
-        "entities":  { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string" }, "type": { "type": "string" }, "context": { "type": "string" } }, "required": ["name", "type", "context"], "additionalProperties": false } },
-        "actions":   { "type": "array", "items": { "type": "object", "properties": { "verb": { "type": "string" }, "object": { "type": "string" }, "details": { "type": "string" } }, "required": ["verb", "object", "details"], "additionalProperties": false } },
-        "causality": { "type": "array", "items": { "type": "object", "properties": { "relation": { "type": "string" }, "description": { "type": "string" } }, "required": ["relation", "description"], "additionalProperties": false } }
-      },
-      "required": ["topics", "entities", "actions", "causality"],
-      "additionalProperties": false
-    },
-    "significance":   { "type": "string" },
-    "emotional_tone":  { "type": "string" },
-    "outcome":         { "type": "string" },
-    "salience":        { "type": "number" }
-  },
-  "required": ["gist", "summary", "content", "narrative", "concepts", "structured_concepts", "significance", "emotional_tone", "outcome", "salience"],
-  "additionalProperties": false
-}`)
-}
-
 // NewEncodingAgent creates a new encoding agent with the given dependencies.
-func NewEncodingAgent(s store.Store, llmProv llm.Provider, log *slog.Logger) *EncodingAgent {
-	return NewEncodingAgentWithConfig(s, llmProv, log, DefaultConfig())
+func NewEncodingAgent(s store.Store, embedder embedding.Provider, log *slog.Logger) *EncodingAgent {
+	return NewEncodingAgentWithConfig(s, embedder, log, DefaultConfig())
 }
 
 // NewEncodingAgentWithConfig creates a new encoding agent with custom configuration.
-func NewEncodingAgentWithConfig(s store.Store, llmProv llm.Provider, log *slog.Logger, cfg EncodingConfig) *EncodingAgent {
+func NewEncodingAgentWithConfig(s store.Store, embedder embedding.Provider, log *slog.Logger, cfg EncodingConfig) *EncodingAgent {
 	semSize := cfg.MaxConcurrentEncodings
 	if semSize <= 0 {
 		semSize = 1
@@ -225,7 +187,7 @@ func NewEncodingAgentWithConfig(s store.Store, llmProv llm.Provider, log *slog.L
 	ctx, cancel := context.WithCancel(context.Background())
 	ea := &EncodingAgent{
 		store:              s,
-		llmProvider:        llmProv,
+		embedder:           embedder,
 		log:                log,
 		config:             cfg,
 		name:               "encoding-agent",
@@ -235,17 +197,6 @@ func NewEncodingAgentWithConfig(s store.Store, llmProv llm.Provider, log *slog.L
 		processingMemories: make(map[string]bool),
 		encodingSem:        make(chan struct{}, semSize),
 		failureCounts:      make(map[string]int),
-	}
-
-	// Load coaching instructions if configured
-	if cfg.CoachingFile != "" {
-		instructions, err := loadCoachingInstructions(cfg.CoachingFile)
-		if err != nil {
-			log.Warn("failed to load coaching file", "path", cfg.CoachingFile, "error", err)
-		} else if instructions != "" {
-			ea.coachingInstructions = instructions
-			log.Info("coaching instructions loaded", "path", cfg.CoachingFile)
-		}
 	}
 
 	return ea
@@ -344,12 +295,6 @@ func (ea *EncodingAgent) Start(ctx context.Context, bus events.Bus) error {
 	ea.subscriptionID = bus.Subscribe(events.TypeRawMemoryCreated, ea.handleRawMemoryCreated)
 	ea.log.Info("subscribed to raw memory creation events", "agent", ea.name)
 
-	// Subscribe to background LLM classification if enabled
-	if ea.config.EnableLLMClassification {
-		ea.classificationSubID = bus.Subscribe(events.TypeAssociationsPendingClassification, ea.handleAssociationClassification)
-		ea.log.Info("LLM association classification enabled", "agent", ea.name)
-	}
-
 	// Start the polling loop as a fallback mechanism.
 	// MCP processes disable polling — they only encode via events for memories
 	// they themselves create. The daemon's polling loop is the single poller.
@@ -373,9 +318,6 @@ func (ea *EncodingAgent) Stop() error {
 		// Unsubscribe from events
 		if ea.bus != nil && ea.subscriptionID != "" {
 			ea.bus.Unsubscribe(ea.subscriptionID)
-		}
-		if ea.bus != nil && ea.classificationSubID != "" {
-			ea.bus.Unsubscribe(ea.classificationSubID)
 		}
 
 		// Stop the polling loop
@@ -419,9 +361,9 @@ func (ea *EncodingAgent) EncodeAllPending(ctx context.Context) (int, error) {
 
 // Health checks if the encoding agent is functioning.
 func (ea *EncodingAgent) Health(ctx context.Context) error {
-	// Check if the LLM provider is available
-	if err := ea.llmProvider.Health(ctx); err != nil {
-		return fmt.Errorf("llm provider unhealthy: %w", err)
+	// Check if the embedding provider is available
+	if err := ea.embedder.Health(ctx); err != nil {
+		return fmt.Errorf("embedding provider unhealthy: %w", err)
 	}
 
 	// Check if the store is reachable (try a simple read)
@@ -663,11 +605,11 @@ func (ea *EncodingAgent) pollAndProcessRawMemories(ctx context.Context) error {
 		for _, cm := range compressed[i:end] {
 			texts = append(texts, cm.embeddingText)
 		}
-		batchResult, err := ea.llmProvider.BatchEmbed(ctx, texts)
+		batchResult, err := ea.embedder.BatchEmbed(ctx, texts)
 		if err != nil {
 			ea.log.Warn("batch embedding failed, falling back to individual", "error", err, "batch_size", len(texts))
 			for j, cm := range compressed[i:end] {
-				emb, err := ea.llmProvider.Embed(ctx, cm.embeddingText)
+				emb, err := ea.embedder.Embed(ctx, cm.embeddingText)
 				if err != nil {
 					ea.log.Warn("individual embedding also failed", "raw_id", cm.rawID, "error", err)
 				} else {
@@ -696,15 +638,9 @@ func (ea *EncodingAgent) pollAndProcessRawMemories(ctx context.Context) error {
 	return nil
 }
 
-// compressRawMemory runs the LLM compression step and returns the result plus embedding text.
-func (ea *EncodingAgent) compressRawMemory(ctx context.Context, raw store.RawMemory) (*compressionResponse, string, error) {
-	compression, err := ea.compressAndExtractConcepts(ctx, raw)
-	if err != nil {
-		if raw.Source == "filesystem" {
-			return nil, "", fmt.Errorf("LLM unavailable for filesystem encoding: %w", err)
-		}
-		compression = ea.fallbackCompression(raw)
-	}
+// compressRawMemory runs the heuristic compression step and returns the result plus embedding text.
+func (ea *EncodingAgent) compressRawMemory(_ context.Context, raw store.RawMemory) (*compressionResponse, string, error) {
+	compression := ea.heuristicCompression(raw)
 	embeddingText := agentutil.Truncate(compression.Summary+" "+compression.Content, ea.maxEmbedding())
 	return compression, embeddingText, nil
 }
@@ -842,9 +778,8 @@ func (ea *EncodingAgent) persistEncodedMemory(ctx context.Context, raw store.Raw
 		ea.log.Warn("failed to write memory attributes", "error", err)
 	}
 
-	// Write associations and collect classification candidates
+	// Write associations
 	associationsCreated := 0
-	var classificationCandidates []events.AssocCandidate
 	for i := range associations {
 		associations[i].SourceID = memoryID
 		if err := ea.store.CreateAssociation(ctx, associations[i]); err != nil {
@@ -852,17 +787,6 @@ func (ea *EncodingAgent) persistEncodedMemory(ctx context.Context, raw store.Raw
 				"target_id", associations[i].TargetID, "error", err)
 		} else {
 			associationsCreated++
-			if ea.config.EnableLLMClassification && associations[i].RelationType == "similar" {
-				targetMem, err := ea.store.GetMemory(ctx, associations[i].TargetID)
-				if err == nil {
-					classificationCandidates = append(classificationCandidates, events.AssocCandidate{
-						SourceID: memoryID,
-						TargetID: associations[i].TargetID,
-						Summary1: compression.Summary,
-						Summary2: targetMem.Summary,
-					})
-				}
-			}
 		}
 	}
 
@@ -906,14 +830,6 @@ func (ea *EncodingAgent) persistEncodedMemory(ctx context.Context, raw store.Raw
 			Ts:                  time.Now(),
 		}); err != nil {
 			ea.log.Warn("failed to publish MemoryEncoded event", "memory_id", memoryID, "error", err)
-		}
-		if len(classificationCandidates) > 0 {
-			if err := ea.bus.Publish(ctx, events.AssociationsPendingClassification{
-				Candidates: classificationCandidates,
-				Ts:         time.Now(),
-			}); err != nil {
-				ea.log.Warn("failed to publish classification event", "memory_id", memoryID, "error", err)
-			}
 		}
 	}
 
@@ -1002,9 +918,9 @@ func (ea *EncodingAgent) encodeMemory(ctx context.Context, rawID string) error {
 
 	ea.log.Debug("encoding raw memory", "raw_id", raw.ID, "source", raw.Source)
 
-	// Step 1b: Tier 2 concept pre-check — skip expensive LLM compression if a
-	// semantically similar memory likely already exists (zero LLM cost).
-	skipCompression := false
+	// Step 1b: Tier 2 concept pre-check — skip embedding if a semantically
+	// similar memory likely already exists (cheap concept overlap check).
+	skipEmbedding := false
 	if raw.Source != "mcp" { // Never skip MCP memories — they're explicit user input.
 		rawConcepts := retrieval.ParseQueryConcepts(raw.Content)
 		if len(rawConcepts) >= 3 {
@@ -1012,9 +928,9 @@ func (ea *EncodingAgent) encodeMemory(ctx context.Context, rawID string) error {
 			if cerr == nil && len(candidates) > 0 {
 				for _, cand := range candidates {
 					if conceptOverlap(rawConcepts, cand.Concepts) >= 0.8 {
-						ea.log.Info("tier2-dedup: likely duplicate, skipping LLM compression",
+						ea.log.Info("tier2-dedup: likely duplicate, skipping encoding",
 							"raw_id", raw.ID, "existing_id", cand.ID)
-						skipCompression = true
+						skipEmbedding = true
 						break
 					}
 				}
@@ -1022,36 +938,24 @@ func (ea *EncodingAgent) encodeMemory(ctx context.Context, rawID string) error {
 		}
 	}
 
-	// Step 2: Call LLM to compress and extract concepts (skipped if Tier 2 dedup triggered)
-	var compression *compressionResponse
-	if skipCompression {
-		compression = ea.fallbackCompression(raw)
-	} else {
-		compression, err = ea.compressAndExtractConcepts(ctx, raw)
-		if err != nil {
-			ea.log.Error("failed to compress raw memory with LLM", "raw_id", raw.ID, "error", err)
-			if raw.Source == "filesystem" {
-				ea.log.Info("skipping fallback encoding for filesystem event, will retry later", "raw_id", raw.ID)
-				return fmt.Errorf("LLM unavailable for filesystem encoding: %w", err)
-			}
-			compression = ea.fallbackCompression(raw)
-		}
-	}
+	// Step 2: Heuristic compression and concept extraction
+	compression := ea.heuristicCompression(raw)
+	_ = skipEmbedding // reserved for future use: skip embedding for tier2-dedup hits
 
 	ea.log.Debug("compression completed", "raw_id", raw.ID, "summary_length", len(compression.Summary))
 
 	// Step 3: Generate embedding (truncate to avoid exceeding model context)
 	embeddingText := agentutil.Truncate(compression.Summary+" "+compression.Content, ea.maxEmbedding())
-	embedding, err := ea.llmProvider.Embed(ctx, embeddingText)
+	emb, err := ea.embedder.Embed(ctx, embeddingText)
 	if err != nil {
 		ea.log.Warn("failed to generate embedding", "raw_id", raw.ID, "error", err)
 		// Continue without embedding; it's optional
 	} else {
-		ea.log.Debug("embedding generated successfully", "raw_id", raw.ID, "dims", len(embedding))
+		ea.log.Debug("embedding generated successfully", "raw_id", raw.ID, "dims", len(emb))
 	}
 
 	// Steps 4-8: Persist the encoded memory (dedup, write, associations, events)
-	result, err := ea.persistEncodedMemory(ctx, raw, compression, embedding)
+	result, err := ea.persistEncodedMemory(ctx, raw, compression, emb)
 	if err != nil {
 		return err
 	}
@@ -1126,9 +1030,9 @@ func looksLikeMarkup(content string) bool {
 	return false
 }
 
-// compressAndExtractConcepts calls the LLM to compress and extract concepts from a raw memory.
-// Falls back to heuristic compression if the LLM call fails or returns unparseable output.
-func (ea *EncodingAgent) compressAndExtractConcepts(ctx context.Context, raw store.RawMemory) (*compressionResponse, error) {
+// heuristicCompression produces a compression using deterministic heuristics
+// from the embedding package. No LLM calls are made.
+func (ea *EncodingAgent) heuristicCompression(raw store.RawMemory) *compressionResponse {
 	// Pre-process markup content — strip tags to get clean text
 	processedContent := raw.Content
 	if looksLikeMarkup(processedContent) {
@@ -1138,198 +1042,12 @@ func (ea *EncodingAgent) compressAndExtractConcepts(ctx context.Context, raw sto
 		}
 	}
 
-	truncatedContent := agentutil.Truncate(processedContent, ea.maxLLMContent())
+	result := embedding.GenerateEncodingResponse(processedContent, raw.Source, raw.Type)
 
-	// Gather contextual information for richer encoding
-	episodeCtx := ea.getEpisodeContext(ctx, raw)
-	relatedCtx := ea.getRelatedContext(ctx, raw)
-
-	// Build the LLM prompt
-	prompt := buildCompressionPrompt(truncatedContent, raw.Source, raw.Type, episodeCtx, relatedCtx, ea.coachingInstructions, ea.config.ConceptVocabulary)
-
-	req := llm.CompletionRequest{
-		Messages: []llm.Message{
-			{Role: "system", Content: "You are a memory encoder. You receive events and output structured JSON. Never explain, never apologize, never chat. Just fill in the JSON fields based on the event data."},
-			{Role: "user", Content: prompt},
-		},
-		MaxTokens:   ea.config.CompletionMaxTokens,
-		Temperature: ea.config.CompletionTemperature,
-		ResponseFormat: &llm.ResponseFormat{
-			Type: "json_schema",
-			JSONSchema: &llm.JSONSchema{
-				Name:   "encoding_response",
-				Strict: true,
-				Schema: encodingResponseSchema(),
-			},
-		},
-	}
-
-	resp, err := ea.llmProvider.Complete(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("LLM completion failed: %w", err)
-	}
-
-	// Logit validation: reject low-confidence completions from embedded models
-	if resp.MeanProb > 0 && resp.MeanProb < 0.10 {
-		slog.Warn("LLM completion has very low confidence, falling back to heuristic",
-			"mean_prob", resp.MeanProb, "min_prob", resp.MinProb,
-			"tokens", resp.CompletionTokens)
-		return nil, fmt.Errorf("LLM completion confidence too low (mean_prob=%.3f)", resp.MeanProb)
-	}
-	if resp.MeanProb > 0 {
-		slog.Debug("LLM completion confidence", "mean_prob", resp.MeanProb, "min_prob", resp.MinProb)
-	}
-
-	// Extract and parse JSON from LLM response
-	jsonStr := agentutil.ExtractJSON(resp.Content)
-	var result compressionResponse
-	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
-		slog.Debug("LLM response failed JSON parse", "raw_response", agentutil.Truncate(resp.Content, 500), "stop_reason", resp.StopReason, "tokens_used", resp.TokensUsed)
-		return nil, fmt.Errorf("failed to parse LLM compression response: %w", err)
-	}
-
-	// Validate and fix fields
-	if result.Summary == "" {
-		result.Summary = agentutil.Truncate(processedContent, 100)
-	}
-	if r := []rune(result.Summary); len(r) > 100 {
-		result.Summary = string(r[:100])
-	}
-	if result.Content == "" {
-		result.Content = truncatedContent
-	}
-	if result.Gist == "" {
-		result.Gist = truncateString(result.Summary, 60)
-	}
-	if len(result.Concepts) == 0 {
-		result.Concepts = extractDefaultConcepts(truncatedContent, raw.Type, raw.Source)
-	}
-	result.Concepts = cleanConcepts(result.Concepts)
-	if result.Salience <= 0.0 || result.Salience > 1.0 {
-		result.Salience = heuristicSalience(raw.Source, raw.Type, truncatedContent)
-	}
-
-	return &result, nil
-}
-
-// buildCompressionPrompt constructs the LLM prompt for memory compression and concept extraction.
-// NOTE: The prompt deliberately avoids showing a JSON template because the local LLM model
-// echoes template placeholder text verbatim into the output fields. Structured output
-// (response_format with json_schema) enforces the JSON structure instead.
-func buildCompressionPrompt(content, source, memType, episodeCtx, relatedCtx, coachingInstructions string, conceptVocabulary []string) string {
-	var b strings.Builder
-
-	if source == "ingest" {
-		b.WriteString(`Catalog this source code file. Describe what the file IS and DOES.
-
-Fill in every JSON field based on the actual file content below:
-- gist: What this file is in under 60 characters.
-- summary: The file's purpose in under 100 characters.
-- content: A compressed description of what the file contains and how it works.
-- narrative: The file's role in the project architecture and why it matters.
-- concepts: 3-5 keywords describing the file's domain. PREFER exact terms from the vocabulary list below; only use new terms if no vocabulary term fits.
-- structured_concepts: Extract topics, entities, actions, and causal relationships from the file.
-- significance: One of routine, notable, important, or critical.
-- emotional_tone: neutral.
-- outcome: success.
-- salience: 0.7+ for core implementation, 0.5 for tests/utilities, 0.3 for generated files.
-
-`)
-	} else {
-		b.WriteString(`Encode this event into memory. Read the content below and summarize what actually happened.
-
-Fill in every JSON field based on the actual event content below:
-- gist: What happened in under 60 characters.
-- summary: What happened and why it matters in under 100 characters.
-- content: The key details someone would need to understand this event later.
-- narrative: The story of what happened including context and meaning.
-- concepts: 3-5 keywords about the event. PREFER exact terms from the vocabulary list below; only use new terms if no vocabulary term fits.
-- structured_concepts: Extract topics, entities, actions, and causal relationships from the event.
-- significance: One of routine, notable, important, or critical.
-- emotional_tone: One of neutral, satisfying, frustrating, exciting, or concerning.
-- outcome: One of success, failure, ongoing, or unknown.
-- salience: 0.7+ for decisions/errors/insights, 0.5 for notable activity, 0.3 for routine file saves.
-
-`)
-	}
-
-	if len(conceptVocabulary) > 0 {
-		b.WriteString("IMPORTANT: Extract concepts from the CONTENT of the memory, not from what kind of memory it is. A decision about database indexing should have concepts like 'database', 'performance' — NOT 'decision'. Do NOT use metadata as concepts (e.g., 'source:mcp', 'type:insight', project names).\n\n")
-		b.WriteString("CONCEPT VOCABULARY — prefer terms from this list when they match the content topic. Invent a new term if no vocabulary term fits the actual subject matter:\n")
-		b.WriteString(strings.Join(conceptVocabulary, ", "))
-		b.WriteString("\n\n")
-	}
-
-	if episodeCtx != "" {
-		b.WriteString(episodeCtx)
-	}
-	if relatedCtx != "" {
-		b.WriteString(relatedCtx)
-	}
-
-	if coachingInstructions != "" {
-		b.WriteString(coachingInstructions)
-		b.WriteString("\n\n")
-	}
-
-	fmt.Fprintf(&b, "SOURCE: %s\n", source)
-	fmt.Fprintf(&b, "TYPE: %s\n", memType)
-	fmt.Fprintf(&b, "CONTENT:\n%s\n", content)
-
-	return b.String()
-}
-
-// loadCoachingInstructions reads the coaching YAML file and returns
-// the encoding coaching text to inject into prompts.
-// Returns ("", nil) if path is empty or file does not exist.
-func loadCoachingInstructions(path string) (string, error) {
-	if path == "" {
-		return "", nil
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", nil // coaching file is optional
-		}
-		return "", fmt.Errorf("reading coaching file: %w", err)
-	}
-
-	// Minimal struct — only parse the fields we need
-	var coaching struct {
-		Coaching struct {
-			Encoding struct {
-				Notes        string `yaml:"notes"`
-				Instructions string `yaml:"instructions"`
-			} `yaml:"encoding"`
-		} `yaml:"coaching"`
-	}
-
-	if err := yaml.Unmarshal(data, &coaching); err != nil {
-		return "", fmt.Errorf("parsing coaching file: %w", err)
-	}
-
-	var parts []string
-	if n := strings.TrimSpace(coaching.Coaching.Encoding.Notes); n != "" {
-		parts = append(parts, "COACHING NOTES:\n"+n)
-	}
-	if inst := strings.TrimSpace(coaching.Coaching.Encoding.Instructions); inst != "" {
-		parts = append(parts, "COACHING INSTRUCTIONS:\n"+inst)
-	}
-
-	if len(parts) == 0 {
-		return "", nil
-	}
-	return strings.Join(parts, "\n\n"), nil
-}
-
-// fallbackCompression creates a compression when LLM fails.
-func (ea *EncodingAgent) fallbackCompression(raw store.RawMemory) *compressionResponse {
-	// Create a summary — prefer path-based description for files, content for everything else
-	summary := raw.Content
+	// Build a path-aware summary for filesystem events
+	summary := result.Summary
 	if path, ok := raw.Metadata["path"]; ok {
 		if pathStr, ok := path.(string); ok && pathStr != "" {
-			// Use the file path to create a meaningful summary
 			action := raw.Type
 			if action == "" {
 				action = "changed"
@@ -1338,7 +1056,6 @@ func (ea *EncodingAgent) fallbackCompression(raw store.RawMemory) *compressionRe
 		}
 	}
 	if looksLikeMarkup(summary) {
-		// Don't use raw HTML as summary — strip tags or use a generic description
 		stripped := strings.TrimSpace(stripHTMLTags(summary))
 		if len(stripped) > 20 {
 			summary = stripped
@@ -1350,25 +1067,66 @@ func (ea *EncodingAgent) fallbackCompression(raw store.RawMemory) *compressionRe
 		summary = string(r[:80])
 	}
 
-	// Extract basic concepts from the content
-	concepts := extractDefaultConcepts(raw.Content, raw.Type, raw.Source)
+	concepts := cleanConcepts(result.Concepts)
+	if len(concepts) == 0 {
+		concepts = extractDefaultConcepts(processedContent, raw.Type, raw.Source)
+	}
 
 	return &compressionResponse{
 		Gist:               truncateString(summary, 60),
 		Summary:            summary,
-		Content:            agentutil.Truncate(raw.Content, ea.maxLLMContent()),
+		Content:            result.Content,
 		Narrative:          "",
 		Concepts:           concepts,
 		StructuredConcepts: nil,
-		Significance:       "routine",
-		EmotionalTone:      "neutral",
-		Outcome:            "ongoing",
-		Salience:           heuristicSalience(raw.Source, raw.Type, raw.Content),
+		Significance:       result.Significance,
+		EmotionalTone:      result.Tone,
+		Outcome:            result.Outcome,
+		Salience:           result.Salience,
 	}
 }
 
-// heuristicSalience computes a reasonable salience score based on content characteristics
-// when the LLM fails to provide one.
+// compressAndExtractConcepts produces a heuristic compression for a raw memory.
+// Retained for backward compatibility with existing tests; delegates to heuristicCompression.
+func (ea *EncodingAgent) compressAndExtractConcepts(_ context.Context, raw store.RawMemory) (*compressionResponse, error) {
+	return ea.heuristicCompression(raw), nil
+}
+
+// fallbackCompression creates a compression using heuristics. Retained for
+// backward compatibility with existing tests; delegates to heuristicCompression.
+func (ea *EncodingAgent) fallbackCompression(raw store.RawMemory) *compressionResponse {
+	return ea.heuristicCompression(raw)
+}
+
+// cleanConcepts normalizes and filters extracted concepts:
+// - lowercases all terms
+// - strips metadata-like concepts (source:*, type:*, project names)
+// - deduplicates
+func cleanConcepts(concepts []string) []string {
+	seen := make(map[string]bool)
+	var cleaned []string
+	for _, c := range concepts {
+		c = strings.ToLower(strings.TrimSpace(c))
+		if c == "" {
+			continue
+		}
+		// Strip metadata-like concepts
+		if strings.Contains(c, ":") || strings.HasPrefix(c, "source") || strings.HasPrefix(c, "type") {
+			continue
+		}
+		// Skip overly generic terms
+		if c == "mnemonic" || c == "general" || c == "memory" && len(concepts) > 3 {
+			continue
+		}
+		if !seen[c] {
+			seen[c] = true
+			cleaned = append(cleaned, c)
+		}
+	}
+	return cleaned
+}
+
+// heuristicSalience computes a reasonable salience score based on content characteristics.
 func heuristicSalience(source, memType, content string) float32 {
 	score := float32(0.5) // base
 
@@ -1411,35 +1169,7 @@ func heuristicSalience(source, memType, content string) float32 {
 	return score
 }
 
-// cleanConcepts normalizes and filters extracted concepts:
-// - lowercases all terms
-// - strips metadata-like concepts (source:*, type:*, project names)
-// - deduplicates
-func cleanConcepts(concepts []string) []string {
-	seen := make(map[string]bool)
-	var cleaned []string
-	for _, c := range concepts {
-		c = strings.ToLower(strings.TrimSpace(c))
-		if c == "" {
-			continue
-		}
-		// Strip metadata-like concepts
-		if strings.Contains(c, ":") || strings.HasPrefix(c, "source") || strings.HasPrefix(c, "type") {
-			continue
-		}
-		// Skip overly generic terms
-		if c == "mnemonic" || c == "general" || c == "memory" && len(concepts) > 3 {
-			continue
-		}
-		if !seen[c] {
-			seen[c] = true
-			cleaned = append(cleaned, c)
-		}
-	}
-	return cleaned
-}
-
-// extractDefaultConcepts extracts basic concepts when LLM compression fails.
+// extractDefaultConcepts extracts basic concepts when heuristic compression fails.
 func extractDefaultConcepts(content, memoryType, source string) []string {
 	concepts := []string{}
 
@@ -1546,6 +1276,16 @@ func (ea *EncodingAgent) classifyRelationship(ctx context.Context, compression *
 	return "similar"
 }
 
+// llmClassifyRelationship classifies the relationship between two memory summaries
+// using heuristic keyword analysis. Retained for backward compatibility; no LLM calls are made.
+func (ea *EncodingAgent) llmClassifyRelationship(_ context.Context, summary1, summary2 string) string {
+	result := embedding.ClassifyRelationship(summary1, summary2)
+	if validRelationTypes[result] {
+		return result
+	}
+	return ""
+}
+
 // isTemporalRelationship detects if two memories are temporally adjacent.
 func isTemporalRelationship(raw store.RawMemory, existing store.Memory, window time.Duration) bool {
 	timeDiff := raw.Timestamp.Sub(existing.Timestamp)
@@ -1597,178 +1337,6 @@ func detectContradiction(content1, content2 string) bool {
 		}
 	}
 	return false
-}
-
-// classificationResponse is the expected JSON from the LLM for relationship classification.
-type classificationResponse struct {
-	RelationType string `json:"relation_type"`
-}
-
-// llmClassifyRelationship asks the LLM to classify the relationship between two memory summaries.
-func (ea *EncodingAgent) llmClassifyRelationship(ctx context.Context, summary1, summary2 string) string {
-	prompt := fmt.Sprintf(`How are these two memories connected? Think about whether one led to the other, whether they reinforce the same idea, or whether they tell different sides of the same story.
-
-Memory A: %s
-Memory B: %s
-
-Respond with ONLY a JSON object — pick the relationship that best captures the connection:
-{"relation_type":"similar|caused_by|part_of|contradicts|temporal|reinforces"}`,
-		agentutil.Truncate(summary1, 100),
-		agentutil.Truncate(summary2, 100),
-	)
-
-	req := llm.CompletionRequest{
-		Messages: []llm.Message{
-			{Role: "system", Content: "You are a classifier. Output JSON only."},
-			{Role: "user", Content: prompt},
-		},
-		MaxTokens:   30,
-		Temperature: 0.1,
-		ResponseFormat: &llm.ResponseFormat{
-			Type: "json_schema",
-			JSONSchema: &llm.JSONSchema{
-				Name:   "classification_response",
-				Strict: true,
-				Schema: json.RawMessage(`{"type":"object","properties":{"relation_type":{"type":"string"}},"required":["relation_type"],"additionalProperties":false}`),
-			},
-		},
-	}
-
-	resp, err := ea.llmProvider.Complete(ctx, req)
-	if err != nil {
-		ea.log.Debug("llm relationship classification failed", "error", err)
-		return ""
-	}
-
-	jsonStr := agentutil.ExtractJSON(resp.Content)
-	var result classificationResponse
-	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
-		ea.log.Debug("failed to parse classification response", "response", resp.Content)
-		return ""
-	}
-
-	if validRelationTypes[result.RelationType] {
-		return result.RelationType
-	}
-
-	return ""
-}
-
-// handleAssociationClassification processes pending association reclassification using the LLM.
-// It runs in the background, acquiring the encoding semaphore for each LLM call.
-func (ea *EncodingAgent) handleAssociationClassification(ctx context.Context, event events.Event) error {
-	e, ok := event.(events.AssociationsPendingClassification)
-	if !ok {
-		return fmt.Errorf("invalid event type: expected AssociationsPendingClassification")
-	}
-
-	ea.wg.Add(1)
-	go func() {
-		defer ea.wg.Done()
-
-		for _, candidate := range e.Candidates {
-			// Acquire encoding semaphore to serialize LLM calls
-			select {
-			case ea.encodingSem <- struct{}{}:
-			case <-ea.ctx.Done():
-				return
-			}
-
-			newType := ea.llmClassifyRelationship(ea.ctx, candidate.Summary1, candidate.Summary2)
-
-			<-ea.encodingSem // release
-
-			// Only update if LLM returned a more specific type than "similar"
-			if newType != "" && newType != "similar" {
-				if err := ea.store.UpdateAssociationType(ea.ctx, candidate.SourceID, candidate.TargetID, newType); err != nil {
-					ea.log.Warn("failed to update association type", "src", candidate.SourceID, "tgt", candidate.TargetID, "error", err)
-				} else {
-					ea.log.Debug("association reclassified", "src", candidate.SourceID, "tgt", candidate.TargetID, "type", newType)
-				}
-			}
-		}
-	}()
-
-	return nil
-}
-
-// ============================================================================
-// Episode and Context Gathering
-// ============================================================================
-
-// getEpisodeContext gathers preceding events from the same episode for context.
-func (ea *EncodingAgent) getEpisodeContext(ctx context.Context, raw store.RawMemory) string {
-	// Bulk-ingested files have no meaningful sequential context — skip to avoid
-	// cross-contamination of file descriptions in the LLM prompt.
-	if raw.Source == "ingest" {
-		return ""
-	}
-
-	// Try to find the open episode's raw events for context
-	ep, err := ea.store.GetOpenEpisode(ctx)
-	if err != nil || len(ep.RawMemoryIDs) == 0 {
-		return ""
-	}
-
-	var contextLines []string
-	count := 0
-	for _, rawID := range ep.RawMemoryIDs {
-		if rawID == raw.ID || count >= 5 {
-			break
-		}
-		prevRaw, err := ea.store.GetRaw(ctx, rawID)
-		if err != nil {
-			continue
-		}
-		line := fmt.Sprintf("  [%s] %s/%s: %s",
-			prevRaw.Timestamp.Format("15:04:05"),
-			prevRaw.Source,
-			prevRaw.Type,
-			truncateString(prevRaw.Content, 200),
-		)
-		contextLines = append(contextLines, line)
-		count++
-	}
-
-	if len(contextLines) == 0 {
-		return ""
-	}
-
-	result := "RECENT SESSION CONTEXT (preceding activities):\n"
-	for _, l := range contextLines {
-		result += l + "\n"
-	}
-	result += "\n"
-	return result
-}
-
-// getRelatedContext gathers semantically similar existing memories for context.
-func (ea *EncodingAgent) getRelatedContext(ctx context.Context, raw store.RawMemory) string {
-	// Use concept-based search with keywords from the raw content
-	words := extractKeywords(raw.Content)
-	if len(words) == 0 {
-		return ""
-	}
-
-	if len(words) > 5 {
-		words = words[:5]
-	}
-
-	related, err := ea.store.SearchByConcepts(ctx, words, 3)
-	if err != nil || len(related) == 0 {
-		return ""
-	}
-
-	result := "RELATED EXISTING MEMORIES:\n"
-	for _, mem := range related {
-		result += fmt.Sprintf("  - [%s] %s (concepts: %s)\n",
-			mem.Timestamp.Format("2006-01-02 15:04"),
-			mem.Summary,
-			joinConcepts(mem.Concepts),
-		)
-	}
-	result += "\n"
-	return result
 }
 
 // getEpisodeIDForRaw finds which episode a raw memory belongs to.

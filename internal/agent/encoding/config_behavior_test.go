@@ -2,122 +2,17 @@ package encoding
 
 import (
 	"context"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/appsprout-dev/mnemonic/internal/llm"
 	"github.com/appsprout-dev/mnemonic/internal/store"
 )
 
 // ---------------------------------------------------------------------------
-// Config Behavioral Tests — verify each config param affects encoding behavior
+// Config Behavioral Tests -- verify each config param affects encoding behavior
 // ---------------------------------------------------------------------------
-
-func TestConfigCompletionMaxTokensPassedToLLM(t *testing.T) {
-	tests := []struct {
-		name      string
-		maxTokens int
-	}{
-		{"tokens_256", 256},
-		{"tokens_2048", 2048},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			var capturedMaxTokens int
-
-			s := &mockStore{
-				getRawFn: func(_ context.Context, _ string) (store.RawMemory, error) {
-					return store.RawMemory{
-						ID:      "raw1",
-						Content: "test content for encoding",
-						Source:  "mcp",
-						Type:    "decision",
-					}, nil
-				},
-				writeMemoryFn: func(_ context.Context, _ store.Memory) error { return nil },
-			}
-
-			p := &mockLLMProvider{
-				completeFn: func(_ context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
-					capturedMaxTokens = req.MaxTokens
-					return llm.CompletionResponse{
-						Content: `{"gist":"test","summary":"test summary","content":"test content","narrative":"test","concepts":["test"],"salience":0.5,"significance":"routine","emotional_tone":"neutral","outcome":"success"}`,
-					}, nil
-				},
-				embedFn: func(_ context.Context, _ string) ([]float32, error) {
-					return []float32{0.1, 0.2, 0.3}, nil
-				},
-			}
-
-			cfg := DefaultConfig()
-			cfg.CompletionMaxTokens = tc.maxTokens
-			agent := NewEncodingAgentWithConfig(s, p, testLogger(), cfg)
-			agent.bus = newMockBus()
-
-			err := agent.encodeMemory(context.Background(), "raw1")
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			if capturedMaxTokens != tc.maxTokens {
-				t.Errorf("expected MaxTokens=%d in LLM request, got %d", tc.maxTokens, capturedMaxTokens)
-			}
-		})
-	}
-}
-
-func TestConfigCompletionTemperaturePassedToLLM(t *testing.T) {
-	tests := []struct {
-		name string
-		temp float32
-	}{
-		{"temp_0.1", 0.1},
-		{"temp_0.7", 0.7},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			var capturedTemp float32
-
-			s := &mockStore{
-				getRawFn: func(_ context.Context, _ string) (store.RawMemory, error) {
-					return store.RawMemory{ID: "raw1", Content: "test content", Source: "mcp", Type: "decision"}, nil
-				},
-				writeMemoryFn: func(_ context.Context, _ store.Memory) error { return nil },
-			}
-
-			p := &mockLLMProvider{
-				completeFn: func(_ context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
-					capturedTemp = req.Temperature
-					return llm.CompletionResponse{
-						Content: `{"gist":"test","summary":"test","content":"test","narrative":"test","concepts":["test"],"salience":0.5,"significance":"routine","emotional_tone":"neutral","outcome":"success"}`,
-					}, nil
-				},
-				embedFn: func(_ context.Context, _ string) ([]float32, error) {
-					return []float32{0.1, 0.2, 0.3}, nil
-				},
-			}
-
-			cfg := DefaultConfig()
-			cfg.CompletionTemperature = tc.temp
-			agent := NewEncodingAgentWithConfig(s, p, testLogger(), cfg)
-			agent.bus = newMockBus()
-
-			err := agent.encodeMemory(context.Background(), "raw1")
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			if capturedTemp != tc.temp {
-				t.Errorf("expected Temperature=%.1f in LLM request, got %.1f", tc.temp, capturedTemp)
-			}
-		})
-	}
-}
 
 func TestConfigSimilarityThresholdGatesAssociations(t *testing.T) {
 	tests := []struct {
@@ -151,12 +46,7 @@ func TestConfigSimilarityThresholdGatesAssociations(t *testing.T) {
 				},
 			}
 
-			p := &mockLLMProvider{
-				completeFn: func(_ context.Context, _ llm.CompletionRequest) (llm.CompletionResponse, error) {
-					return llm.CompletionResponse{
-						Content: `{"gist":"test","summary":"test","content":"test","narrative":"test","concepts":["test"],"salience":0.5,"significance":"routine","emotional_tone":"neutral","outcome":"success"}`,
-					}, nil
-				},
+			p := &mockEmbeddingProvider{
 				embedFn: func(_ context.Context, _ string) ([]float32, error) {
 					return []float32{0.1, 0.2, 0.3}, nil
 				},
@@ -204,12 +94,7 @@ func TestConfigMaxSimilarSearchResultsPassedToStore(t *testing.T) {
 				},
 			}
 
-			p := &mockLLMProvider{
-				completeFn: func(_ context.Context, _ llm.CompletionRequest) (llm.CompletionResponse, error) {
-					return llm.CompletionResponse{
-						Content: `{"gist":"test","summary":"test","content":"test","narrative":"test","concepts":["test"],"salience":0.5,"significance":"routine","emotional_tone":"neutral","outcome":"success"}`,
-					}, nil
-				},
+			p := &mockEmbeddingProvider{
 				embedFn: func(_ context.Context, _ string) ([]float32, error) {
 					return []float32{0.1, 0.2, 0.3}, nil
 				},
@@ -232,38 +117,42 @@ func TestConfigMaxSimilarSearchResultsPassedToStore(t *testing.T) {
 	}
 }
 
-func TestConfigConceptVocabularyIncludedInPrompt(t *testing.T) {
+func TestConfigConceptVocabularyAffectsExtraction(t *testing.T) {
 	tests := []struct {
-		name           string
-		vocabulary     []string
-		expectInPrompt string
+		name        string
+		vocabulary  []string
+		content     string
+		expectFound string // a concept we expect to find in the result
 	}{
-		{"custom_vocab", []string{"golang", "memory", "sqlite"}, "golang, memory, sqlite"},
-		{"empty_vocab", nil, ""},
+		{
+			"default_vocab_extracts_go",
+			DefaultConceptVocabulary,
+			"writing go code with testing and debugging",
+			"go",
+		},
+		{
+			"custom_vocab_extracts_golang",
+			[]string{"golang", "memory", "sqlite"},
+			"using golang and memory management with sqlite database",
+			"golang",
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			var capturedPrompt string
+			var writtenMemory store.Memory
 
 			s := &mockStore{
 				getRawFn: func(_ context.Context, _ string) (store.RawMemory, error) {
-					return store.RawMemory{ID: "raw1", Content: "test content", Source: "mcp", Type: "decision"}, nil
+					return store.RawMemory{ID: "raw1", Content: tc.content, Source: "mcp", Type: "decision"}, nil
 				},
-				writeMemoryFn: func(_ context.Context, _ store.Memory) error { return nil },
+				writeMemoryFn: func(_ context.Context, m store.Memory) error {
+					writtenMemory = m
+					return nil
+				},
 			}
 
-			p := &mockLLMProvider{
-				completeFn: func(_ context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
-					for _, msg := range req.Messages {
-						if msg.Role == "user" {
-							capturedPrompt = msg.Content
-						}
-					}
-					return llm.CompletionResponse{
-						Content: `{"gist":"test","summary":"test","content":"test","narrative":"test","concepts":["test"],"salience":0.5,"significance":"routine","emotional_tone":"neutral","outcome":"success"}`,
-					}, nil
-				},
+			p := &mockEmbeddingProvider{
 				embedFn: func(_ context.Context, _ string) ([]float32, error) {
 					return []float32{0.1, 0.2, 0.3}, nil
 				},
@@ -279,14 +168,15 @@ func TestConfigConceptVocabularyIncludedInPrompt(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
-			if tc.expectInPrompt != "" {
-				if !strings.Contains(capturedPrompt, tc.expectInPrompt) {
-					t.Errorf("expected vocabulary %q in prompt, not found", tc.expectInPrompt)
+			found := false
+			for _, c := range writtenMemory.Concepts {
+				if c == tc.expectFound {
+					found = true
+					break
 				}
-			} else {
-				if strings.Contains(capturedPrompt, "CONCEPT VOCABULARY") {
-					t.Error("expected no vocabulary section in prompt with nil vocabulary")
-				}
+			}
+			if !found {
+				t.Errorf("expected concept %q in result, got %v", tc.expectFound, writtenMemory.Concepts)
 			}
 		})
 	}
@@ -318,21 +208,16 @@ func TestConfigMaxConcurrentEncodingsLimitsConcurrency(t *testing.T) {
 				writeMemoryFn: func(_ context.Context, _ store.Memory) error { return nil },
 			}
 
-			p := &mockLLMProvider{
-				completeFn: func(_ context.Context, _ llm.CompletionRequest) (llm.CompletionResponse, error) {
+			p := &mockEmbeddingProvider{
+				embedFn: func(_ context.Context, _ string) ([]float32, error) {
 					current := atomic.AddInt64(&currentInFlight, 1)
 					mu.Lock()
 					if current > maxInFlight {
 						maxInFlight = current
 					}
 					mu.Unlock()
-					time.Sleep(10 * time.Millisecond) // simulate LLM latency
+					time.Sleep(10 * time.Millisecond) // simulate embedding latency
 					atomic.AddInt64(&currentInFlight, -1)
-					return llm.CompletionResponse{
-						Content: `{"gist":"test","summary":"test","content":"test","narrative":"test","concepts":["test"],"salience":0.5,"significance":"routine","emotional_tone":"neutral","outcome":"success"}`,
-					}, nil
-				},
-				embedFn: func(_ context.Context, _ string) ([]float32, error) {
 					return []float32{0.1, 0.2, 0.3}, nil
 				},
 			}

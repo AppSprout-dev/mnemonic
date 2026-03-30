@@ -2,7 +2,6 @@ package episoding
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -11,8 +10,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/appsprout-dev/mnemonic/internal/agent/agentutil"
+	"github.com/appsprout-dev/mnemonic/internal/embedding"
 	"github.com/appsprout-dev/mnemonic/internal/events"
-	"github.com/appsprout-dev/mnemonic/internal/llm"
 	"github.com/appsprout-dev/mnemonic/internal/store"
 )
 
@@ -36,8 +35,8 @@ func DefaultEpisodingConfig() EpisodingConfig {
 
 // EpisodingAgent clusters raw memories into temporal episodes.
 type EpisodingAgent struct {
-	store       store.Store
-	llmProvider llm.Provider
+	store    store.Store
+	embedder embedding.Provider
 	config      EpisodingConfig
 	log         *slog.Logger
 	bus         events.Bus
@@ -54,14 +53,14 @@ type EpisodingAgent struct {
 }
 
 // NewEpisodingAgent creates a new episoding agent.
-func NewEpisodingAgent(s store.Store, llmProvider llm.Provider, log *slog.Logger, cfg EpisodingConfig) *EpisodingAgent {
+func NewEpisodingAgent(s store.Store, embedder embedding.Provider, log *slog.Logger, cfg EpisodingConfig) *EpisodingAgent {
 	lookback := cfg.StartupLookback
 	if lookback <= 0 {
 		lookback = 1 * time.Hour
 	}
 	return &EpisodingAgent{
 		store:             s,
-		llmProvider:       llmProvider,
+		embedder:          embedder,
 		config:            cfg,
 		log:               log,
 		lastProcessedTime: time.Now().Add(-lookback),
@@ -302,7 +301,7 @@ func (ea *EpisodingAgent) checkIdleEpisode(ctx context.Context) error {
 	return nil
 }
 
-// closeEpisode synthesizes an episode using the LLM and closes it.
+// closeEpisode synthesizes an episode algorithmically and closes it.
 func (ea *EpisodingAgent) closeEpisode(ctx context.Context, ep *store.Episode) error {
 	ea.log.Info("closing episode", "id", ep.ID, "events", len(ep.RawMemoryIDs))
 
@@ -326,7 +325,7 @@ func (ea *EpisodingAgent) closeEpisode(ctx context.Context, ep *store.Episode) e
 			}
 		}
 
-		// Include file path in event text sent to LLM
+		// Include file path in event text for synthesis
 		text := fmt.Sprintf("[%s] [%s] [%s] [%s]: %s",
 			raw.Timestamp.Format("15:04:05"),
 			raw.Source,
@@ -364,81 +363,19 @@ func (ea *EpisodingAgent) closeEpisode(ctx context.Context, ep *store.Episode) e
 		return nil
 	}
 
-	// Build LLM prompt for episode synthesis
-	eventsStr := ""
-	for _, t := range eventTexts {
-		eventsStr += t + "\n\n"
+	// Algorithmic episode synthesis — no LLM needed
+	durationMinutes := int(ep.EndTime.Sub(ep.StartTime).Minutes())
+	if durationMinutes < 1 {
+		durationMinutes = 1
 	}
-
-	// Detect if episode contains MCP-source events (Claude Code interaction)
-	hasMCPEvents := false
-	for _, rawID := range ep.RawMemoryIDs {
-		raw, err := ea.store.GetRaw(ctx, rawID)
-		if err != nil {
-			continue
-		}
-		if raw.Source == "mcp" {
-			hasMCPEvents = true
-			break
-		}
-	}
-
-	var prompt string
-	if hasMCPEvents {
-		// Claude-aware prompt: emphasize the collaborative creative journey
-		prompt = fmt.Sprintf(`You're looking at a chapter from a creative collaboration — a human and AI building something together. What's the story of this session?
-
-Look for the arc: What problem were they trying to solve? What did they decide to do? Did they hit any walls, and how did they get past them? What did they actually create or change? What's the most interesting thing that happened?
-
-Events:
-%s
-
-Respond with ONLY a JSON object (no prose, no fences):
-{"title":"a vivid, specific title for this session","summary":"1-2 sentences — the outcome and why it matters","narrative":"the story of what unfolded — decisions, breakthroughs, struggles, and what was learned","emotional_tone":"neutral|satisfying|frustrating|exciting|concerning","outcome":"success|failure|ongoing|unknown","concepts":["keyword1","keyword2"],"salience":0.7}`, eventsStr)
-	} else {
-		prompt = fmt.Sprintf(`You're looking at a stream of activity — moments from someone's work. What's the thread that connects them? What was this person doing, and what's worth remembering about it?
-
-Events:
-%s
-
-Respond with ONLY a JSON object (no prose, no fences):
-{"title":"a clear, specific title","summary":"1-2 sentences capturing what happened","narrative":"the story — what was this person working on, what did they accomplish, what's interesting about it","emotional_tone":"neutral|satisfying|frustrating|exciting|concerning","outcome":"success|failure|ongoing|unknown","concepts":["keyword1","keyword2"],"salience":0.5}`, eventsStr)
-	}
-
-	resp, err := ea.llmProvider.Complete(ctx, llm.CompletionRequest{
-		Messages: []llm.Message{
-			{Role: "system", Content: "You are an episode synthesizer. Summarize groups of events into coherent episodes. Output JSON only."},
-			{Role: "user", Content: prompt},
-		},
-		MaxTokens:   1024,
-		Temperature: 0.3,
-		ResponseFormat: &llm.ResponseFormat{
-			Type: "json_schema",
-			JSONSchema: &llm.JSONSchema{
-				Name:   "episode_synthesis",
-				Strict: true,
-				Schema: json.RawMessage(`{"type":"object","properties":{"title":{"type":"string"},"summary":{"type":"string"},"narrative":{"type":"string"},"emotional_tone":{"type":"string"},"outcome":{"type":"string"},"concepts":{"type":"array","items":{"type":"string"}},"salience":{"type":"number"}},"required":["title","summary","narrative","emotional_tone","outcome","concepts","salience"],"additionalProperties":false}`),
-			},
-		},
-	})
-
-	if err != nil {
-		ea.log.Warn("LLM episode synthesis failed, using fallback", "error", err)
-		ep.Title = fmt.Sprintf("Session with %d events", len(ep.RawMemoryIDs))
-		ep.Summary = ep.Title
-		ep.Salience = ea.defaultSalience()
-		ep.Concepts = []string{}
-	} else {
-		// Parse LLM response
-		parsed := parseEpisodeSynthesis(resp.Content)
-		ep.Title = parsed.Title
-		ep.Summary = parsed.Summary
-		ep.Narrative = parsed.Narrative
-		ep.EmotionalTone = parsed.EmotionalTone
-		ep.Outcome = parsed.Outcome
-		ep.Concepts = parsed.Concepts
-		ep.Salience = parsed.Salience
-	}
+	result := embedding.GenerateEpisodeSynthesis(eventTexts, durationMinutes)
+	ep.Title = result.Title
+	ep.Summary = result.Summary
+	ep.Narrative = result.Narrative
+	ep.EmotionalTone = result.EmotionalTone
+	ep.Outcome = result.Outcome
+	ep.Concepts = result.Concepts
+	ep.Salience = result.Salience
 
 	ep.State = store.EpisodeStateClosed
 	ep.UpdatedAt = time.Now()
@@ -507,58 +444,6 @@ Respond with ONLY a JSON object (no prose, no fences):
 		"tone", ep.EmotionalTone,
 		"concepts", len(ep.Concepts),
 		"files", len(ep.FilesModified),
-		"claude_session", hasMCPEvents,
 	)
 	return nil
-}
-
-// episodeSynthesis is the LLM response structure.
-type episodeSynthesis struct {
-	Title         string   `json:"title"`
-	Summary       string   `json:"summary"`
-	Narrative     string   `json:"narrative"`
-	EmotionalTone string   `json:"emotional_tone"`
-	Outcome       string   `json:"outcome"`
-	Concepts      []string `json:"concepts"`
-	Salience      float32  `json:"salience"`
-}
-
-// parseEpisodeSynthesis extracts JSON from LLM response.
-func parseEpisodeSynthesis(response string) episodeSynthesis {
-	var result episodeSynthesis
-	jsonStr := agentutil.ExtractJSON(response)
-	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
-		return episodeSynthesis{
-			Title:         "Untitled session",
-			Summary:       "Episode synthesis failed — LLM returned unparseable response.",
-			Salience:      0.5,
-			EmotionalTone: "neutral",
-			Outcome:       "ongoing",
-			Concepts:      []string{},
-		}
-	}
-	// Guard against the LLM returning code or garbage in fields
-	if len(result.Summary) > 500 {
-		result.Summary = result.Summary[:500] + "..."
-	}
-	if len(result.Narrative) > 2000 {
-		result.Narrative = result.Narrative[:2000] + "..."
-	}
-	// Validate fields
-	if result.Title == "" {
-		result.Title = "Untitled session"
-	}
-	if result.Salience <= 0 {
-		result.Salience = 0.5
-	}
-	if result.EmotionalTone == "" {
-		result.EmotionalTone = "neutral"
-	}
-	if result.Outcome == "" {
-		result.Outcome = "ongoing"
-	}
-	if result.Concepts == nil {
-		result.Concepts = []string{}
-	}
-	return result
 }

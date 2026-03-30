@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/appsprout-dev/mnemonic/internal/llm"
 	"github.com/appsprout-dev/mnemonic/internal/store"
 )
 
@@ -299,136 +298,8 @@ func TestConfigDualHitBonusAddsToScore(t *testing.T) {
 	}
 }
 
-func TestConfigSynthesisMaxTokensPassedToLLM(t *testing.T) {
-	now := time.Now()
+// TestConfigSynthesisMaxTokensPassedToLLM is removed — synthesis was removed
+// from the retrieval agent in the heuristic pipeline migration.
 
-	tests := []struct {
-		name      string
-		maxTokens int
-	}{
-		{"tokens_256", 256},
-		{"tokens_2048", 2048},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			var capturedMaxTokens int
-
-			s := &mockStore{
-				searchByFullTextFunc: func(_ context.Context, _ string, _ int) ([]store.Memory, error) {
-					return []store.Memory{
-						{ID: "m1", Summary: "test", Salience: 0.8, LastAccessed: now},
-					}, nil
-				},
-				searchByEmbeddingFunc: func(_ context.Context, _ []float32, _ int) ([]store.RetrievalResult, error) {
-					return nil, nil
-				},
-				getAssociationsFunc: func(_ context.Context, _ string) ([]store.Association, error) {
-					return nil, nil
-				},
-				getMemoryFunc: func(_ context.Context, id string) (store.Memory, error) {
-					return store.Memory{ID: id, Summary: "test", Salience: 0.8, LastAccessed: now}, nil
-				},
-			}
-
-			p := &mockLLMProvider{
-				completeFunc: func(_ context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
-					capturedMaxTokens = req.MaxTokens
-					return llm.CompletionResponse{Content: "synthesis result", TokensUsed: 10}, nil
-				},
-			}
-
-			cfg := DefaultConfig()
-			cfg.SynthesisMaxTokens = tc.maxTokens
-			agent := NewRetrievalAgent(s, p, cfg, testLogger(), nil)
-
-			_, err := agent.Query(context.Background(), QueryRequest{
-				Query:      "test",
-				Synthesize: true,
-			})
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			if capturedMaxTokens != tc.maxTokens {
-				t.Errorf("expected MaxTokens=%d in LLM request, got %d", tc.maxTokens, capturedMaxTokens)
-			}
-		})
-	}
-}
-
-func TestConfigMaxToolCallsLimitsSynthesisTools(t *testing.T) {
-	now := time.Now()
-
-	s := &mockStore{
-		searchByFullTextFunc: func(_ context.Context, _ string, _ int) ([]store.Memory, error) {
-			return []store.Memory{
-				{ID: "m1", Summary: "test", Salience: 0.8, LastAccessed: now},
-			}, nil
-		},
-		searchByEmbeddingFunc: func(_ context.Context, _ []float32, _ int) ([]store.RetrievalResult, error) {
-			return nil, nil
-		},
-		getAssociationsFunc: func(_ context.Context, _ string) ([]store.Association, error) {
-			return nil, nil
-		},
-		getMemoryFunc: func(_ context.Context, id string) (store.Memory, error) {
-			return store.Memory{ID: id, Summary: "test", Salience: 0.8, LastAccessed: now}, nil
-		},
-	}
-
-	tests := []struct {
-		name         string
-		maxToolCalls int
-		wantCalls    int // expected total Complete() calls: 1 per tool round + 1 final
-	}{
-		// maxToolCalls=0: first call gets no tools, must produce text immediately → 1 call
-		{"max_tool_calls_0", 0, 1},
-		// maxToolCalls=2: up to 2 rounds of tool use + 1 final = 3 max calls
-		{"max_tool_calls_2", 2, 3},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			callCount := 0
-
-			p := &mockLLMProvider{
-				completeFunc: func(_ context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
-					callCount++
-					// If tools are available, make a tool call; otherwise return text
-					if len(req.Tools) > 0 {
-						return llm.CompletionResponse{
-							ToolCalls: []llm.ToolCall{
-								{
-									ID: "call1",
-									Function: llm.ToolCallFunction{
-										Name:      "search_memories",
-										Arguments: `{"query": "test"}`,
-									},
-								},
-							},
-						}, nil
-					}
-					return llm.CompletionResponse{Content: "final synthesis", TokensUsed: 10}, nil
-				},
-			}
-
-			cfg := DefaultConfig()
-			cfg.MaxToolCalls = tc.maxToolCalls
-			agent := NewRetrievalAgent(s, p, cfg, testLogger(), nil)
-
-			_, err := agent.Query(context.Background(), QueryRequest{
-				Query:      "test",
-				Synthesize: true,
-			})
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			if callCount > tc.wantCalls {
-				t.Errorf("maxToolCalls=%d: expected at most %d Complete() calls, got %d",
-					tc.maxToolCalls, tc.wantCalls, callCount)
-			}
-		})
-	}
-}
+// TestConfigMaxToolCallsLimitsSynthesisTools is removed — synthesis was removed
+// from the retrieval agent in the heuristic pipeline migration.
