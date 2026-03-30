@@ -26,9 +26,10 @@ type scanner interface {
 type SQLiteStore struct {
 	db            *sql.DB
 	dbPath        string
-	embIndex      *embeddingIndex // in-memory embedding cache for fast similarity search
-	indexCount    int             // number of embeddings loaded at startup
-	indexLoadTime time.Duration   // how long loadEmbeddingIndex took
+	embIndex      *embeddingIndex  // float32 brute-force index (handles mixed dimensions)
+	quantIndex    *quantizedIndex  // TurboQuant 1-bit index (fast, single-dimension only)
+	indexCount    int              // number of embeddings loaded at startup
+	indexLoadTime time.Duration    // how long loadEmbeddingIndex took
 }
 
 // NewSQLiteStore opens a SQLite database and initializes the schema.
@@ -50,7 +51,7 @@ func NewSQLiteStore(dbPath string, busyTimeoutMs int) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	s := &SQLiteStore{db: db, dbPath: dbPath, embIndex: newEmbeddingIndex()}
+	s := &SQLiteStore{db: db, dbPath: dbPath, embIndex: newEmbeddingIndex(), quantIndex: newQuantizedIndex()}
 
 	// Initialize the schema
 	if err := InitSchema(db); err != nil {
@@ -126,6 +127,7 @@ func (s *SQLiteStore) loadEmbeddingIndex() error {
 		emb := decodeEmbedding(blob)
 		if len(emb) > 0 {
 			s.embIndex.Add(id, emb)
+			s.quantIndex.Add(id, emb)
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -834,9 +836,10 @@ func (s *SQLiteStore) WriteMemory(ctx context.Context, mem store.Memory) error {
 		return fmt.Errorf("failed to write memory: %w", err)
 	}
 
-	// Update in-memory embedding index
+	// Update in-memory embedding indexes
 	if (mem.State == store.MemoryStateActive || mem.State == store.MemoryStateFading) && len(mem.Embedding) > 0 {
 		s.embIndex.Add(mem.ID, mem.Embedding)
+		s.quantIndex.Add(mem.ID, mem.Embedding)
 	}
 
 	// FTS is automatically synced via triggers defined in schema.go
@@ -917,12 +920,14 @@ func (s *SQLiteStore) UpdateMemory(ctx context.Context, mem store.Memory) error 
 		return fmt.Errorf("memory with id %s: %w", mem.ID, store.ErrNotFound)
 	}
 
-	// Update in-memory embedding index
+	// Update in-memory embedding indexes
 	if (mem.State == store.MemoryStateActive || mem.State == store.MemoryStateFading) && len(mem.Embedding) > 0 {
 		s.embIndex.Add(mem.ID, mem.Embedding)
+		s.quantIndex.Add(mem.ID, mem.Embedding)
 	} else {
 		// State changed away from searchable, or embedding removed
 		s.embIndex.Remove(mem.ID)
+		s.quantIndex.Remove(mem.ID)
 	}
 
 	// FTS is automatically synced via UPDATE trigger in schema.go
@@ -990,9 +995,10 @@ func (s *SQLiteStore) UpdateState(ctx context.Context, id string, state string) 
 		return fmt.Errorf("memory with id %s: %w", id, store.ErrNotFound)
 	}
 
-	// Remove from embedding index if state moved away from searchable
+	// Remove from embedding indexes if state moved away from searchable
 	if state != store.MemoryStateActive && state != store.MemoryStateFading {
 		s.embIndex.Remove(id)
+		s.quantIndex.Remove(id)
 	}
 
 	return nil
@@ -1035,10 +1041,12 @@ func (s *SQLiteStore) AmendMemory(ctx context.Context, id string, newContent str
 
 	// Update FTS is automatic via triggers
 
-	// Update embedding index
+	// Update embedding indexes
 	if len(newEmbedding) > 0 {
 		s.embIndex.Remove(id)
 		s.embIndex.Add(id, newEmbedding)
+		s.quantIndex.Remove(id)
+		s.quantIndex.Add(id, newEmbedding)
 	}
 
 	// Record audit trail
@@ -1192,8 +1200,15 @@ func (s *SQLiteStore) SearchByEmbedding(ctx context.Context, embedding []float32
 		return nil, fmt.Errorf("embedding cannot be empty")
 	}
 
-	// Search the in-memory index (no DB I/O, no row decoding)
-	matches := s.embIndex.Search(embedding, limit)
+	// Search using quantized index (TurboQuant) if it has entries for this dimension,
+	// otherwise fall back to float32 brute-force index.
+	var matches []searchResult
+	if s.quantIndex.Len() > 0 {
+		matches = s.quantIndex.Search(embedding, limit)
+	}
+	if len(matches) == 0 {
+		matches = s.embIndex.Search(embedding, limit)
+	}
 	if len(matches) == 0 {
 		return []store.RetrievalResult{}, nil
 	}
@@ -1694,12 +1709,14 @@ func (s *SQLiteStore) BatchMergeMemories(ctx context.Context, sourceIDs []string
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	// Update embedding index: remove merged sources, add gist
+	// Update embedding indexes: remove merged sources, add gist
 	for _, sourceID := range sourceIDs {
 		s.embIndex.Remove(sourceID)
+		s.quantIndex.Remove(sourceID)
 	}
 	if (gist.State == store.MemoryStateActive || gist.State == store.MemoryStateFading) && len(gist.Embedding) > 0 {
 		s.embIndex.Add(gist.ID, gist.Embedding)
+		s.quantIndex.Add(gist.ID, gist.Embedding)
 	}
 
 	return nil
