@@ -108,9 +108,9 @@ func (qi *quantizedIndex) Search(query []float32, k int) []searchResult {
 
 	// Stage 1: Quantize query and do fast approximate search
 	qquery := qi.quantizer.Quantize(query)
-	candidateLimit := k * 4
-	if candidateLimit < 20 {
-		candidateLimit = 20
+	candidateLimit := k * 20
+	if candidateLimit < 100 {
+		candidateLimit = 100
 	}
 
 	type approxResult struct {
