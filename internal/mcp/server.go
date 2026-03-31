@@ -1627,6 +1627,44 @@ func (srv *MCPServer) handleRecallProject(ctx context.Context, args map[string]i
 		}
 	}
 
+	// Include recent daemon activity summary (merged from get_context).
+	// Shows what the watcher observed since last check — proactive context.
+	since := srv.lastContextTime
+	tenMinAgo := time.Now().Add(-10 * time.Minute)
+	if tenMinAgo.Before(since) {
+		since = tenMinAgo
+	}
+	if raws, err := srv.store.ListRawMemoriesAfter(ctx, since, 20); err == nil {
+		var activity []store.RawMemory
+		for _, raw := range raws {
+			if raw.Source == "mcp" {
+				continue // skip agent's own memories
+			}
+			if project != "" && raw.Project != "" && raw.Project != project {
+				continue
+			}
+			activity = append(activity, raw)
+		}
+		if len(activity) > 0 {
+			text += fmt.Sprintf("\nRecent activity (%d events):\n", len(activity))
+			shown := len(activity)
+			if shown > 5 {
+				shown = 5
+			}
+			for _, raw := range activity[:shown] {
+				snippet := raw.Content
+				if len(snippet) > 80 {
+					snippet = snippet[:80]
+				}
+				text += fmt.Sprintf("  - [%s] %s: %s\n", raw.Source, raw.CreatedAt.Format("15:04"), snippet)
+			}
+			if len(activity) > 5 {
+				text += fmt.Sprintf("  ... and %d more\n", len(activity)-5)
+			}
+		}
+		srv.lastContextTime = time.Now()
+	}
+
 	// Collect memories from either the retrieval agent or recent project search.
 	var resultMemories []store.Memory
 	var synthesis string

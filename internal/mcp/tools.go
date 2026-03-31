@@ -673,18 +673,35 @@ func ToolCount() int {
 // allToolDefs returns the complete list of MCP tool definitions.
 func allToolDefs() []ToolDefinition {
 	return []ToolDefinition{
+		// Core tools — what agents actually use
 		rememberToolDef(),
 		recallToolDef(),
+		recallProjectToolDef(),
 		batchRecallToolDef(),
+		feedbackToolDef(),
+		statusToolDef(),
+		amendToolDef(),
+	}
+}
+
+// AllToolDefsExtended returns ALL tools including deprecated/dev ones.
+// Used for backward compatibility if needed.
+func AllToolDefsExtended() []ToolDefinition {
+	return []ToolDefinition{
+		rememberToolDef(),
+		recallToolDef(),
+		recallProjectToolDef(),
+		batchRecallToolDef(),
+		feedbackToolDef(),
+		statusToolDef(),
+		amendToolDef(),
+		// Extended tools (not exposed by default)
 		getContextToolDef(),
 		forgetToolDef(),
-		statusToolDef(),
-		recallProjectToolDef(),
 		recallTimelineToolDef(),
 		sessionSummaryToolDef(),
 		getPatternsToolDef(),
 		getInsightsToolDef(),
-		feedbackToolDef(),
 		auditEncodingsToolDef(),
 		coachLocalLLMToolDef(),
 		ingestProjectToolDef(),
@@ -692,7 +709,6 @@ func allToolDefs() []ToolDefinition {
 		recallSessionToolDef(),
 		excludePathToolDef(),
 		listExclusionsToolDef(),
-		amendToolDef(),
 		checkMemoryToolDef(),
 		dismissPatternToolDef(),
 		dismissAbstractionToolDef(),
