@@ -549,6 +549,16 @@ func (ra *RetrievalAgent) spreadActivation(ctx context.Context, entryPoints map[
 				continue
 			}
 
+			// Cap fan-out: only follow the top 15 strongest associations per node.
+			// This prevents hub memories (100+ links) from exploding the search.
+			maxFanOut := 15
+			if len(assocs) > maxFanOut {
+				sort.Slice(assocs, func(i, j int) bool {
+					return assocs[i].Strength > assocs[j].Strength
+				})
+				assocs = assocs[:maxFanOut]
+			}
+
 			// Propagate activation along associations
 			for _, assoc := range assocs {
 				// Determine the neighbor: the "other end" of the association.
@@ -566,12 +576,7 @@ func (ra *RetrievalAgent) spreadActivation(ctx context.Context, entryPoints map[
 
 				// Only propagate if above threshold
 				if propagated > ra.config.ActivationThreshold {
-					// Record that this association was traversed (Hebbian activation)
-					if err := ra.store.ActivateAssociation(ctx, memID, neighborID); err != nil {
-						ra.log.Warn("failed to activate association", "src", memID, "tgt", neighborID, "error", err)
-					}
-
-					// Track traversal for feedback loop
+					// Track traversal for deferred Hebbian activation (batched after loop)
 					traversed = append(traversed, store.TraversedAssoc{
 						SourceID: memID,
 						TargetID: neighborID,
@@ -597,6 +602,16 @@ func (ra *RetrievalAgent) spreadActivation(ctx context.Context, entryPoints map[
 
 		frontier = nextFrontier
 	}
+
+	// Batch Hebbian activation updates (deferred from traversal loop to avoid
+	// per-edge DB writes during search — was the #1 cause of slow queries).
+	go func() {
+		bgCtx, bgCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer bgCancel()
+		for _, t := range traversed {
+			_ = ra.store.ActivateAssociation(bgCtx, t.SourceID, t.TargetID)
+		}
+	}()
 
 	return activated, traversed
 }
