@@ -1,67 +1,59 @@
-# Mnemonic MCP Tool Usage — Mandatory
+# Mnemonic MCP Tool Usage
+
+## Available Tools (7)
+
+| Tool | Purpose |
+|------|---------|
+| `remember` | Store decisions, errors, insights, learnings |
+| `recall` | Semantic search with spread activation |
+| `recall_project` | Project context + recent activity (use at session start) |
+| `batch_recall` | Multiple recall queries in one round-trip |
+| `feedback` | Rate recall quality (drives Hebbian learning) |
+| `status` | System health check |
+| `amend` | Update a stale memory in place |
 
 ## Session Start
 
-For tasks involving code changes, decisions, or multi-step work:
 1. Call `recall_project` to load project context
-2. Call `recall` with keywords relevant to the user's first request
-3. If either call returns useful context, use it to inform your work
-4. If a call fails (FTS error, timeout), note it and move on — don't block the session
+2. Call `recall` with keywords relevant to the user's request
+3. If useful context found, use it. If not, move on.
 
-Alternative: Use `batch_recall` to combine multiple queries into one round-trip.
+Alternative: `batch_recall` to combine project context + task-specific queries.
 
-For trivial tasks (typo fix, single-line change, quick question): skip recall and just do the work.
+For trivial tasks: skip recall, just do the work.
 
-## During Work (MUST)
+## During Work
 
-### Remember
+### Remember (be selective)
 
-- **Decisions**: Architectural/design choices — `type: "decision"`
-- **Errors**: Bugs encountered and resolved — `type: "error"`
-- **Insights**: Non-obvious discoveries about the codebase — `type: "insight"`
-- **Learnings**: Library, API, or framework behavior — `type: "learning"`
-- **Experiment results**: HP sweep findings, benchmark baselines, training outcomes — `type: "insight"` or `type: "decision"` depending on whether it's an observation or a choice made from it
+Only store things a future session would need:
+- **Decisions**: "chose X because Y" — `type: "decision"`
+- **Errors**: bugs found and how they were fixed — `type: "error"`
+- **Insights**: non-obvious discoveries — `type: "insight"`
+- **Learnings**: API/framework behavior — `type: "learning"`
 
-Use judgment — remember things a future session would need. Don't remember trivial actions, file paths, or things derivable from git history.
+Do NOT remember: file paths, trivial changes, things derivable from git history or code.
 
 ### Recall mid-session
 
-Don't only recall at session start. When entering new territory (new subsystem, unfamiliar pattern, making claims about prior work), call `recall` with specific keywords first. Example: before suggesting HP ranges, recall prior training findings. Before claiming something works a certain way, check if there's a stored decision or learning about it.
+When entering unfamiliar territory, recall before assuming. Check if there's a prior decision or known issue.
 
 ### Amend stale memories
 
-If a recall returns a memory that's outdated or partially wrong, use `amend` to update it in place rather than creating a new memory. This preserves associations and history.
+If recall returns outdated info, use `amend` to fix it in place. This preserves associations.
 
-## After Recalls (MUST)
+## After Recalls
 
-- After using `recall` and acting on the results, call `feedback`:
-  - `helpful` — memories were relevant and informed your work
-  - `partial` — some relevant, some noise
-  - `irrelevant` — memories didn't help
-- If recall returned 0 results, no feedback needed — but consider whether your query was too broad or too specific
-- This trains the retrieval system — skipping it degrades future recall quality
+Call `feedback` after acting on recall results:
+- `helpful` — memories informed your work
+- `partial` — some useful, some noise
+- `irrelevant` — didn't help
 
-## Between Phases / Major Tasks (MUST)
+This trains retrieval. Skipping it degrades future quality.
 
-When working through multi-phase plans (epics, milestones, sequential issues):
-- `remember` key decisions, strategy changes, or gotchas from the completed phase before starting the next
-- `recall` relevant context before entering a new phase — prior phase decisions may affect the current one
-- This ensures continuity across long sessions and prevents rediscovering the same issues
+## What NOT to Do
 
-## Reducing Noise
-
-- Use `include_patterns: false` and `include_abstractions: false` on `recall` when you only need memories, not patterns/principles
-- Use `types: ["decision", "error"]` to filter recall to actionable memory types
-- Use `dismiss_pattern` and `dismiss_abstraction` to archive noise that keeps surfacing
-
-## Before Committing (SHOULD)
-
-- Review the session's work and `remember` any decisions or insights that haven't been stored yet
-- Call `session_summary` if the session involved significant work
-
-## General
-
-- Prefer specific `recall` queries over broad ones — "SQLite FTS5 migration" not "database stuff"
-- Set the `type` field on every `remember` call — never use the default "general" when a specific type fits
-- When a recall returns irrelevant noise, say so via `feedback` — this is how the system improves
-- Don't remember things that belong in experiment docs — training results go in `training/docs/`, not just in mnemonic memory. Memory is for cross-session context, not a substitute for proper documentation
+- Don't use `include_patterns` or `include_abstractions` — these produce noise
+- Don't store experiment results in memory — those go in `training/docs/`
+- Don't remember things that belong in code comments or commit messages
+- Don't create memories about file structure or architecture — read the code instead
