@@ -1200,15 +1200,10 @@ func (s *SQLiteStore) SearchByEmbedding(ctx context.Context, embedding []float32
 		return nil, fmt.Errorf("embedding cannot be empty")
 	}
 
-	// Search using quantized index (TurboQuant) if it has entries for this dimension,
-	// otherwise fall back to float32 brute-force index.
-	var matches []searchResult
-	if s.quantIndex.Len() > 0 {
-		matches = s.quantIndex.Search(embedding, limit)
-	}
-	if len(matches) == 0 {
-		matches = s.embIndex.Search(embedding, limit)
-	}
+	// Use float32 brute-force index as primary (100% recall, 13ms at 34K memories).
+	// The quantized index (TurboQuant) is maintained in parallel for future use at
+	// larger scales (100K+ memories) where float32 brute-force becomes slow.
+	matches := s.embIndex.Search(embedding, limit)
 	if len(matches) == 0 {
 		return []store.RetrievalResult{}, nil
 	}

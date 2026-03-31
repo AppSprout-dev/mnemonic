@@ -87,6 +87,89 @@ func Similarity(a, b QuantizedVector) float32 {
 	return estimate
 }
 
+// ScalarQuantizedVector stores an int8 scalar-quantized embedding.
+// Each dimension is independently mapped to [-127, 127] using per-vector
+// min/max scaling. Simple, fast, and much higher recall than 1-bit QJL.
+type ScalarQuantizedVector struct {
+	Values []int8   // quantized dimension values
+	Min    float32  // original min value (for dequantization)
+	Max    float32  // original max value (for dequantization)
+	Norm   float32  // L2 norm of original vector
+}
+
+// ScalarQuantize compresses a float32 vector to int8 per dimension.
+// No projection matrix needed — operates directly on the original space.
+// Compression: 384 float32 (1536 bytes) → 384 int8 + 12 bytes = 396 bytes (3.9x).
+func ScalarQuantize(vec []float32) ScalarQuantizedVector {
+	if len(vec) == 0 {
+		return ScalarQuantizedVector{}
+	}
+
+	// Compute norm and find min/max
+	var normSq float64
+	minVal := vec[0]
+	maxVal := vec[0]
+	for _, v := range vec {
+		normSq += float64(v) * float64(v)
+		if v < minVal {
+			minVal = v
+		}
+		if v > maxVal {
+			maxVal = v
+		}
+	}
+	norm := float32(math.Sqrt(normSq))
+
+	// Quantize to int8 [-127, 127]
+	rangeVal := maxVal - minVal
+	if rangeVal == 0 {
+		rangeVal = 1
+	}
+	scale := float32(254.0) / rangeVal
+
+	values := make([]int8, len(vec))
+	for i, v := range vec {
+		q := int((v-minVal)*scale) - 127
+		if q < -127 {
+			q = -127
+		}
+		if q > 127 {
+			q = 127
+		}
+		values[i] = int8(q)
+	}
+
+	return ScalarQuantizedVector{
+		Values: values,
+		Min:    minVal,
+		Max:    maxVal,
+		Norm:   norm,
+	}
+}
+
+// ScalarSimilarity computes approximate cosine similarity between two
+// scalar-quantized vectors using int8 dot product.
+func ScalarSimilarity(a, b ScalarQuantizedVector) float32 {
+	if len(a.Values) != len(b.Values) || len(a.Values) == 0 {
+		return 0
+	}
+
+	var dot, normA, normB int64
+	for i := range a.Values {
+		av := int64(a.Values[i])
+		bv := int64(b.Values[i])
+		dot += av * bv
+		normA += av * av
+		normB += bv * bv
+	}
+
+	denom := math.Sqrt(float64(normA)) * math.Sqrt(float64(normB))
+	if denom == 0 {
+		return 0
+	}
+	return float32(float64(dot) / denom)
+}
+
 // packBits packs a slice of booleans into a []uint64 bit array.
 // Bit i is stored as bit (i % 64) of element (i / 64).
 func packBits(signs []bool) []uint64 {

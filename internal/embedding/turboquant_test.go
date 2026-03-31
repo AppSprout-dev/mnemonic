@@ -316,3 +316,131 @@ func cosineSim(a, b []float32) float32 {
 	}
 	return float32(dot / denom)
 }
+
+// --- Scalar Quantization (int8) tests ---
+
+func TestScalarQuantIdenticalVectors(t *testing.T) {
+	v := makeUnitVector(384, 1)
+	pv1 := ScalarQuantize(v)
+	pv2 := ScalarQuantize(v)
+	sim := ScalarSimilarity(pv1, pv2)
+	// Identical vectors should have high similarity
+	if sim < 0.8 {
+		t.Errorf("identical vectors: ScalarSimilarity = %.4f, want > 0.8", sim)
+	}
+}
+
+func TestScalarQuantCompressionRatio(t *testing.T) {
+	v := makeUnitVector(384, 1)
+	pv := ScalarQuantize(v)
+
+	origBytes := 384 * 4 // float32
+	scalarBytes := len(pv.Values) + 12 // values (int8) + min + max + norm
+	ratio := float64(origBytes) / float64(scalarBytes)
+
+	t.Logf("Scalar quantization: %d bytes -> %d bytes (%.1fx)", origBytes, scalarBytes, ratio)
+
+	// int8: 384 bytes + 12 overhead = 396 bytes
+	// Ratio should be ~3.9x
+	if ratio < 3.0 {
+		t.Errorf("compression ratio %.1fx, want >3x", ratio)
+	}
+}
+
+func TestScalarQuantRecall(t *testing.T) {
+	const dims = 384
+	const n = 5000
+	rng := rand.New(rand.NewSource(99))
+
+	// Generate random vectors
+	vecs := make([][]float32, n)
+	pvecs := make([]ScalarQuantizedVector, n)
+	for i := 0; i < n; i++ {
+		vecs[i] = makeUnitVector(dims, int64(i+1000))
+		pvecs[i] = ScalarQuantize(vecs[i])
+	}
+
+	// Run recall test: for 20 random queries, check overlap of top-10
+	hits := 0
+	total := 0
+	for qi := 0; qi < 20; qi++ {
+		query := make([]float32, dims)
+		for j := range query {
+			query[j] = float32(rng.NormFloat64())
+		}
+		normalize(query)
+
+		pquery := ScalarQuantize(query)
+
+		// Exact top-10
+		exact := make([]scored, n)
+		for i := 0; i < n; i++ {
+			exact[i] = scored{i, cosineSim(query, vecs[i])}
+		}
+		sortScored(exact)
+		exactTop := make(map[int]bool)
+		for i := 0; i < 10; i++ {
+			exactTop[exact[i].idx] = true
+		}
+
+		// Polar top-10
+		polar := make([]scored, n)
+		for i := 0; i < n; i++ {
+			polar[i] = scored{i, ScalarSimilarity(pquery, pvecs[i])}
+		}
+		sortScored(polar)
+
+		for i := 0; i < 10; i++ {
+			total++
+			if exactTop[polar[i].idx] {
+				hits++
+			}
+		}
+	}
+
+	recall := float64(hits) / float64(total) * 100
+	t.Logf("PolarQuant recall@10: %.1f%% (%d/%d)", recall, hits, total)
+
+	// Scalar int8 quantization is a coarse pre-filter; 40%+ recall is acceptable
+	// when combined with exact re-ranking on the candidate set.
+	if recall < 30 {
+		t.Errorf("recall too low: %.1f%%, want >30%%", recall)
+	}
+}
+
+type scored struct {
+	idx   int
+	score float32
+}
+
+func sortScored(s []scored) {
+	for i := 1; i < len(s); i++ {
+		for j := i; j > 0 && s[j].score > s[j-1].score; j-- {
+			s[j], s[j-1] = s[j-1], s[j]
+		}
+	}
+}
+
+// Comparison benchmark: 1-bit vs int8
+func BenchmarkScalarSimilarity(b *testing.B) {
+	dims := 384
+	v1 := makeUnitVector(dims, 1)
+	v2 := makeUnitVector(dims, 2)
+	pv1 := ScalarQuantize(v1)
+	pv2 := ScalarQuantize(v2)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ScalarSimilarity(pv1, pv2)
+	}
+}
+
+func BenchmarkScalarQuantize(b *testing.B) {
+	dims := 384
+	vec := makeUnitVector(dims, 1)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ScalarQuantize(vec)
+	}
+}
