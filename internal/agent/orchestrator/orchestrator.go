@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/appsprout-dev/mnemonic/internal/embedding"
 	"github.com/appsprout-dev/mnemonic/internal/events"
-	"github.com/appsprout-dev/mnemonic/internal/llm"
 	"github.com/appsprout-dev/mnemonic/internal/store"
 )
 
@@ -48,8 +48,8 @@ type HealthReport struct {
 
 // Orchestrator is the central autonomous scheduler and health monitor.
 type Orchestrator struct {
-	store       store.Store
-	llmProvider llm.Provider
+	store    store.Store
+	embedder embedding.Provider
 	config      OrchestratorConfig
 	log         *slog.Logger
 	bus         events.Bus
@@ -67,10 +67,10 @@ type Orchestrator struct {
 	warnings        []string
 }
 
-func NewOrchestrator(s store.Store, llmProv llm.Provider, cfg OrchestratorConfig, log *slog.Logger) *Orchestrator {
+func NewOrchestrator(s store.Store, embedder embedding.Provider, cfg OrchestratorConfig, log *slog.Logger) *Orchestrator {
 	return &Orchestrator{
-		store:       s,
-		llmProvider: llmProv,
+		store:    s,
+		embedder: embedder,
 		config:      cfg,
 		log:         log,
 		startTime:   time.Now(),
@@ -179,11 +179,11 @@ func (o *Orchestrator) runMonitorCycle(ctx context.Context) {
 
 // checkLLMHealth verifies the LLM backend is reachable.
 func (o *Orchestrator) checkLLMHealth(ctx context.Context) {
-	if o.llmProvider == nil {
+	if o.embedder == nil {
 		return
 	}
 
-	err := o.llmProvider.Health(ctx)
+	err := o.embedder.Health(ctx)
 	o.mu.Lock()
 	defer o.mu.Unlock()
 

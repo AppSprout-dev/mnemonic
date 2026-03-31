@@ -102,21 +102,24 @@ func diagnoseCommand(configPath string) {
 		}
 	}
 
-	// 4. LLM provider
-	llmProvider := newLLMProvider(cfg)
+	// 4. Embedding provider
+	embProv := newEmbeddingProvider(cfg)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if err := llmProvider.Health(ctx); err != nil {
-		fail("LLM", fmt.Sprintf("LLM provider not reachable at %s (%v)", cfg.LLM.Endpoint, err))
+	if err := embProv.Health(ctx); err != nil {
+		fail("Embedding", fmt.Sprintf("embedding provider not healthy (%v)", err))
 	} else {
-		// Try a quick embedding to verify the model works
-		_, embErr := llmProvider.Embed(ctx, "test")
+		_, embErr := embProv.Embed(ctx, "test")
 		if embErr != nil {
-			warn("LLM", fmt.Sprintf("reachable at %s but embedding failed: %v", cfg.LLM.Endpoint, embErr))
+			warn("Embedding", fmt.Sprintf("healthy but embedding failed: %v", embErr))
 		} else {
-			pass("LLM", fmt.Sprintf("model %s at %s", cfg.LLM.ChatModel, cfg.LLM.Endpoint))
+			provName := cfg.Embedding.Provider
+			if provName == "" {
+				provName = "auto"
+			}
+			pass("Embedding", fmt.Sprintf("provider=%s", provName))
 		}
 	}
 

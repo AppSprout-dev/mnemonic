@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/appsprout-dev/mnemonic/internal/llm"
+	"github.com/appsprout-dev/mnemonic/internal/embedding"
 	"github.com/appsprout-dev/mnemonic/internal/store"
 )
 
@@ -32,24 +32,21 @@ type HealthResponse struct {
 // HandleHealth returns an HTTP handler that performs a health check.
 // Checks LLM availability with 2s timeout and store health.
 // Returns 200 with health status JSON.
-func HandleHealth(s store.Store, llmProv llm.Provider, version string, toolCount int, startTime time.Time, log *slog.Logger) http.HandlerFunc {
+func HandleHealth(s store.Store, embProv embedding.Provider, version string, toolCount int, startTime time.Time, log *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		log.Debug("health check requested")
 
-		// Check LLM health with 2s timeout
+		// Check embedding provider health with 2s timeout
 		llmHealthCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
 
 		llmAvailable := true
 		var llmModel string
-		if err := llmProv.Health(llmHealthCtx); err != nil {
-			log.Warn("llm health check failed", "error", err)
+		if err := embProv.Health(llmHealthCtx); err != nil {
+			log.Warn("embedding health check failed", "error", err)
 			llmAvailable = false
-		} else {
-			if info, err := llmProv.ModelInfo(llmHealthCtx); err == nil {
-				llmModel = info.Name
-			}
 		}
+		_ = llmModel // kept for backward-compatible JSON response
 
 		// Check store health by counting memories
 		storeHealthy := true

@@ -2,7 +2,6 @@ package consolidation
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math"
@@ -12,8 +11,8 @@ import (
 	"time"
 
 	"github.com/appsprout-dev/mnemonic/internal/agent/agentutil"
+	"github.com/appsprout-dev/mnemonic/internal/embedding"
 	"github.com/appsprout-dev/mnemonic/internal/events"
-	"github.com/appsprout-dev/mnemonic/internal/llm"
 	"github.com/appsprout-dev/mnemonic/internal/store"
 	"github.com/google/uuid"
 )
@@ -107,26 +106,26 @@ func DefaultConfig() ConsolidationConfig {
 // ConsolidationAgent performs periodic memory consolidation — the "sleeping brain."
 // Each cycle: decay salience → transition states → prune associations → merge clusters → delete expired.
 type ConsolidationAgent struct {
-	store       store.Store
-	llmProvider llm.Provider
-	config      ConsolidationConfig
-	log         *slog.Logger
-	bus         events.Bus
-	ctx         context.Context
-	cancel      context.CancelFunc
-	wg          sync.WaitGroup
-	stopOnce    sync.Once
-	triggerCh   chan struct{} // allows on-demand consolidation via event bus or reactor
+	store    store.Store
+	embedder embedding.Provider
+	config   ConsolidationConfig
+	log      *slog.Logger
+	bus      events.Bus
+	ctx      context.Context
+	cancel   context.CancelFunc
+	wg       sync.WaitGroup
+	stopOnce sync.Once
+	triggerCh chan struct{} // allows on-demand consolidation via event bus or reactor
 }
 
 // NewConsolidationAgent creates a new consolidation agent.
-func NewConsolidationAgent(s store.Store, llmProv llm.Provider, cfg ConsolidationConfig, log *slog.Logger) *ConsolidationAgent {
+func NewConsolidationAgent(s store.Store, embedder embedding.Provider, cfg ConsolidationConfig, log *slog.Logger) *ConsolidationAgent {
 	return &ConsolidationAgent{
-		store:       s,
-		llmProvider: llmProv,
-		config:      cfg,
-		log:         log,
-		triggerCh:   make(chan struct{}, 1),
+		store:     s,
+		embedder:  embedder,
+		config:    cfg,
+		log:       log,
+		triggerCh: make(chan struct{}, 1),
 	}
 }
 
@@ -277,30 +276,20 @@ func (ca *ConsolidationAgent) runCycle(ctx context.Context) (*CycleReport, error
 	}
 	report.AssociationsPruned = pruned
 
-	// Steps 4-5 require LLM — skip if unavailable to avoid timeout loops
-	llmAvailable := ca.llmProvider != nil && ca.llmProvider.Health(ctx) == nil
-	if !llmAvailable {
-		ca.log.Warn("skipping LLM-dependent steps (merge, pattern extraction): LLM unavailable")
-	}
-
 	// Step 4: Merge highly similar memory clusters into gists
-	if llmAvailable {
-		merges, err := ca.mergeClusters(ctx)
-		if err != nil {
-			ca.log.Warn("cluster merging failed", "error", err)
-			// Non-fatal, continue
-		}
-		report.MergesPerformed = merges
+	merges, err := ca.mergeClusters(ctx)
+	if err != nil {
+		ca.log.Warn("cluster merging failed", "error", err)
+		// Non-fatal, continue
 	}
+	report.MergesPerformed = merges
 
 	// Step 5: Extract patterns from memory clusters
-	if llmAvailable {
-		patternsExtracted, err := ca.extractPatterns(ctx)
-		if err != nil {
-			ca.log.Warn("pattern extraction failed", "error", err)
-		}
-		report.PatternsExtracted = patternsExtracted
+	patternsExtracted, err := ca.extractPatterns(ctx)
+	if err != nil {
+		ca.log.Warn("pattern extraction failed", "error", err)
 	}
+	report.PatternsExtracted = patternsExtracted
 
 	// Step 6: Delete expired archived memories
 	deleted, err := ca.deleteExpired(ctx)
@@ -524,7 +513,7 @@ func (ca *ConsolidationAgent) pruneAssociations(ctx context.Context) (int, error
 }
 
 // mergeClusters finds groups of highly similar memories and merges them into gist memories.
-// Uses embedding similarity to find clusters, then asks the LLM to create a unified summary.
+// Uses embedding similarity to find clusters, then picks the highest-salience memory as representative.
 func (ca *ConsolidationAgent) mergeClusters(ctx context.Context) (int, error) {
 	// Get all active memories with embeddings
 	memories, err := ca.store.ListMemories(ctx, store.MemoryStateActive, ca.config.MaxMemoriesPerCycle, 0)
@@ -617,16 +606,13 @@ func (ca *ConsolidationAgent) findClusters(memories []store.Memory) [][]store.Me
 	return clusters
 }
 
-// createGist uses the LLM to synthesize a cluster of memories into a single gist memory.
-func (ca *ConsolidationAgent) createGist(ctx context.Context, cluster []store.Memory) (store.Memory, error) {
-	// Build a prompt listing all memories in the cluster
-	memorySummaries := ""
+// createGist picks the highest-salience memory from a cluster as the representative gist.
+func (ca *ConsolidationAgent) createGist(_ context.Context, cluster []store.Memory) (store.Memory, error) {
 	allConcepts := make(map[string]bool)
 	var maxSalience float32
 	var totalEmbedding []float32
 
-	for i, mem := range cluster {
-		memorySummaries += fmt.Sprintf("%d. %s\n", i+1, mem.Summary)
+	for _, mem := range cluster {
 		for _, c := range mem.Concepts {
 			allConcepts[c] = true
 		}
@@ -661,56 +647,17 @@ func (ca *ConsolidationAgent) createGist(ctx context.Context, cluster []store.Me
 		concepts = concepts[:7] // Cap at 7 concepts for a gist
 	}
 
-	// Ask LLM to create a unified summary
-	prompt := fmt.Sprintf(`These memories are echoes of the same experience — they overlap and reinforce each other. Distill them into one clear, essential memory that captures what matters most.
-
-What's the core truth these memories share? Keep the most important details and let the repetition fall away.
-
-Memories:
-%s
-Respond with ONLY a JSON object:
-{"summary":"the essential memory in one sentence, under 80 chars","content":"the key details worth keeping, 2-3 sentences"}`, memorySummaries)
-
-	var gistSummary, gistContent string
-
-	req := llm.CompletionRequest{
-		Messages: []llm.Message{
-			{Role: "system", Content: "You are a memory consolidator. Merge related memories into a single summary. Output JSON only."},
-			{Role: "user", Content: prompt},
-		},
-		MaxTokens:   200,
-		Temperature: 0.2,
-		ResponseFormat: &llm.ResponseFormat{
-			Type: "json_schema",
-			JSONSchema: &llm.JSONSchema{
-				Name:   "merge_gist",
-				Strict: true,
-				Schema: json.RawMessage(`{"type":"object","properties":{"summary":{"type":"string"},"content":{"type":"string"}},"required":["summary","content"],"additionalProperties":false}`),
-			},
-		},
-	}
-
-	resp, err := ca.llmProvider.Complete(ctx, req)
-	if err != nil {
-		ca.log.Warn("llm gist creation failed, skipping merge (will retry next cycle)", "error", err)
-		return store.Memory{}, fmt.Errorf("LLM unavailable for gist creation: %w", err)
-	} else {
-		// Try to parse JSON from response
-		jsonStr := agentutil.ExtractJSON(resp.Content)
-		var parsed struct {
-			Summary string `json:"summary"`
-			Content string `json:"content"`
-		}
-		if err := json.Unmarshal([]byte(jsonStr), &parsed); err != nil {
-			ca.log.Warn("failed to parse gist JSON, skipping merge", "error", err)
-			return store.Memory{}, fmt.Errorf("failed to parse gist response: %w", err)
-		} else {
-			gistSummary = parsed.Summary
-			gistContent = parsed.Content
+	// Pick highest-salience memory as representative
+	best := cluster[0]
+	for _, m := range cluster[1:] {
+		if m.Salience > best.Salience {
+			best = m
 		}
 	}
+	gistSummary := best.Summary
+	gistContent := best.Content
 
-	// Fallback: if LLM returned an empty summary, truncate content (matches encoding agent)
+	// Fallback: if summary is empty, truncate content
 	if gistSummary == "" {
 		gistSummary = agentutil.Truncate(gistContent, 100)
 	}
@@ -851,7 +798,7 @@ func (ca *ConsolidationAgent) extractPatterns(ctx context.Context) (int, error) 
 }
 
 // processPatternClusters handles the common logic for evaluating a set of memory clusters
-// as potential patterns: strengthening existing matches or identifying new ones via LLM.
+// as potential patterns: strengthening existing matches or identifying new ones via heuristic analysis.
 func (ca *ConsolidationAgent) processPatternClusters(ctx context.Context, clusters [][]store.Memory, project string, budget int) int {
 	minSalience := agentutil.Float32Or(ca.config.MinEvidenceSalience, 0.5)
 	extracted := 0
@@ -916,7 +863,7 @@ func (ca *ConsolidationAgent) processPatternClusters(ctx context.Context, cluste
 			continue
 		}
 		if pattern == nil {
-			ca.log.Info("pattern extraction: LLM rejected cluster (not a pattern)", "project", project, "cluster_size", len(qualified))
+			ca.log.Info("pattern extraction: cluster rejected (not a pattern)", "project", project, "cluster_size", len(qualified))
 			continue
 		}
 
@@ -1157,70 +1104,14 @@ func averageEmbedding(memories []store.Memory) []float32 {
 	return avg
 }
 
-// patternResponse is the expected JSON structure from the LLM for pattern identification.
-type patternResponse struct {
-	IsPattern   bool     `json:"is_pattern"`
-	Title       string   `json:"title"`
-	Description string   `json:"description"`
-	PatternType string   `json:"pattern_type"`
-	Concepts    []string `json:"concepts"`
-}
-
-// identifyPattern asks the LLM whether a cluster of memories represents a recurring pattern.
+// identifyPattern uses heuristic concept analysis to detect a recurring pattern in a memory cluster.
 func (ca *ConsolidationAgent) identifyPattern(ctx context.Context, cluster []store.Memory, project string) (*store.Pattern, error) {
-	// Build prompt with quality signals
-	var summaries strings.Builder
-	allConcepts := make(map[string]bool)
+	clusterConcepts := make([][]string, len(cluster))
 	for i, mem := range cluster {
-		qualityInfo := fmt.Sprintf("salience:%.2f, accessed:%d", mem.Salience, mem.AccessCount)
-		fmt.Fprintf(&summaries, "%d. [%s] %s (concepts: %s)\n", i+1, qualityInfo, mem.Summary, strings.Join(mem.Concepts, ", "))
-		for _, c := range mem.Concepts {
-			allConcepts[c] = true
-		}
+		clusterConcepts[i] = mem.Concepts
 	}
-
-	prompt := fmt.Sprintf(`Look at these %d memories together. Is there a recurring theme here — something that keeps happening, a habit forming, a lesson being learned (or not learned)?
-
-I'm curious whether these point to a pattern: a practice this person keeps returning to, an error they keep encountering, a decision style they favor, or a workflow that's emerging.
-
-Memories:
-%s
-
-Respond with ONLY a JSON object:
-{"is_pattern": true/false, "title": "a descriptive name for the pattern", "description": "what the pattern is and why it matters", "pattern_type": "recurring_error|code_practice|decision_pattern|workflow|temporal_sequence", "concepts": ["key", "concepts"]}
-
-If these memories are just coincidentally similar but don't reveal a real pattern, set is_pattern to false. Only call it a pattern if it genuinely recurs.`, len(cluster), summaries.String())
-
-	req := llm.CompletionRequest{
-		Messages: []llm.Message{
-			{Role: "system", Content: "You are a pattern detector. Identify recurring patterns in memories. Output JSON only."},
-			{Role: "user", Content: prompt},
-		},
-		MaxTokens:   200,
-		Temperature: 0.3,
-		ResponseFormat: &llm.ResponseFormat{
-			Type: "json_schema",
-			JSONSchema: &llm.JSONSchema{
-				Name:   "pattern_response",
-				Strict: true,
-				Schema: json.RawMessage(`{"type":"object","properties":{"is_pattern":{"type":"boolean"},"title":{"type":"string"},"description":{"type":"string"},"pattern_type":{"type":"string"},"concepts":{"type":"array","items":{"type":"string"}}},"required":["is_pattern","title","description","pattern_type","concepts"],"additionalProperties":false}`),
-			},
-		},
-	}
-
-	resp, err := ca.llmProvider.Complete(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("LLM pattern identification failed: %w", err)
-	}
-
-	// Extract and parse JSON
-	jsonStr := agentutil.ExtractJSON(resp.Content)
-	var result patternResponse
-	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
-		return nil, fmt.Errorf("failed to parse pattern response: %w", err)
-	}
-
-	if !result.IsPattern || result.Title == "" {
+	patResult := embedding.GeneratePattern(clusterConcepts)
+	if patResult == nil {
 		return nil, nil
 	}
 
@@ -1230,12 +1121,12 @@ If these memories are just coincidentally similar but don't reveal a real patter
 		evidenceIDs[i] = mem.ID
 	}
 
-	// Generate embedding from the pattern's own description (more precise than averaged cluster embeddings)
-	patternText := result.Title + ": " + result.Description
-	embedding, embErr := ca.llmProvider.Embed(ctx, patternText)
+	// Generate embedding from the pattern's own description
+	patternText := patResult.Title + ": " + patResult.Description
+	patternEmb, embErr := ca.embedder.Embed(ctx, patternText)
 	if embErr != nil {
 		ca.log.Warn("failed to embed pattern text, falling back to cluster average", "error", embErr)
-		embedding = averageEmbedding(cluster)
+		patternEmb = averageEmbedding(cluster)
 	}
 
 	// Determine project
@@ -1246,14 +1137,14 @@ If these memories are just coincidentally similar but don't reveal a real patter
 
 	pattern := &store.Pattern{
 		ID:           uuid.New().String(),
-		PatternType:  result.PatternType,
-		Title:        result.Title,
-		Description:  result.Description,
+		PatternType:  patResult.PatternType,
+		Title:        patResult.Title,
+		Description:  patResult.Description,
 		EvidenceIDs:  evidenceIDs,
 		Strength:     0.5,
 		Project:      proj,
-		Concepts:     result.Concepts,
-		Embedding:    embedding,
+		Concepts:     patResult.Concepts,
+		Embedding:    patternEmb,
 		AccessCount:  0,
 		LastAccessed: time.Now(),
 		State:        store.MemoryStateActive,

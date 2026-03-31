@@ -165,8 +165,8 @@ func TestNewRetrievalAgent(t *testing.T) {
 	if agent.store != s {
 		t.Error("expected store to be set")
 	}
-	if agent.llm != p {
-		t.Error("expected llm provider to be set")
+	if agent.embedder != p {
+		t.Error("expected embedding provider to be set")
 	}
 	if agent.config.MaxHops != cfg.MaxHops {
 		t.Errorf("expected MaxHops %d, got %d", cfg.MaxHops, agent.config.MaxHops)
@@ -672,13 +672,10 @@ func TestQueryWithSynthesis(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if resp.Synthesis != synthesisText {
-		t.Errorf("expected synthesis %q, got %q", synthesisText, resp.Synthesis)
-	}
-
-	// Verify LLM Complete was called for synthesis
-	if p.completeCalls != 1 {
-		t.Errorf("expected 1 Complete call for synthesis, got %d", p.completeCalls)
+	// Synthesis is no longer performed by the retrieval agent (removed in heuristic pipeline).
+	// The consuming agent synthesizes from raw results.
+	if resp.Synthesis != "" {
+		t.Errorf("expected empty synthesis (removed), got %q", resp.Synthesis)
 	}
 }
 
@@ -739,14 +736,9 @@ func TestQueryEmptyResultsWithSynthesis(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// synthesizeNarrative returns "No relevant memories found." for empty results
-	if resp.Synthesis != "No relevant memories found." {
-		t.Errorf("expected 'No relevant memories found.' synthesis, got %q", resp.Synthesis)
-	}
-
-	// LLM.Complete should NOT be called when there are no results
-	if p.completeCalls != 0 {
-		t.Errorf("expected 0 Complete calls for empty results synthesis, got %d", p.completeCalls)
+	// Synthesis is no longer performed — expect empty
+	if resp.Synthesis != "" {
+		t.Errorf("expected empty synthesis (removed), got %q", resp.Synthesis)
 	}
 }
 

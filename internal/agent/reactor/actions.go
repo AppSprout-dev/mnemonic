@@ -10,7 +10,6 @@ import (
 
 	"github.com/appsprout-dev/mnemonic/internal/agent/forum"
 	"github.com/appsprout-dev/mnemonic/internal/events"
-	"github.com/appsprout-dev/mnemonic/internal/llm"
 	"github.com/appsprout-dev/mnemonic/internal/store"
 	"github.com/google/uuid"
 )
@@ -395,12 +394,9 @@ func querySimple(ctx context.Context, q ForumQuerier, query string, limit int) [
 	return results
 }
 
-// RespondToMentionAction generates an LLM-powered response from the mentioned agent.
+// RespondToMentionAction generates a static personality response from the mentioned agent.
 type RespondToMentionAction struct {
-	LLM          llm.Provider
 	ForumQuerier ForumQuerier // can be nil
-	MaxTokens    int          // from config (default: 512)
-	Temperature  float64      // from config (default: 0.7)
 	Log          *slog.Logger
 }
 
@@ -417,46 +413,14 @@ func (a *RespondToMentionAction) Execute(ctx context.Context, trigger events.Eve
 		return nil
 	}
 
-	// Build the response content
+	// Build static response from personality + agent data
+	agentData := buildAgentContext(ctx, mention.AgentKey, mention.Content, state.Store, a.ForumQuerier, mention.EpisodeID)
+
 	var content string
-
-	if a.LLM == nil {
-		// Graceful fallback when LLM is unavailable
-		content = fmt.Sprintf("%s is currently offline. This mention will be picked up when the LLM becomes available.", personality.Name)
+	if agentData != "" {
+		content = fmt.Sprintf("%s (%s): %s", personality.Name, personality.Title, agentData)
 	} else {
-		// Build context for the LLM
-		var systemPrompt strings.Builder
-		systemPrompt.WriteString(fmt.Sprintf("You are the %s (%s) of the Mnemonic cognitive memory system. ", personality.Name, personality.Title))
-		systemPrompt.WriteString(fmt.Sprintf("Your tone is %s. ", personality.Tone))
-		systemPrompt.WriteString("A human has @mentioned you in a forum thread. Respond helpfully and concisely (2-4 sentences max) based on your role. ")
-		systemPrompt.WriteString("Do not use markdown formatting. Be direct and informative.")
-
-		// Inject real data based on which agent is being mentioned
-		agentData := buildAgentContext(ctx, mention.AgentKey, mention.Content, state.Store, a.ForumQuerier, mention.EpisodeID)
-		if agentData != "" {
-			systemPrompt.WriteString("\n\n" + agentData)
-		}
-
-		resp, err := a.LLM.Complete(ctx, llm.CompletionRequest{
-			Messages: []llm.Message{
-				{Role: "system", Content: systemPrompt.String()},
-				{Role: "user", Content: mention.Content},
-			},
-			MaxTokens:       a.MaxTokens,
-			Temperature:     float32(a.Temperature),
-			DisableThinking: true, // forum replies don't need chain-of-thought
-		})
-		if err != nil {
-			content = fmt.Sprintf("%s encountered an error processing your mention. Try again later.", personality.Name)
-			if a.Log != nil {
-				a.Log.Warn("mention LLM call failed", "agent", mention.AgentKey, "error", err)
-			}
-		} else {
-			content = strings.TrimSpace(resp.Content)
-			if content == "" {
-				content = fmt.Sprintf("%s processed your mention but had nothing to add right now.", personality.Name)
-			}
-		}
+		content = fmt.Sprintf("%s (%s) acknowledged your mention.", personality.Name, personality.Title)
 	}
 
 	// Write the response as a forum post

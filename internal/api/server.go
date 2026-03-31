@@ -12,7 +12,7 @@ import (
 	"github.com/appsprout-dev/mnemonic/internal/agent/retrieval"
 	"github.com/appsprout-dev/mnemonic/internal/api/routes"
 	"github.com/appsprout-dev/mnemonic/internal/events"
-	"github.com/appsprout-dev/mnemonic/internal/llm"
+	"github.com/appsprout-dev/mnemonic/internal/embedding"
 	"github.com/appsprout-dev/mnemonic/internal/store"
 	"github.com/appsprout-dev/mnemonic/internal/web"
 )
@@ -29,7 +29,7 @@ type ServerConfig struct {
 // ServerDeps holds dependencies injected into the server.
 type ServerDeps struct {
 	Store                 store.Store
-	LLM                   llm.Provider
+	Embedder              embedding.Provider
 	Bus                   events.Bus
 	Retriever             *retrieval.RetrievalAgent
 	Consolidator          routes.ConsolidationRunner // can be nil if disabled
@@ -82,7 +82,7 @@ func NewServer(cfg ServerConfig, deps ServerDeps) *Server {
 // registerRoutes registers all API routes with the mux.
 func (s *Server) registerRoutes() {
 	// Health and stats
-	s.mux.HandleFunc("GET /api/v1/health", routes.HandleHealth(s.deps.Store, s.deps.LLM, s.deps.Version, s.deps.MCPToolCount, s.deps.StartTime, s.deps.Log))
+	s.mux.HandleFunc("GET /api/v1/health", routes.HandleHealth(s.deps.Store, s.deps.Embedder, s.deps.Version, s.deps.MCPToolCount, s.deps.StartTime, s.deps.Log))
 	s.mux.HandleFunc("GET /api/v1/stats", routes.HandleStats(s.deps.Store, s.deps.Log))
 
 	// Self-update
@@ -112,7 +112,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/retrieval/stats", routes.HandleRetrievalStats(s.deps.Retriever, s.deps.Log))
 
 	// Embedding backfill
-	s.mux.HandleFunc("POST /api/v1/embeddings/backfill", routes.HandleBackfillEmbeddings(s.deps.Store, s.deps.LLM, s.deps.Log))
+	s.mux.HandleFunc("POST /api/v1/embeddings/backfill", routes.HandleBackfillEmbeddings(s.deps.Store, s.deps.Embedder, s.deps.Log))
 
 	// Feedback
 	s.mux.HandleFunc("POST /api/v1/feedback", routes.HandleFeedback(s.deps.Store, s.deps.Log))

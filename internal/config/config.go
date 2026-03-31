@@ -16,7 +16,8 @@ import (
 
 // Config is the root configuration structure.
 type Config struct {
-	LLM            LLMConfig            `yaml:"llm"`
+	Embedding      EmbeddingProviderConfig `yaml:"embedding"`
+	LLM            LLMConfig               `yaml:"llm"`
 	Store          StoreConfig          `yaml:"store"`
 	Memory         MemoryConfig         `yaml:"memory"`
 	Perception     PerceptionConfig     `yaml:"perception"`
@@ -55,6 +56,16 @@ type LLMConfig struct {
 	TimeoutSec           int               `yaml:"timeout_sec"`
 	MaxConcurrent        int               `yaml:"max_concurrent"` // max simultaneous LLM requests (0 = default 2)
 	Embedded             EmbeddedLLMConfig `yaml:"embedded"`       // config for in-process llama.cpp provider
+}
+
+// EmbeddingProviderConfig selects which embedding backend to use.
+// When provider is "bow" (or empty with no LLM endpoint), uses the built-in
+// bag-of-words embedding — zero network, zero dependencies, fully air-gapped.
+// When provider is "api", uses an OpenAI-compatible embedding endpoint.
+type EmbeddingProviderConfig struct {
+	Provider string `yaml:"provider"` // "bow" (default), "api"
+	Endpoint string `yaml:"endpoint"` // for "api" provider (defaults to llm.endpoint)
+	Model    string `yaml:"model"`    // for "api" provider (defaults to llm.embedding_model)
 }
 
 // EmbeddedLLMConfig holds settings for the in-process llama.cpp provider.

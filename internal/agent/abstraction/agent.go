@@ -2,7 +2,6 @@ package abstraction
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -10,8 +9,8 @@ import (
 	"time"
 
 	"github.com/appsprout-dev/mnemonic/internal/agent/agentutil"
+	"github.com/appsprout-dev/mnemonic/internal/embedding"
 	"github.com/appsprout-dev/mnemonic/internal/events"
-	"github.com/appsprout-dev/mnemonic/internal/llm"
 	"github.com/appsprout-dev/mnemonic/internal/store"
 )
 
@@ -29,16 +28,16 @@ type AbstractionConfig struct {
 }
 
 type AbstractionAgent struct {
-	store       store.Store
-	llmProvider llm.Provider
-	config      AbstractionConfig
-	log         *slog.Logger
-	bus         events.Bus
-	ctx         context.Context
-	cancel      context.CancelFunc
-	wg          sync.WaitGroup
-	stopOnce    sync.Once
-	triggerCh   chan struct{} // allows on-demand abstraction when patterns are discovered
+	store    store.Store
+	embedder embedding.Provider
+	config   AbstractionConfig
+	log      *slog.Logger
+	bus      events.Bus
+	ctx      context.Context
+	cancel   context.CancelFunc
+	wg       sync.WaitGroup
+	stopOnce sync.Once
+	triggerCh chan struct{} // allows on-demand abstraction when patterns are discovered
 }
 
 type CycleReport struct {
@@ -49,13 +48,13 @@ type CycleReport struct {
 	AbstractionsDemoted int
 }
 
-func NewAbstractionAgent(s store.Store, llmProv llm.Provider, cfg AbstractionConfig, log *slog.Logger) *AbstractionAgent {
+func NewAbstractionAgent(s store.Store, embedder embedding.Provider, cfg AbstractionConfig, log *slog.Logger) *AbstractionAgent {
 	return &AbstractionAgent{
-		store:       s,
-		llmProvider: llmProv,
-		config:      cfg,
-		log:         log,
-		triggerCh:   make(chan struct{}, 1),
+		store:     s,
+		embedder:  embedder,
+		config:    cfg,
+		log:       log,
+		triggerCh: make(chan struct{}, 1),
 	}
 }
 
@@ -459,86 +458,29 @@ func (aa *AbstractionAgent) verifyGrounding(ctx context.Context, report *CycleRe
 	return nil
 }
 
-type principleResponse struct {
-	HasPrinciple bool     `json:"has_principle"`
-	Title        string   `json:"title"`
-	Principle    string   `json:"principle"`
-	Concepts     []string `json:"concepts"`
-	Confidence   float64  `json:"confidence"`
-}
-
-// synthesizePrinciple asks LLM to identify a principle from a cluster of patterns.
+// synthesizePrinciple uses concept clustering to identify a principle from a cluster of patterns.
 func (aa *AbstractionAgent) synthesizePrinciple(ctx context.Context, patterns []store.Pattern) (*store.Abstraction, error) {
-	var descriptions strings.Builder
 	var patternIDs []string
 	var allConcepts []string
 
+	descriptions := make([]string, len(patterns))
 	for i, p := range patterns {
-		fmt.Fprintf(&descriptions, "%d. [%s] %s: %s\n   Concepts: %s\n",
-			i+1, p.PatternType, p.Title, p.Description, strings.Join(p.Concepts, ", "))
+		descriptions[i] = p.Description
 		patternIDs = append(patternIDs, p.ID)
 		allConcepts = append(allConcepts, p.Concepts...)
 	}
 
-	prompt := fmt.Sprintf(`These patterns keep recurring in this project. Is there a practical engineering principle that explains them?
-
-Focus on actionable guidance — something a developer could apply when making decisions. Be specific to THIS project's domain, not generic software wisdom. Write like a senior engineer documenting a team practice, not a philosopher.
-
-Patterns:
-%s
-
-Respond with ONLY a JSON object:
-{
-  "has_principle": true/false,
-  "title": "short name for this practice",
-  "principle": "1-2 sentences of concrete, project-specific engineering guidance",
-  "concepts": ["key", "concepts"],
-  "confidence": 0.0-1.0
-}
-
-Set has_principle to false if:
-- The patterns are only loosely related
-- The principle would apply to any software project (too generic)
-- You cannot state it as actionable guidance ("when X, do Y")`, descriptions.String())
-
-	req := llm.CompletionRequest{
-		Messages: []llm.Message{
-			{Role: "system", Content: "You are a senior software engineer identifying recurring practices in a codebase. Extract concrete engineering principles from patterns. Output JSON only."},
-			{Role: "user", Content: prompt},
-		},
-		MaxTokens:   200,
-		Temperature: 0.3,
-		ResponseFormat: &llm.ResponseFormat{
-			Type: "json_schema",
-			JSONSchema: &llm.JSONSchema{
-				Name:   "principle_response",
-				Strict: true,
-				Schema: json.RawMessage(`{"type":"object","properties":{"has_principle":{"type":"boolean"},"title":{"type":"string"},"principle":{"type":"string"},"concepts":{"type":"array","items":{"type":"string"}},"confidence":{"type":"number"}},"required":["has_principle","title","principle","concepts","confidence"],"additionalProperties":false}`),
-			},
-		},
-	}
-
-	resp, err := aa.llmProvider.Complete(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("LLM principle synthesis failed: %w", err)
-	}
-
-	jsonStr := agentutil.ExtractJSON(resp.Content)
-	var result principleResponse
-	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
-		return nil, fmt.Errorf("failed to parse principle response: %w", err)
-	}
-
-	if !result.HasPrinciple || result.Title == "" || result.Principle == "" {
+	result := embedding.GeneratePrinciple(descriptions)
+	if result == nil {
 		return nil, nil
 	}
 
-	// Generate embedding from the principle's own text (more precise than averaged pattern embeddings)
+	// Generate embedding from the principle's own text
 	principleText := result.Title + ": " + result.Principle
-	embedding, embErr := aa.llmProvider.Embed(ctx, principleText)
+	emb, embErr := aa.embedder.Embed(ctx, principleText)
 	if embErr != nil {
 		aa.log.Warn("failed to embed principle text, falling back to pattern average", "error", embErr)
-		embedding = averagePatternEmbedding(patterns)
+		emb = averagePatternEmbedding(patterns)
 	}
 
 	concepts := result.Concepts
@@ -563,93 +505,36 @@ Set has_principle to false if:
 		SourcePatternIDs: patternIDs,
 		Confidence:       confidence,
 		Concepts:         concepts,
-		Embedding:        embedding,
+		Embedding:        emb,
 		State:            "active",
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
 	}, nil
 }
 
-type axiomResponse struct {
-	HasAxiom   bool     `json:"has_axiom"`
-	Title      string   `json:"title"`
-	Axiom      string   `json:"axiom"`
-	Concepts   []string `json:"concepts"`
-	Confidence float64  `json:"confidence"`
-}
-
-// synthesizeAxiom asks LLM to identify a fundamental axiom from a cluster of principles.
+// synthesizeAxiom uses concept clustering to identify an axiom from a cluster of principles.
 func (aa *AbstractionAgent) synthesizeAxiom(ctx context.Context, principles []store.Abstraction) (*store.Abstraction, error) {
-	var descriptions strings.Builder
 	var sourceIDs []string
 	var allConcepts []string
 
+	descriptions := make([]string, len(principles))
 	for i, p := range principles {
-		fmt.Fprintf(&descriptions, "%d. %s: %s\n   Concepts: %s\n",
-			i+1, p.Title, p.Description, strings.Join(p.Concepts, ", "))
+		descriptions[i] = p.Description
 		sourceIDs = append(sourceIDs, p.ID)
 		allConcepts = append(allConcepts, p.Concepts...)
 	}
 
-	prompt := fmt.Sprintf(`These engineering principles emerged from real project patterns. Is there a higher-level rule that connects them?
-
-State it as a concrete guideline that shapes how this team builds software. Think "team engineering standard" not "universal truth." It should be specific enough that someone could disagree with it.
-
-Principles:
-%s
-
-Respond with ONLY a JSON object:
-{
-  "has_axiom": true/false,
-  "title": "concise name for this rule",
-  "axiom": "1-2 sentences of concrete engineering guidance that connects these principles",
-  "concepts": ["key", "concepts"],
-  "confidence": 0.0-1.0
-}
-
-Set has_axiom to false if:
-- The principles don't converge on a shared rule
-- The rule would be generic advice (applies to any team)
-- You cannot express it as actionable guidance`, descriptions.String())
-
-	req := llm.CompletionRequest{
-		Messages: []llm.Message{
-			{Role: "system", Content: "You are a senior software engineer synthesizing team engineering standards from observed principles. Output JSON only."},
-			{Role: "user", Content: prompt},
-		},
-		MaxTokens:   200,
-		Temperature: 0.3,
-		ResponseFormat: &llm.ResponseFormat{
-			Type: "json_schema",
-			JSONSchema: &llm.JSONSchema{
-				Name:   "axiom_response",
-				Strict: true,
-				Schema: json.RawMessage(`{"type":"object","properties":{"has_axiom":{"type":"boolean"},"title":{"type":"string"},"axiom":{"type":"string"},"concepts":{"type":"array","items":{"type":"string"}},"confidence":{"type":"number"}},"required":["has_axiom","title","axiom","concepts","confidence"],"additionalProperties":false}`),
-			},
-		},
-	}
-
-	resp, err := aa.llmProvider.Complete(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("LLM axiom synthesis failed: %w", err)
-	}
-
-	jsonStr := agentutil.ExtractJSON(resp.Content)
-	var result axiomResponse
-	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
-		return nil, fmt.Errorf("failed to parse axiom response: %w", err)
-	}
-
-	if !result.HasAxiom || result.Title == "" || result.Axiom == "" {
+	result := embedding.GenerateAxiom(descriptions)
+	if result == nil {
 		return nil, nil
 	}
 
-	// Generate embedding from the axiom's own text (more precise than averaged principle embeddings)
+	// Generate embedding from the axiom's own text
 	axiomText := result.Title + ": " + result.Axiom
-	embedding, embErr := aa.llmProvider.Embed(ctx, axiomText)
+	emb, embErr := aa.embedder.Embed(ctx, axiomText)
 	if embErr != nil {
 		aa.log.Warn("failed to embed axiom text, falling back to principle average", "error", embErr)
-		embedding = averageAbstractionEmbedding(principles)
+		emb = averageAbstractionEmbedding(principles)
 	}
 
 	concepts := result.Concepts
@@ -674,7 +559,7 @@ Set has_axiom to false if:
 		SourcePatternIDs: sourceIDs, // these are actually principle IDs
 		Confidence:       confidence,
 		Concepts:         concepts,
-		Embedding:        embedding,
+		Embedding:        emb,
 		State:            "active",
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),

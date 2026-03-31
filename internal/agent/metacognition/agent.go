@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/appsprout-dev/mnemonic/internal/embedding"
 	"github.com/appsprout-dev/mnemonic/internal/events"
-	"github.com/appsprout-dev/mnemonic/internal/llm"
 	"github.com/appsprout-dev/mnemonic/internal/store"
 	"github.com/google/uuid"
 )
@@ -21,9 +21,9 @@ type MetacognitionConfig struct {
 }
 
 type MetacognitionAgent struct {
-	store       store.Store
-	llmProvider llm.Provider
-	config      MetacognitionConfig
+	store    store.Store
+	embedder embedding.Provider
+	config   MetacognitionConfig
 	log         *slog.Logger
 	bus         events.Bus
 	ctx         context.Context
@@ -33,13 +33,13 @@ type MetacognitionAgent struct {
 	triggerCh   chan struct{}
 }
 
-func NewMetacognitionAgent(s store.Store, llmProv llm.Provider, cfg MetacognitionConfig, log *slog.Logger) *MetacognitionAgent {
+func NewMetacognitionAgent(s store.Store, embedder embedding.Provider, cfg MetacognitionConfig, log *slog.Logger) *MetacognitionAgent {
 	return &MetacognitionAgent{
-		store:       s,
-		llmProvider: llmProv,
-		config:      cfg,
-		log:         log,
-		triggerCh:   make(chan struct{}, 1),
+		store:     s,
+		embedder:  embedder,
+		config:    cfg,
+		log:       log,
+		triggerCh: make(chan struct{}, 1),
 	}
 }
 
@@ -472,7 +472,7 @@ func (ma *MetacognitionAgent) actOnHighDeadRatio(_ context.Context, obs store.Me
 
 // actOnQualityIssues: re-embed memories that are missing embeddings.
 func (ma *MetacognitionAgent) actOnQualityIssues(ctx context.Context, obs store.MetaObservation) int {
-	if ma.llmProvider == nil {
+	if ma.embedder == nil {
 		return 0
 	}
 
@@ -510,7 +510,7 @@ func (ma *MetacognitionAgent) actOnQualityIssues(ctx context.Context, obs store.
 			continue
 		}
 
-		embedding, err := ma.llmProvider.Embed(ctx, text)
+		embedding, err := ma.embedder.Embed(ctx, text)
 		if err != nil {
 			ma.log.Warn("re-embedding failed", "memory_id", mem.ID, "error", err)
 			continue

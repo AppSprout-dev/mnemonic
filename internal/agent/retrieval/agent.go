@@ -2,7 +2,6 @@ package retrieval
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math"
@@ -13,8 +12,8 @@ import (
 
 	"github.com/appsprout-dev/mnemonic/internal/agent/agentutil"
 	"github.com/appsprout-dev/mnemonic/internal/concepts"
+	"github.com/appsprout-dev/mnemonic/internal/embedding"
 	"github.com/appsprout-dev/mnemonic/internal/events"
-	"github.com/appsprout-dev/mnemonic/internal/llm"
 	"github.com/appsprout-dev/mnemonic/internal/store"
 	"github.com/google/uuid"
 )
@@ -165,7 +164,7 @@ type QueryResponse struct {
 // RetrievalAgent performs memory retrieval using full-text search, embeddings, and spread activation.
 type RetrievalAgent struct {
 	store    store.Store
-	llm      llm.Provider
+	embedder embedding.Provider
 	config   RetrievalConfig
 	log      *slog.Logger
 	mu       sync.RWMutex
@@ -185,10 +184,10 @@ type retrievalStats struct {
 // NewRetrievalAgent creates a new retrieval agent with the given dependencies.
 // If bus is non-nil, the agent subscribes to watcher events and boosts recall
 // scores for memories whose concepts overlap with recent daemon activity.
-func NewRetrievalAgent(s store.Store, llmProv llm.Provider, cfg RetrievalConfig, log *slog.Logger, bus events.Bus) *RetrievalAgent {
+func NewRetrievalAgent(s store.Store, embedder embedding.Provider, cfg RetrievalConfig, log *slog.Logger, bus events.Bus) *RetrievalAgent {
 	ra := &RetrievalAgent{
-		store:  s,
-		llm:    llmProv,
+		store:    s,
+		embedder: embedder,
 		config: cfg,
 		log:    log,
 		stats: &retrievalStats{
@@ -293,7 +292,7 @@ func (ra *RetrievalAgent) Query(ctx context.Context, req QueryRequest) (QueryRes
 
 	// Step 3: Find entry points via embedding search
 	var embeddingResults []store.RetrievalResult
-	embedding, err := ra.llm.Embed(ctx, req.Query)
+	embedding, err := ra.embedder.Embed(ctx, req.Query)
 	if err != nil {
 		ra.log.Warn("embedding generation failed", "query_id", queryID, "error", err)
 	} else {
@@ -411,22 +410,9 @@ func (ra *RetrievalAgent) Query(ctx context.Context, req QueryRequest) (QueryRes
 		})
 	}
 
-	// Step 11: Optional synthesis (now includes patterns and abstractions)
+	// Synthesis is no longer performed by the retrieval agent.
+	// The consuming agent (e.g. Claude via MCP) synthesizes from raw results.
 	var synthesis string
-	if req.Synthesize {
-		synthStart := time.Now()
-		synthesis, err = ra.synthesizeNarrative(ctx, req.Query, ranked, matchedPatterns, matchedAbstractions)
-		if err != nil {
-			ra.log.Warn("synthesis failed", "query_id", queryID, "error", err)
-			synthesis = ""
-		}
-		synthesisMs := time.Since(synthStart).Milliseconds()
-		ra.log.Debug("synthesis completed", "query_id", queryID, "synthesis_length", len(synthesis), "took_ms", synthesisMs)
-
-		ra.mu.Lock()
-		ra.stats.AvgSynthesisMs = (ra.stats.AvgSynthesisMs + synthesisMs) / 2
-		ra.mu.Unlock()
-	}
 
 	// Calculate total time
 	tookMs := time.Since(startTime).Milliseconds()
@@ -563,6 +549,16 @@ func (ra *RetrievalAgent) spreadActivation(ctx context.Context, entryPoints map[
 				continue
 			}
 
+			// Cap fan-out: only follow the top 15 strongest associations per node.
+			// This prevents hub memories (100+ links) from exploding the search.
+			maxFanOut := 15
+			if len(assocs) > maxFanOut {
+				sort.Slice(assocs, func(i, j int) bool {
+					return assocs[i].Strength > assocs[j].Strength
+				})
+				assocs = assocs[:maxFanOut]
+			}
+
 			// Propagate activation along associations
 			for _, assoc := range assocs {
 				// Determine the neighbor: the "other end" of the association.
@@ -580,12 +576,7 @@ func (ra *RetrievalAgent) spreadActivation(ctx context.Context, entryPoints map[
 
 				// Only propagate if above threshold
 				if propagated > ra.config.ActivationThreshold {
-					// Record that this association was traversed (Hebbian activation)
-					if err := ra.store.ActivateAssociation(ctx, memID, neighborID); err != nil {
-						ra.log.Warn("failed to activate association", "src", memID, "tgt", neighborID, "error", err)
-					}
-
-					// Track traversal for feedback loop
+					// Track traversal for deferred Hebbian activation (batched after loop)
 					traversed = append(traversed, store.TraversedAssoc{
 						SourceID: memID,
 						TargetID: neighborID,
@@ -611,6 +602,16 @@ func (ra *RetrievalAgent) spreadActivation(ctx context.Context, entryPoints map[
 
 		frontier = nextFrontier
 	}
+
+	// Batch Hebbian activation updates (deferred from traversal loop to avoid
+	// per-edge DB writes during search — was the #1 cause of slow queries).
+	go func() {
+		bgCtx, bgCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer bgCancel()
+		for _, t := range traversed {
+			_ = ra.store.ActivateAssociation(bgCtx, t.SourceID, t.TargetID)
+		}
+	}()
 
 	return activated, traversed
 }
@@ -755,329 +756,6 @@ func (ra *RetrievalAgent) rankResults(ctx context.Context, activated map[string]
 	return results
 }
 
-// synthesisTools returns the read-only tools available to the LLM during synthesis.
-func (ra *RetrievalAgent) synthesisTools() []llm.Tool {
-	return []llm.Tool{
-		{
-			Type: "function",
-			Function: llm.ToolFunction{
-				Name:        "search_memories",
-				Description: "Search for additional memories by keyword or phrase. Use this when you want to explore a topic mentioned in the existing memories.",
-				Parameters: json.RawMessage(`{
-					"type": "object",
-					"properties": {
-						"query": {"type": "string", "description": "The search query — a keyword, phrase, or concept to look for"}
-					},
-					"required": ["query"]
-				}`),
-			},
-		},
-		{
-			Type: "function",
-			Function: llm.ToolFunction{
-				Name:        "get_related",
-				Description: "Follow connections from a specific memory to find related ones. Use this when a memory seems important and you want to see what it connects to.",
-				Parameters: json.RawMessage(`{
-					"type": "object",
-					"properties": {
-						"memory_id": {"type": "string", "description": "The ID of the memory to explore connections from"}
-					},
-					"required": ["memory_id"]
-				}`),
-			},
-		},
-		{
-			Type: "function",
-			Function: llm.ToolFunction{
-				Name:        "get_details",
-				Description: "Get the full detail of a specific memory — its narrative, context, and original observations. Use this when a summary isn't enough.",
-				Parameters: json.RawMessage(`{
-					"type": "object",
-					"properties": {
-						"memory_id": {"type": "string", "description": "The ID of the memory to get full details for"}
-					},
-					"required": ["memory_id"]
-				}`),
-			},
-		},
-		{
-			Type: "function",
-			Function: llm.ToolFunction{
-				Name:        "search_timeline",
-				Description: "Find memories from a specific time period. Use this when the question involves 'recently', 'last week', or a specific date range.",
-				Parameters: json.RawMessage(`{
-					"type": "object",
-					"properties": {
-						"from": {"type": "string", "description": "Start date in YYYY-MM-DD format"},
-						"to": {"type": "string", "description": "End date in YYYY-MM-DD format"}
-					},
-					"required": ["from", "to"]
-				}`),
-			},
-		},
-		{
-			Type: "function",
-			Function: llm.ToolFunction{
-				Name:        "get_project_context",
-				Description: "Get an overview of a project — what's been happening, key themes, and activity summary. Use this for project-level questions.",
-				Parameters: json.RawMessage(`{
-					"type": "object",
-					"properties": {
-						"project": {"type": "string", "description": "The project name to get context for"}
-					},
-					"required": ["project"]
-				}`),
-			},
-		},
-	}
-}
-
-// executeTool dispatches a tool call to the appropriate read-only Store method and returns the result as a string.
-func (ra *RetrievalAgent) executeTool(ctx context.Context, tc llm.ToolCall) string {
-	var args map[string]interface{}
-	if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
-		return fmt.Sprintf("Error parsing arguments: %v", err)
-	}
-
-	switch tc.Function.Name {
-	case "search_memories":
-		query, _ := args["query"].(string)
-		if query == "" {
-			return "Error: query is required"
-		}
-		memories, err := ra.store.SearchByFullText(ctx, query, 5)
-		if err != nil {
-			return fmt.Sprintf("Search failed: %v", err)
-		}
-		if len(memories) == 0 {
-			return "No memories found matching that query."
-		}
-		var sb strings.Builder
-		for i, mem := range memories {
-			project := ""
-			if mem.Project != "" {
-				project = fmt.Sprintf(" [%s]", mem.Project)
-			}
-			fmt.Fprintf(&sb, "%d. (id:%s)%s %s\n   Concepts: %s\n", i+1, mem.ID, project, mem.Summary, strings.Join(mem.Concepts, ", "))
-		}
-		return sb.String()
-
-	case "get_related":
-		memoryID, _ := args["memory_id"].(string)
-		if memoryID == "" {
-			return "Error: memory_id is required"
-		}
-		assocs, err := ra.store.GetAssociations(ctx, memoryID)
-		if err != nil {
-			return fmt.Sprintf("Failed to get associations: %v", err)
-		}
-		if len(assocs) == 0 {
-			return "This memory has no connections to other memories."
-		}
-		var sb strings.Builder
-		for i, assoc := range assocs {
-			if i >= 5 {
-				break
-			}
-			targetMem, err := ra.store.GetMemory(ctx, assoc.TargetID)
-			if err != nil {
-				continue
-			}
-			fmt.Fprintf(&sb, "- (id:%s) %s [%s, strength: %.2f]\n", targetMem.ID, targetMem.Summary, assoc.RelationType, assoc.Strength)
-		}
-		if sb.Len() == 0 {
-			return "Connected memories could not be loaded."
-		}
-		return sb.String()
-
-	case "get_details":
-		memoryID, _ := args["memory_id"].(string)
-		if memoryID == "" {
-			return "Error: memory_id is required"
-		}
-		res, err := ra.store.GetMemoryResolution(ctx, memoryID)
-		if err != nil {
-			return fmt.Sprintf("Failed to get details: %v", err)
-		}
-		return fmt.Sprintf("Gist: %s\n\nFull narrative: %s", res.Gist, res.Narrative)
-
-	case "search_timeline":
-		fromStr, _ := args["from"].(string)
-		toStr, _ := args["to"].(string)
-		from, err := time.Parse("2006-01-02", fromStr)
-		if err != nil {
-			return fmt.Sprintf("Error parsing 'from' date: %v", err)
-		}
-		to, err := time.Parse("2006-01-02", toStr)
-		if err != nil {
-			return fmt.Sprintf("Error parsing 'to' date: %v", err)
-		}
-		// Include the entire 'to' day
-		to = to.Add(24*time.Hour - time.Second)
-		memories, err := ra.store.ListMemoriesByTimeRange(ctx, from, to, 5)
-		if err != nil {
-			return fmt.Sprintf("Timeline search failed: %v", err)
-		}
-		if len(memories) == 0 {
-			return "No memories found in that time range."
-		}
-		var sb strings.Builder
-		for i, mem := range memories {
-			fmt.Fprintf(&sb, "%d. (id:%s) [%s] %s\n", i+1, mem.ID, mem.CreatedAt.Format("2006-01-02 15:04"), mem.Summary)
-		}
-		return sb.String()
-
-	case "get_project_context":
-		project, _ := args["project"].(string)
-		if project == "" {
-			return "Error: project is required"
-		}
-		summary, err := ra.store.GetProjectSummary(ctx, project)
-		if err != nil {
-			return fmt.Sprintf("Failed to get project context: %v", err)
-		}
-		data, _ := json.MarshalIndent(summary, "", "  ")
-		return string(data)
-
-	default:
-		return fmt.Sprintf("Unknown tool: %s", tc.Function.Name)
-	}
-}
-
-// synthesizeNarrative uses the LLM to create a reasoned response from retrieved memories, patterns, and abstractions.
-// The LLM has access to read-only tools to pull in additional context during synthesis.
-func (ra *RetrievalAgent) synthesizeNarrative(ctx context.Context, query string, results []store.RetrievalResult, patterns []store.Pattern, abstractions []store.Abstraction) (string, error) {
-	if len(results) == 0 && len(patterns) == 0 && len(abstractions) == 0 {
-		return "No relevant memories found.", nil
-	}
-
-	// Build the initial prompt with pre-fetched context
-	var prompt strings.Builder
-	prompt.WriteString("Answer this memory search concisely. Summarize what the memories tell you — focus on concrete facts, decisions, and specifics. Do NOT pad with filler or restate what each memory says individually.\n\n")
-	prompt.WriteString("You have tools available to search for more context if needed. Use them only if the memories below are clearly incomplete.\n\n")
-	fmt.Fprintf(&prompt, "They're asking: %s\n\n", query)
-
-	// Memories section — include IDs so the LLM can reference them with tools
-	if len(results) > 0 {
-		prompt.WriteString("Specific memories:\n")
-		for i, result := range results {
-			mem := result.Memory
-			project := ""
-			if mem.Project != "" {
-				project = fmt.Sprintf(" [%s]", mem.Project)
-			}
-			detail := mem.Content
-			if detail == "" {
-				detail = mem.Summary
-			}
-			fmt.Fprintf(&prompt, "%d. (id:%s)%s %s\n   Detail: %s\n   Concepts: %v | Created: %s\n",
-				i+1, mem.ID, project, mem.Summary, detail, mem.Concepts, mem.CreatedAt.Format("2006-01-02 15:04"))
-		}
-		prompt.WriteString("\n")
-	}
-
-	// Patterns section
-	if len(patterns) > 0 {
-		prompt.WriteString("Patterns you've noticed over time:\n")
-		for i, p := range patterns {
-			project := ""
-			if p.Project != "" {
-				project = fmt.Sprintf(" [%s]", p.Project)
-			}
-			fmt.Fprintf(&prompt, "- %s%s: %s (strength: %.2f)\n", p.Title, project, p.Description, p.Strength)
-			if i >= 2 {
-				break
-			}
-		}
-		prompt.WriteString("\n")
-	}
-
-	// Abstractions section
-	if len(abstractions) > 0 {
-		prompt.WriteString("Deeper principles you've learned:\n")
-		for i, a := range abstractions {
-			levelLabel := "principle"
-			if a.Level == 3 {
-				levelLabel = "axiom"
-			}
-			fmt.Fprintf(&prompt, "- [%s] %s: %s (confidence: %.2f)\n", levelLabel, a.Title, a.Description, a.Confidence)
-			if i >= 2 {
-				break
-			}
-		}
-		prompt.WriteString("\n")
-	}
-
-	prompt.WriteString("Respond in 2-5 sentences. Include specific details (file names, commands, decisions). Skip patterns/principles unless directly relevant to the query. Do not repeat each memory — synthesize.")
-
-	// Build conversation history for the tool-use loop
-	messages := []llm.Message{
-		{Role: "user", Content: prompt.String()},
-	}
-	tools := ra.synthesisTools()
-	toolCallCount := 0
-
-	for {
-		req := llm.CompletionRequest{
-			Messages:    messages,
-			MaxTokens:   ra.config.SynthesisMaxTokens,
-			Temperature: 0.5,
-		}
-
-		// Only provide tools if we haven't exhausted the budget
-		if toolCallCount < ra.config.MaxToolCalls {
-			req.Tools = tools
-		}
-
-		resp, err := ra.llm.Complete(ctx, req)
-		if err != nil {
-			// If tool-use fails (e.g. model doesn't support it), fall back to no-tools synthesis
-			if toolCallCount == 0 {
-				ra.log.Warn("tool-use synthesis failed, falling back to plain synthesis", "error", err)
-				req.Tools = nil
-				resp, err = ra.llm.Complete(ctx, req)
-				if err != nil {
-					return "", fmt.Errorf("llm synthesis failed: %w", err)
-				}
-				return strings.TrimSpace(resp.Content), nil
-			}
-			return "", fmt.Errorf("llm synthesis failed during tool loop: %w", err)
-		}
-
-		// If the model returned text (no tool calls), we're done
-		if len(resp.ToolCalls) == 0 {
-			return strings.TrimSpace(resp.Content), nil
-		}
-
-		// The model wants to use tools — append its message to the conversation
-		assistantMsg := llm.Message{
-			Role:      "assistant",
-			ToolCalls: resp.ToolCalls,
-		}
-		messages = append(messages, assistantMsg)
-
-		// Execute each tool call and append results
-		for _, tc := range resp.ToolCalls {
-			ra.log.Debug("executing synthesis tool", "tool", tc.Function.Name, "args", tc.Function.Arguments, "call_number", toolCallCount+1)
-
-			result := ra.executeTool(ctx, tc)
-
-			messages = append(messages, llm.Message{
-				Role:       "tool",
-				Content:    result,
-				ToolCallID: tc.ID,
-			})
-		}
-
-		toolCallCount++
-
-		// If we've hit the budget, the next iteration will send without tools,
-		// forcing the model to produce a text response
-		if toolCallCount >= ra.config.MaxToolCalls {
-			ra.log.Debug("tool call budget exhausted, forcing final synthesis")
-		}
-	}
-}
 
 // ParseQueryConcepts extracts meaningful tokens from text by splitting on spaces
 // and filtering common words. Useful for lightweight concept extraction without LLM.

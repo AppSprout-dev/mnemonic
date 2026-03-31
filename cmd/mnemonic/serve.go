@@ -27,7 +27,7 @@ import (
 	"github.com/appsprout-dev/mnemonic/internal/config"
 	"github.com/appsprout-dev/mnemonic/internal/daemon"
 	"github.com/appsprout-dev/mnemonic/internal/events"
-	"github.com/appsprout-dev/mnemonic/internal/llm"
+	"github.com/appsprout-dev/mnemonic/internal/embedding"
 	"github.com/appsprout-dev/mnemonic/internal/logger"
 	"github.com/appsprout-dev/mnemonic/internal/mcp"
 	"github.com/appsprout-dev/mnemonic/internal/store"
@@ -148,8 +148,9 @@ func serveCommand(configPath string) {
 		}
 	}
 
-	// Create LLM provider
-	llmProvider := newLLMProvider(cfg)
+	// Create embedding provider (heuristic pipeline — no generative LLM needed)
+	embProvider := newEmbeddingProvider(cfg)
+
 
 	// Check for embedding model drift
 	embModel := cfg.LLM.EmbeddingModel
@@ -208,14 +209,12 @@ func serveCommand(configPath string) {
 	bus := events.NewInMemoryBus(bufferSize)
 	defer func() { _ = bus.Close() }()
 
-	// Check LLM health (warn loudly if unavailable, don't fail startup)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.LLM.TimeoutSec)*time.Second)
-	if err := llmProvider.Health(ctx); err != nil {
-		log.Warn("LLM provider unavailable at startup", "endpoint", cfg.LLM.Endpoint, "error", err)
-		fmt.Fprintf(os.Stderr, "\n%s⚠ WARNING: LLM provider is not reachable at %s%s\n", colorYellow, cfg.LLM.Endpoint, colorReset)
-		fmt.Fprintf(os.Stderr, "  Memory encoding will not work until the LLM provider is running.\n")
-		fmt.Fprintf(os.Stderr, "  Raw observations will queue and be processed once the LLM provider is available.\n")
-		fmt.Fprintf(os.Stderr, "  Run 'mnemonic diagnose' for a full health check.\n\n")
+	// Check embedding provider health (warn if unavailable, don't fail startup)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := embProvider.Health(ctx); err != nil {
+		log.Warn("embedding provider unavailable at startup", "error", err)
+		fmt.Fprintf(os.Stderr, "\n%s⚠ WARNING: Embedding provider is not reachable%s\n", colorYellow, colorReset)
+		fmt.Fprintf(os.Stderr, "  Falling back to bag-of-words embeddings.\n\n")
 	}
 	cancel()
 
@@ -240,18 +239,20 @@ func serveCommand(configPath string) {
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	defer rootCancel()
 
-	// Instrumented provider wrapper — gives each agent its own usage tracking.
-	// If training data capture is enabled, wrap with TrainingCaptureProvider too.
-	modelLabel := cfg.LLM.ChatModel
-	if cfg.LLM.Provider == "embedded" && cfg.LLM.Embedded.ChatModelFile != "" {
-		modelLabel = cfg.LLM.Embedded.ChatModelFile
-	}
-	wrap := func(caller string) llm.Provider {
-		var p llm.Provider = llm.NewInstrumentedProvider(llmProvider, memStore, caller, modelLabel)
-		if cfg.Training.CaptureEnabled && cfg.Training.CaptureDir != "" {
-			p = llm.NewTrainingCaptureProvider(p, caller, cfg.Training.CaptureDir)
+	// Instrumented embedding provider wrapper — gives each agent its own usage tracking.
+	modelLabel := cfg.LLM.EmbeddingModel
+	switch cfg.Embedding.Provider {
+	case "bow":
+		modelLabel = "bow-128"
+	case "hugot":
+		modelLabel = "hugot-MiniLM-384"
+	default:
+		if modelLabel == "" {
+			modelLabel = "bow-128"
 		}
-		return p
+	}
+	wrapEmb := func(caller string) embedding.Provider {
+		return embedding.NewInstrumentedProvider(embProvider, memStore, caller, modelLabel)
 	}
 
 	// --- Start episoding agent (groups raw events into episodes) ---
@@ -268,7 +269,7 @@ func serveCommand(configPath string) {
 			StartupLookback:      cfg.Episoding.StartupLookback,
 			DefaultSalience:      cfg.Episoding.DefaultSalience,
 		}
-		episodingAgent = episoding.NewEpisodingAgent(memStore, wrap("episoding"), log, episodingCfg)
+		episodingAgent = episoding.NewEpisodingAgent(memStore, wrapEmb("episoding"), log, episodingCfg)
 		if err := episodingAgent.Start(rootCtx, bus); err != nil {
 			log.Error("failed to start episoding agent", "error", err)
 		} else {
@@ -279,7 +280,7 @@ func serveCommand(configPath string) {
 	// --- Start encoding agent ---
 	var encoder *encoding.EncodingAgent
 	if cfg.Encoding.Enabled {
-		encoder = encoding.NewEncodingAgentWithConfig(memStore, wrap("encoding"), log, buildEncodingConfig(cfg))
+		encoder = encoding.NewEncodingAgentWithConfig(memStore, wrapEmb("encoding"), log, buildEncodingConfig(cfg))
 		if err := encoder.Start(rootCtx, bus); err != nil {
 			log.Error("failed to start encoding agent", "error", err)
 		} else {
@@ -367,7 +368,6 @@ func serveCommand(configPath string) {
 			percAgent = perception.NewPerceptionAgent(
 				watchers,
 				memStore,
-				wrap("perception"),
 				perception.PerceptionConfig{
 					HeuristicConfig: perception.HeuristicConfig{
 						MinContentLength:        cfg.Perception.Heuristics.MinContentLength,
@@ -428,12 +428,12 @@ func serveCommand(configPath string) {
 	}
 
 	// --- Create retrieval agent for API queries ---
-	retriever := retrieval.NewRetrievalAgent(memStore, wrap("retrieval"), buildRetrievalConfig(cfg), log, bus)
+	retriever := retrieval.NewRetrievalAgent(memStore, wrapEmb("retrieval"), buildRetrievalConfig(cfg), log, bus)
 
 	// --- Start consolidation agent ---
 	var consolidator *consolidation.ConsolidationAgent
 	if cfg.Consolidation.Enabled {
-		consolidator = consolidation.NewConsolidationAgent(memStore, wrap("consolidation"), toConsolidationConfig(cfg), log)
+		consolidator = consolidation.NewConsolidationAgent(memStore, wrapEmb("consolidation"), toConsolidationConfig(cfg), log)
 
 		if err := consolidator.Start(rootCtx, bus); err != nil {
 			log.Error("failed to start consolidation agent", "error", err)
@@ -445,7 +445,7 @@ func serveCommand(configPath string) {
 	// --- Start metacognition agent ---
 	var metaAgent *metacognition.MetacognitionAgent
 	if cfg.Metacognition.Enabled {
-		metaAgent = metacognition.NewMetacognitionAgent(memStore, wrap("metacognition"), metacognition.MetacognitionConfig{
+		metaAgent = metacognition.NewMetacognitionAgent(memStore, wrapEmb("metacognition"), metacognition.MetacognitionConfig{
 			Interval:           cfg.Metacognition.Interval,
 			StartupDelay:       time.Duration(cfg.Metacognition.StartupDelaySec) * time.Second,
 			ReflectionLookback: cfg.Metacognition.ReflectionLookback,
@@ -462,7 +462,7 @@ func serveCommand(configPath string) {
 	// --- Start dreaming agent ---
 	var dreamer *dreaming.DreamingAgent
 	if cfg.Dreaming.Enabled {
-		dreamer = dreaming.NewDreamingAgent(memStore, wrap("dreaming"), dreaming.DreamingConfig{
+		dreamer = dreaming.NewDreamingAgent(memStore, wrapEmb("dreaming"), dreaming.DreamingConfig{
 			Interval:               cfg.Dreaming.Interval,
 			BatchSize:              cfg.Dreaming.BatchSize,
 			SalienceThreshold:      cfg.Dreaming.SalienceThreshold,
@@ -484,7 +484,7 @@ func serveCommand(configPath string) {
 	// --- Start abstraction agent ---
 	var abstractionAgent *abstraction.AbstractionAgent
 	if cfg.Abstraction.Enabled {
-		abstractionAgent = abstraction.NewAbstractionAgent(memStore, wrap("abstraction"), abstraction.AbstractionConfig{
+		abstractionAgent = abstraction.NewAbstractionAgent(memStore, wrapEmb("abstraction"), abstraction.AbstractionConfig{
 			Interval:                   cfg.Abstraction.Interval,
 			MinStrength:                cfg.Abstraction.MinStrength,
 			MaxLLMCalls:                cfg.Abstraction.MaxLLMCalls,
@@ -507,7 +507,7 @@ func serveCommand(configPath string) {
 	// --- Start orchestrator (autonomous health monitoring and self-testing) ---
 	var orch *orchestrator.Orchestrator
 	if cfg.Orchestrator.Enabled {
-		orch = orchestrator.NewOrchestrator(memStore, wrap("orchestrator"), orchestrator.OrchestratorConfig{
+		orch = orchestrator.NewOrchestrator(memStore, wrapEmb("orchestrator"), orchestrator.OrchestratorConfig{
 			AdaptiveIntervals:    cfg.Orchestrator.AdaptiveIntervals,
 			MaxDBSizeMB:          cfg.Orchestrator.MaxDBSizeMB,
 			SelfTestInterval:     cfg.Orchestrator.SelfTestInterval,
@@ -571,7 +571,7 @@ func serveCommand(configPath string) {
 		deps.ForumMentionTemp = cfg.Forum.MentionTemp
 		deps.ForumPerAgentSubforums = cfg.Forum.PerAgentSubforums
 		deps.ForumDigestPosting = cfg.Forum.DigestPosting
-		deps.MentionLLM = llmProvider
+		// MentionLLM is no longer used — @mention responses are static
 		if retriever != nil {
 			deps.MentionQuery = retriever
 		}
@@ -605,7 +605,7 @@ func serveCommand(configPath string) {
 	if cfg.API.Port > 0 {
 		apiDeps := api.ServerDeps{
 			Store:                 memStore,
-			LLM:                   llmProvider,
+			Embedder:              embProvider,
 			Bus:                   bus,
 			Retriever:             retriever,
 			IngestExcludePatterns: cfg.Perception.Filesystem.ExcludePatterns,

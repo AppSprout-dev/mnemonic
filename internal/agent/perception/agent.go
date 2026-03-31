@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -15,7 +14,6 @@ import (
 
 	"github.com/appsprout-dev/mnemonic/internal/agent"
 	"github.com/appsprout-dev/mnemonic/internal/events"
-	"github.com/appsprout-dev/mnemonic/internal/llm"
 	"github.com/appsprout-dev/mnemonic/internal/store"
 	"github.com/appsprout-dev/mnemonic/internal/watcher"
 	"github.com/google/uuid"
@@ -50,12 +48,11 @@ type PerceptionConfig struct {
 // defaultContentDedupTTL is the default duration for content-hash dedup.
 const defaultContentDedupTTL = 5 * time.Second
 
-// PerceptionAgent orchestrates the perception pipeline: watchers → heuristic → LLM → memory.
+// PerceptionAgent orchestrates the perception pipeline: watchers → heuristic → memory.
 type PerceptionAgent struct {
 	name             string
 	watchers         []watcher.Watcher
 	store            store.Store
-	llmProvider      llm.Provider
 	cfg              PerceptionConfig
 	log              *slog.Logger
 	heuristicFilter  *HeuristicFilter
@@ -81,7 +78,6 @@ type PerceptionAgent struct {
 func NewPerceptionAgent(
 	watchers []watcher.Watcher,
 	s store.Store,
-	llmProv llm.Provider,
 	cfg PerceptionConfig,
 	log *slog.Logger,
 ) *PerceptionAgent {
@@ -93,7 +89,6 @@ func NewPerceptionAgent(
 		name:          "perception",
 		watchers:      watchers,
 		store:         s,
-		llmProvider:   llmProv,
 		cfg:           cfg,
 		log:           log,
 		gitOpCooldown: gitCooldown,
@@ -372,29 +367,7 @@ func (pa *PerceptionAgent) processEvent(ctx context.Context, event Event) {
 
 	salience := heuristicResult.Score
 
-	// 2. LLM gating (if enabled)
-	if pa.cfg.LLMGatingEnabled {
-		llmResult, err := pa.callLLMGate(ctx, event, heuristicResult.Score)
-		if err != nil {
-			pa.log.Error(
-				"LLM gating failed, falling back to heuristic",
-				"error", err,
-				"source", event.Source,
-			)
-			// Fall back to heuristic score
-			salience = heuristicResult.Score
-		} else if !llmResult.WorthRemembering {
-			pa.log.Info(
-				"event rejected by LLM gating",
-				"source", event.Source,
-				"path", event.Path,
-				"reason", llmResult.Reason,
-			)
-			return
-		} else {
-			salience = llmResult.Salience
-		}
-	}
+	// LLM gating has been removed — heuristic scoring is the only path.
 
 	// 3. Compute content hash for early dedup
 	truncatedContent := pa.truncateContent(event.Content, pa.maxRawContentLen())
@@ -465,95 +438,6 @@ func (pa *PerceptionAgent) processEvent(ctx context.Context, event Event) {
 	)
 }
 
-// callLLMGate calls the LLM to determine if an event is worth remembering.
-func (pa *PerceptionAgent) callLLMGate(
-	ctx context.Context,
-	event Event,
-	heuristicScore float32,
-) (*llmGateResult, error) {
-	// Build the prompt
-	snippetLen := pa.cfg.LLMGateSnippetLen
-	if snippetLen <= 0 {
-		snippetLen = 500
-	}
-	contentSnippet := event.Content
-	if len(contentSnippet) > snippetLen {
-		contentSnippet = contentSnippet[:snippetLen]
-	}
-
-	prompt := fmt.Sprintf(`You are a memory perception system. Evaluate if this observation is worth remembering.
-
-Source: %s
-Type: %s
-Content: %s
-
-Respond in exactly this JSON format, nothing else:
-{"worth_remembering": true, "salience": 0.7, "reason": "brief explanation"}
-
-Salience 0.0-1.0: Higher for errors, decisions, insights, creative work. Lower for routine navigation, trivial commands.`,
-		event.Source,
-		event.Type,
-		contentSnippet,
-	)
-
-	// Create LLM request with structured output to ensure valid JSON
-	req := llm.CompletionRequest{
-		Messages: []llm.Message{
-			{Role: "system", Content: "You are a relevance filter. Decide if events are worth remembering. Output JSON only."},
-			{Role: "user", Content: prompt},
-		},
-		MaxTokens:   200,
-		Temperature: 0.5,
-		ResponseFormat: &llm.ResponseFormat{
-			Type: "json_schema",
-			JSONSchema: &llm.JSONSchema{
-				Name:   "gate_response",
-				Strict: true,
-				Schema: json.RawMessage(`{"type":"object","properties":{"worth_remembering":{"type":"boolean"},"salience":{"type":"number"},"reason":{"type":"string"}},"required":["worth_remembering","salience","reason"],"additionalProperties":false}`),
-			},
-		},
-	}
-
-	// Call LLM with context timeout
-	gateTimeout := time.Duration(pa.cfg.LLMGateTimeoutSec) * time.Second
-	if gateTimeout <= 0 {
-		gateTimeout = 10 * time.Second
-	}
-	llmCtx, cancel := context.WithTimeout(ctx, gateTimeout)
-	defer cancel()
-
-	resp, err := pa.llmProvider.Complete(llmCtx, req)
-	if err != nil {
-		return nil, fmt.Errorf("LLM completion failed: %w", err)
-	}
-
-	// Parse the JSON response
-	var result llmGateResult
-	if err := json.Unmarshal([]byte(resp.Content), &result); err != nil {
-		pa.log.Error(
-			"failed to parse LLM response",
-			"error", err,
-			"response", resp.Content,
-		)
-		return nil, fmt.Errorf("failed to parse LLM response: %w", err)
-	}
-
-	// Clamp salience to [0.0, 1.0]
-	if result.Salience < 0.0 {
-		result.Salience = 0.0
-	} else if result.Salience > 1.0 {
-		result.Salience = 1.0
-	}
-
-	return &result, nil
-}
-
-// llmGateResult represents the LLM's decision on whether to remember an event.
-type llmGateResult struct {
-	WorthRemembering bool    `json:"worth_remembering"`
-	Salience         float32 `json:"salience"`
-	Reason           string  `json:"reason"`
-}
 
 // promoteExclusion pushes a learned exclusion pattern to all watchers that
 // support runtime exclusion updates.
