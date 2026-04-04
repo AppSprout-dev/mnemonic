@@ -324,6 +324,16 @@ def print_results(all_results: dict):
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Hallucination stress test")
+    parser.add_argument("--checkpoint", type=str, default=None,
+                        help="Path to Qwen spoke checkpoint (default: auto-detect exp17/exp18)")
+    parser.add_argument("--skip-gemma", action="store_true",
+                        help="Skip Gemma model (e.g., on droplet with only Qwen)")
+    parser.add_argument("--skip-gemini", action="store_true",
+                        help="Skip Gemini API comparison")
+    cli_args = parser.parse_args()
+
     print("=" * 100)
     print("HALLUCINATION STRESS TEST")
     print(f"Tests: {len(HARD_INPUTS)} hard inputs designed to trigger hallucinations")
@@ -335,9 +345,12 @@ def main():
     # --- Qwen 3.5 2B + Spokes ---
     print("\n--- Loading Qwen 3.5 2B + Spokes ---")
     from qwen_spoke_adapter import QwenWithSpokes, SpokeConfig
-    spoke_path = "checkpoints/exp17_v2_data/best_spokes.pt"
-    if not Path(spoke_path).exists():
-        spoke_path = "checkpoints/exp18_v5_12k/best_spokes.pt"
+    if cli_args.checkpoint:
+        spoke_path = cli_args.checkpoint
+    else:
+        spoke_path = "checkpoints/exp17_v2_data/best_spokes.pt"
+        if not Path(spoke_path).exists():
+            spoke_path = "checkpoints/exp18_v5_12k/best_spokes.pt"
     data = torch.load(spoke_path, weights_only=True, map_location="cpu")
     qwen_model = QwenWithSpokes.from_pretrained(
         "Qwen/Qwen3.5-2B", spoke_config=SpokeConfig(**data["spoke_config"]), dtype=torch.bfloat16,
@@ -355,40 +368,43 @@ def main():
     torch.cuda.empty_cache()
 
     # --- Gemma 4 E2B + Spokes ---
-    print("\n--- Loading Gemma 4 E2B + Spokes ---")
-    from gemma_spoke_adapter import GemmaWithSpokes
-    spoke_path = "checkpoints/gemma4_e2b_v5/best_spokes.pt"
-    if Path(spoke_path).exists():
-        data = torch.load(spoke_path, weights_only=True, map_location="cpu")
-        gemma_model = GemmaWithSpokes.from_pretrained(
-            "google/gemma-4-E2B-it", spoke_config=SpokeConfig(**data["spoke_config"]),
-            offload_ple=False,
-        )
-        gemma_model.load_spokes(spoke_path)
-        if hasattr(gemma_model.base_model, 'hf_device_map'):
-            gemma_model.spokes.to(device)
-        else:
-            gemma_model.to(device)
-        gemma_model.eval()
-        gemma_tok = AutoTokenizer.from_pretrained("google/gemma-4-E2B-it")
+    if not cli_args.skip_gemma:
+        print("\n--- Loading Gemma 4 E2B + Spokes ---")
+        from gemma_spoke_adapter import GemmaWithSpokes
+        gemma_spoke_path = "checkpoints/gemma4_e2b_v5/best_spokes.pt"
+        if Path(gemma_spoke_path).exists():
+            data = torch.load(gemma_spoke_path, weights_only=True, map_location="cpu")
+            gemma_model = GemmaWithSpokes.from_pretrained(
+                "google/gemma-4-E2B-it", spoke_config=SpokeConfig(**data["spoke_config"]),
+                offload_ple=False,
+            )
+            gemma_model.load_spokes(gemma_spoke_path)
+            if hasattr(gemma_model.base_model, 'hf_device_map'):
+                gemma_model.spokes.to(device)
+            else:
+                gemma_model.to(device)
+            gemma_model.eval()
+            gemma_tok = AutoTokenizer.from_pretrained("google/gemma-4-E2B-it")
 
-        print("--- Running Gemma ---")
-        all_results["Gemma4+Spokes"] = run_model(
-            "Gemma4+Spokes", make_local_generator(gemma_model, gemma_tok, device), HARD_INPUTS
-        )
-        del gemma_model
-        torch.cuda.empty_cache()
+            print("--- Running Gemma ---")
+            all_results["Gemma4+Spokes"] = run_model(
+                "Gemma4+Spokes", make_local_generator(gemma_model, gemma_tok, device), HARD_INPUTS
+            )
+            del gemma_model
+            torch.cuda.empty_cache()
+        else:
+            print("  Gemma checkpoint not found, skipping")
     else:
-        print("  Gemma checkpoint not found, skipping")
+        print("\n--- Skipping Gemma (--skip-gemma) ---")
 
     # --- Gemini 3 Flash ---
-    if os.environ.get("LLM_API_KEY"):
+    if not cli_args.skip_gemini and os.environ.get("LLM_API_KEY"):
         print("\n--- Running Gemini 3 Flash ---")
         all_results["Gemini3Flash"] = run_model(
             "Gemini3Flash", make_gemini_generator(), HARD_INPUTS
         )
     else:
-        print("\n--- LLM_API_KEY not set, skipping Gemini ---")
+        print("\n--- Skipping Gemini ---")
 
     # --- Results ---
     print_results(all_results)

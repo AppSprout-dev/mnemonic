@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from training_constants import ENCODING_SYSTEM_PROMPT, REQUIRED_FIELDS  # noqa: E402
 
 API_KEY = os.environ.get("LLM_API_KEY", "")
-MODEL = "gemini-3-flash-preview"
+MODEL = "gemini-3.1-pro-preview"
 
 
 def create_batch_file(input_path: str, batch_path: str) -> int:
