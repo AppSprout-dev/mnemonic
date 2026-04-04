@@ -30,15 +30,37 @@ type wsConn struct {
 	log             *slog.Logger
 }
 
+// defaultOrigins is the built-in set of allowed CORS/WebSocket origins.
+var defaultOrigins = []string{
+	"http://localhost:3000",
+	"http://localhost:8080",
+	"http://127.0.0.1:3000",
+	"http://127.0.0.1:8080",
+	"http://localhost:9999",
+	"http://127.0.0.1:9999",
+}
+
 // AllowedOrigins is the set of origins allowed for CORS and WebSocket connections.
 // Used by both the CORS middleware in server.go and the WebSocket upgrader here.
-var AllowedOrigins = map[string]bool{
-	"http://localhost:3000": true,
-	"http://localhost:8080": true,
-	"http://127.0.0.1:3000": true,
-	"http://127.0.0.1:8080": true,
-	"http://localhost:9999": true,
-	"http://127.0.0.1:9999": true,
+// Populated by SetAllowedOrigins; defaults applied if never called.
+var AllowedOrigins = buildOriginMap(defaultOrigins)
+
+// SetAllowedOrigins replaces the allowed origins map. If origins is empty,
+// the built-in defaults are used.
+func SetAllowedOrigins(origins []string) {
+	if len(origins) == 0 {
+		AllowedOrigins = buildOriginMap(defaultOrigins)
+		return
+	}
+	AllowedOrigins = buildOriginMap(origins)
+}
+
+func buildOriginMap(origins []string) map[string]bool {
+	m := make(map[string]bool, len(origins))
+	for _, o := range origins {
+		m[o] = true
+	}
+	return m
 }
 
 // upgrader is the WebSocket upgrader with default settings.
@@ -104,6 +126,7 @@ func HandleWebSocket(bus events.Bus, log *slog.Logger) http.HandlerFunc {
 			events.TypeAbstractionCreated,
 			events.TypeMemoryAmended,
 			events.TypeSessionEnded,
+			events.TypeForumPostCreated,
 		}
 
 		for _, eventType := range eventTypes {
@@ -221,6 +244,8 @@ func wsConnEventToMessage(evt events.Event) WebSocketMessage {
 	case events.MemoryAmended:
 		payload = e
 	case events.SessionEnded:
+		payload = e
+	case events.ForumPostCreated:
 		payload = e
 	default:
 		// Fallback for unknown event types

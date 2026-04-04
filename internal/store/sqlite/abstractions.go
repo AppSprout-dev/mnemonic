@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/appsprout-dev/mnemonic/internal/mathutil"
 	store "github.com/appsprout-dev/mnemonic/internal/store"
 )
 
@@ -156,7 +157,7 @@ func (s *SQLiteStore) SearchAbstractionsByEmbedding(ctx context.Context, embeddi
 		if len(emb) == 0 {
 			continue
 		}
-		score := cosineSimilarity(embedding, emb)
+		score := mathutil.CosineSimilarity(embedding, emb)
 		candidates = append(candidates, candidate{id: id, score: score})
 	}
 
@@ -246,6 +247,20 @@ func scanAbstractionRows(rows *sql.Rows) ([]store.Abstraction, error) {
 	}
 
 	return abstractions, nil
+}
+
+// ArchiveAbstraction archives a single abstraction by ID.
+func (s *SQLiteStore) ArchiveAbstraction(ctx context.Context, id string) error {
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE abstractions SET state = 'archived', updated_at = datetime('now') WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("archiving abstraction %s: %w", id, err)
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("abstraction %s: %w", id, store.ErrNotFound)
+	}
+	return nil
 }
 
 // ArchiveAllAbstractions transitions all active abstractions to archived state.

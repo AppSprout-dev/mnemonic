@@ -31,7 +31,7 @@ cmd/benchmark/         End-to-end benchmark
 cmd/benchmark-quality/ Memory quality IR benchmark
 cmd/lifecycle-test/    Full lifecycle simulation (install → 3 months)
 internal/
-  agent/               8 cognitive agents + orchestrator + reactor
+  agent/               8 cognitive agents + orchestrator + reactor + forum
     perception/        Watch filesystem/terminal/clipboard, heuristic filter
     encoding/          LLM compression, concept extraction, association linking
     episoding/         Temporal episode clustering
@@ -42,11 +42,13 @@ internal/
     abstraction/       Patterns → principles → axioms
     orchestrator/      Autonomous scheduler, health monitoring
     reactor/           Event-driven rule engine
+    forum/             Agent personality system for forum communication
   api/                 REST API server + routes
-  web/                 Embedded dashboard (single-page app, D3.js charts)
-  mcp/                 MCP server (23 tools for Claude Code)
+  web/                 Embedded dashboard (forum-style, modular ES modules + CSS)
+  mcp/                 MCP server (24 tools for Claude Code)
   store/               Store interface + SQLite implementation
   llm/                 LLM provider interface + implementations (LM Studio, Gemini/cloud API)
+    llamacpp/          Optional embedded llama.cpp backend (CGo, build-tagged)
   ingest/              Project ingestion engine
   watcher/             Filesystem (FSEvents/fsnotify), terminal, clipboard
   daemon/              Service management (macOS launchd, Linux systemd, Windows Services)
@@ -67,6 +69,7 @@ training/              Mnemonic-LM training infrastructure
   data/                Tokenized pretraining shards (gitignored)
   sweep_results.tsv    HP sweep results log
   probe_results.tsv    Short probe results from LR bisection
+third_party/           llama.cpp submodule (for embedded LLM builds)
 migrations/            SQLite schema migrations
 scripts/               Utility scripts
 ```
@@ -137,12 +140,12 @@ See [GitHub Issues](https://github.com/appsprout-dev/mnemonic/issues) for tracke
 
 ## MCP Tools Available
 
-You have 21 tools via the `mnemonic` MCP server:
+You have 24 tools via the `mnemonic` MCP server:
 
 | Tool | When to Use |
 |------|-------------|
 | `remember` | Store decisions, errors, insights, learnings (returns raw ID + salience) |
-| `recall` | Semantic search with spread activation (`explain`, `include_associations`, `format`, `type`, `synthesize` params) |
+| `recall` | Semantic search with spread activation (`explain`, `include_associations`, `format`, `type`, `types`, `include_patterns`, `include_abstractions`, `synthesize` params) |
 | `batch_recall` | Run multiple recall queries in parallel — ideal for session start |
 | `get_context` | Proactive suggestions based on recent daemon activity — call at natural breakpoints |
 | `forget` | Archive irrelevant memories |
@@ -154,8 +157,8 @@ You have 21 tools via the `mnemonic` MCP server:
 | `recall_session` | Retrieve all memories from a specific MCP session |
 | `list_sessions` | List recent sessions with time range and memory count |
 | `session_summary` | Summarize current/recent session |
-| `get_patterns` | View discovered recurring patterns |
-| `get_insights` | View metacognition observations and abstractions |
+| `get_patterns` | View discovered recurring patterns (returns IDs for dismissal, supports `min_strength`) |
+| `get_insights` | View metacognition observations and abstractions (returns IDs for dismissal) |
 | `feedback` | Report recall quality (drives ranking, can auto-suppress noisy memories) |
 | `audit_encodings` | Review recent encoding quality and suggest improvements |
 | `coach_local_llm` | Write coaching guidance to improve local LLM prompts |
@@ -163,6 +166,7 @@ You have 21 tools via the `mnemonic` MCP server:
 | `exclude_path` | Add a watcher exclusion pattern at runtime |
 | `list_exclusions` | List all runtime watcher exclusion patterns |
 | `dismiss_pattern` | Archive a stale or irrelevant pattern to stop it surfacing in recall |
+| `dismiss_abstraction` | Archive a stale or irrelevant principle/axiom to stop it surfacing in recall |
 | `create_handoff` | Store structured session handoff notes (high salience, surfaced by recall_project) |
 
 ### At Session Start

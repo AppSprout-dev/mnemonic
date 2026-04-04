@@ -354,25 +354,75 @@ type RetrievalFeedback struct {
 	CreatedAt       time.Time             `json:"created_at"`
 }
 
-// Store is the abstraction for persistent memory.
-type Store interface {
-	// --- Raw memory operations ---
+// ForumCategory is a sub-forum in the forum index.
+type ForumCategory struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Slug        string    `json:"slug"`
+	Description string    `json:"description"`
+	Icon        string    `json:"icon"`
+	Color       string    `json:"color"`
+	Type        string    `json:"type"` // "system", "project", "agent", "custom"
+	SortOrder   int       `json:"sort_order"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// ForumCategorySummary is a category with thread/post counts for the index page.
+type ForumCategorySummary struct {
+	Category    ForumCategory `json:"category"`
+	ThreadCount int           `json:"thread_count"`
+	PostCount   int           `json:"post_count"`
+	LastPost    *ForumPost    `json:"last_post,omitempty"`
+}
+
+// ForumPost is a single post in the forum communication layer.
+// Forum posts are separate from memories — they are a conversation space
+// between humans and agents. Posts can link to memories but are not memories.
+type ForumPost struct {
+	ID         string    `json:"id"`
+	ParentID   string    `json:"parent_id,omitempty"` // NULL = top-level post
+	ThreadID   string    `json:"thread_id"`           // root post ID (denormalized)
+	AuthorType string    `json:"author_type"`         // "human", "agent"
+	AuthorName string    `json:"author_name"`
+	AuthorKey  string    `json:"author_key,omitempty"` // agent key for avatar lookup
+	Content    string    `json:"content"`
+	Mentions   []string  `json:"mentions,omitempty"`    // extracted @mentions
+	MemoryIDs  []string  `json:"memory_ids,omitempty"`  // linked memory IDs
+	EventRef   string    `json:"event_ref,omitempty"`   // event that triggered this post
+	CategoryID string    `json:"category_id,omitempty"` // sub-forum this thread belongs to
+	Pinned     bool      `json:"pinned"`
+	State      string    `json:"state"` // "active", "archived", "internalized"
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+// ForumThread is a denormalized thread summary for listing.
+type ForumThread struct {
+	RootPost   ForumPost `json:"root_post"`
+	ReplyCount int       `json:"reply_count"`
+	LastReply  time.Time `json:"last_reply"`
+}
+
+// RawMemoryStore handles raw (unencoded) memory persistence.
+type RawMemoryStore interface {
 	WriteRaw(ctx context.Context, raw RawMemory) error
 	RawMemoryExistsByHash(ctx context.Context, contentHash string) (bool, error)
 	GetRaw(ctx context.Context, id string) (RawMemory, error)
 	ListRawUnprocessed(ctx context.Context, limit int) ([]RawMemory, error)
 	ListRawMemoriesAfter(ctx context.Context, after time.Time, limit int) ([]RawMemory, error)
 	MarkRawProcessed(ctx context.Context, id string) error
-	// ClaimRawForEncoding atomically marks a raw memory as processed only if it
-	// hasn't been claimed yet (processed=0). Returns ErrAlreadyClaimed if another
-	// process already claimed it. This prevents duplicate encoding across multiple
-	// mnemonic processes sharing the same database.
 	ClaimRawForEncoding(ctx context.Context, id string) error
-	// UnclaimRawMemory resets a raw memory to unprocessed (processed=0) so it
-	// can be retried after a failed encoding attempt.
 	UnclaimRawMemory(ctx context.Context, id string) error
+	RawMemoryExistsByPath(ctx context.Context, source string, project string, filePath string) (bool, error)
+	BatchWriteRaw(ctx context.Context, raws []RawMemory) error
+	ListAllRawMemories(ctx context.Context) ([]RawMemory, error)
+	CountRawUnprocessedByPathPatterns(ctx context.Context, patterns []string) (int, error)
+	BulkMarkRawProcessedByPathPatterns(ctx context.Context, patterns []string) (int, error)
+	ArchiveMemoriesByRawPathPatterns(ctx context.Context, patterns []string) (int, error)
+}
 
-	// --- Encoded memory operations ---
+// MemoryStore handles encoded memory CRUD operations.
+type MemoryStore interface {
 	WriteMemory(ctx context.Context, mem Memory) error
 	GetMemory(ctx context.Context, id string) (Memory, error)
 	GetMemoryByRawID(ctx context.Context, rawID string) (Memory, error)
@@ -383,17 +433,33 @@ type Store interface {
 	IncrementAccess(ctx context.Context, id string) error
 	ListMemories(ctx context.Context, state string, limit, offset int) ([]Memory, error)
 	CountMemories(ctx context.Context) (int, error)
-
-	// --- Memory amendment ---
 	AmendMemory(ctx context.Context, id string, newContent string, newSummary string, newConcepts []string, newEmbedding []float32) error
+	BatchUpdateSalience(ctx context.Context, updates map[string]float32) error
+	BatchMergeMemories(ctx context.Context, sourceIDs []string, gist Memory) error
+	DeleteOldArchived(ctx context.Context, olderThan time.Time) (int, error)
+	GetDeadMemories(ctx context.Context, cutoffDate time.Time) ([]Memory, error)
+	WriteMemoryResolution(ctx context.Context, res MemoryResolution) error
+	GetMemoryResolution(ctx context.Context, memoryID string) (MemoryResolution, error)
+	WriteMemoryAttributes(ctx context.Context, attrs MemoryAttributes) error
+	GetMemoryAttributes(ctx context.Context, memoryID string) (MemoryAttributes, error)
+}
 
-	// --- Search operations ---
+// SearchStore handles memory search and retrieval.
+type SearchStore interface {
 	SearchByFullText(ctx context.Context, query string, limit int) ([]Memory, error)
 	SearchByEmbedding(ctx context.Context, embedding []float32, limit int) ([]RetrievalResult, error)
 	SearchByConcepts(ctx context.Context, concepts []string, limit int) ([]Memory, error)
 	SearchByConceptsInProject(ctx context.Context, concepts []string, project string, limit int) ([]Memory, error)
+	SearchByProject(ctx context.Context, project string, query string, limit int) ([]Memory, error)
+	SearchByEntity(ctx context.Context, name string, entityType string, limit int) ([]Memory, error)
+	ListMemoriesByTimeRange(ctx context.Context, from, to time.Time, limit int) ([]Memory, error)
+	ListMemoriesBySession(ctx context.Context, sessionID string) ([]Memory, error)
+	GetProjectSummary(ctx context.Context, project string) (map[string]interface{}, error)
+	ListProjects(ctx context.Context) ([]string, error)
+}
 
-	// --- Association graph operations ---
+// AssociationStore handles the memory association graph.
+type AssociationStore interface {
 	CreateAssociation(ctx context.Context, assoc Association) error
 	GetAssociations(ctx context.Context, memoryID string) ([]Association, error)
 	UpdateAssociationStrength(ctx context.Context, sourceID, targetID string, strength float32) error
@@ -401,77 +467,28 @@ type Store interface {
 	ActivateAssociation(ctx context.Context, sourceID, targetID string) error
 	PruneWeakAssociations(ctx context.Context, strengthThreshold float32) (int, error)
 	PruneOrphanedAssociations(ctx context.Context) (int, error)
-
-	// --- Deduplication ---
-	RawMemoryExistsByPath(ctx context.Context, source string, project string, filePath string) (bool, error)
-
-	// --- Cleanup operations ---
-	// CountRawUnprocessedByPathPatterns counts unprocessed raw memories
-	// whose metadata path matches any of the given substring patterns.
-	CountRawUnprocessedByPathPatterns(ctx context.Context, patterns []string) (int, error)
-	// BulkMarkRawProcessedByPathPatterns marks unprocessed raw memories as processed
-	// where the metadata path matches any of the given substring patterns.
-	BulkMarkRawProcessedByPathPatterns(ctx context.Context, patterns []string) (int, error)
-	// ArchiveMemoriesByRawPathPatterns archives encoded memories whose raw_id
-	// references a raw memory with a path matching any of the given patterns.
-	ArchiveMemoriesByRawPathPatterns(ctx context.Context, patterns []string) (int, error)
-
-	// --- Batch operations (for consolidation) ---
-	BatchWriteRaw(ctx context.Context, raws []RawMemory) error
-	BatchUpdateSalience(ctx context.Context, updates map[string]float32) error
-	BatchMergeMemories(ctx context.Context, sourceIDs []string, gist Memory) error
-	DeleteOldArchived(ctx context.Context, olderThan time.Time) (int, error)
-
-	// --- Consolidation tracking ---
-	WriteConsolidation(ctx context.Context, record ConsolidationRecord) error
-	GetLastConsolidation(ctx context.Context) (ConsolidationRecord, error)
-
-	// --- Export/Backup operations ---
-	ListAllAssociations(ctx context.Context) ([]Association, error)
-	ListAllRawMemories(ctx context.Context) ([]RawMemory, error)
-
-	// --- Scoped association queries ---
 	GetAssociationsForMemoryIDs(ctx context.Context, memoryIDs []string) ([]Association, error)
+	ListAllAssociations(ctx context.Context) ([]Association, error)
+}
 
-	// --- Metacognition operations ---
-	WriteMetaObservation(ctx context.Context, obs MetaObservation) error
-	ListMetaObservations(ctx context.Context, observationType string, limit int) ([]MetaObservation, error)
-	DeleteOldMetaObservations(ctx context.Context, olderThan time.Time) (int, error)
-	GetDeadMemories(ctx context.Context, cutoffDate time.Time) ([]Memory, error)
-	GetSourceDistribution(ctx context.Context) (map[string]int, error)
+// ConceptStore handles structured concept persistence.
+type ConceptStore interface {
+	WriteConceptSet(ctx context.Context, cs ConceptSet) error
+	GetConceptSet(ctx context.Context, memoryID string) (ConceptSet, error)
+}
 
-	// --- Retrieval feedback operations ---
-	WriteRetrievalFeedback(ctx context.Context, fb RetrievalFeedback) error
-	GetRetrievalFeedback(ctx context.Context, queryID string) (RetrievalFeedback, error)
-	ListRecentRetrievalFeedback(ctx context.Context, since time.Time, limit int) ([]RetrievalFeedback, error)
-	PruneOldFeedback(ctx context.Context, olderThan time.Duration) (int, error)
-	// GetMemoryFeedbackScores computes a normalized feedback score for each memory ID
-	// based on retrieval_feedback records. "helpful" = +1, "irrelevant" = -1, "partial" = 0.
-	// Returns sum/count per memory, so scores range from -1.0 to +1.0.
-	GetMemoryFeedbackScores(ctx context.Context, memoryIDs []string) (map[string]float32, error)
-
-	// --- Episode operations ---
+// EpisodeStore handles episode lifecycle.
+type EpisodeStore interface {
 	CreateEpisode(ctx context.Context, ep Episode) error
 	GetEpisode(ctx context.Context, id string) (Episode, error)
 	UpdateEpisode(ctx context.Context, ep Episode) error
 	ListEpisodes(ctx context.Context, state string, limit, offset int) ([]Episode, error)
 	GetOpenEpisode(ctx context.Context) (Episode, error)
 	CloseEpisode(ctx context.Context, id string) error
+}
 
-	// --- Multi-resolution operations ---
-	WriteMemoryResolution(ctx context.Context, res MemoryResolution) error
-	GetMemoryResolution(ctx context.Context, memoryID string) (MemoryResolution, error)
-
-	// --- Structured concept operations ---
-	WriteConceptSet(ctx context.Context, cs ConceptSet) error
-	GetConceptSet(ctx context.Context, memoryID string) (ConceptSet, error)
-	SearchByEntity(ctx context.Context, name string, entityType string, limit int) ([]Memory, error)
-
-	// --- Memory attribute operations ---
-	WriteMemoryAttributes(ctx context.Context, attrs MemoryAttributes) error
-	GetMemoryAttributes(ctx context.Context, memoryID string) (MemoryAttributes, error)
-
-	// --- Pattern operations ---
+// PatternStore handles recurring pattern persistence.
+type PatternStore interface {
 	WritePattern(ctx context.Context, p Pattern) error
 	GetPattern(ctx context.Context, id string) (Pattern, error)
 	UpdatePattern(ctx context.Context, p Pattern) error
@@ -480,49 +497,110 @@ type Store interface {
 	SearchPatternsByEmbeddingInProject(ctx context.Context, embedding []float32, project string, limit int) ([]Pattern, error)
 	ArchivePattern(ctx context.Context, id string) error
 	ArchiveAllPatterns(ctx context.Context) (int, error)
+}
 
-	// --- Abstraction operations ---
+// AbstractionStore handles abstraction persistence (principles, axioms).
+type AbstractionStore interface {
 	WriteAbstraction(ctx context.Context, a Abstraction) error
 	GetAbstraction(ctx context.Context, id string) (Abstraction, error)
 	UpdateAbstraction(ctx context.Context, a Abstraction) error
 	ListAbstractions(ctx context.Context, level int, limit int) ([]Abstraction, error)
 	ListAbstractionsByState(ctx context.Context, state string, limit int) ([]Abstraction, error)
 	SearchAbstractionsByEmbedding(ctx context.Context, embedding []float32, limit int) ([]Abstraction, error)
+	ArchiveAbstraction(ctx context.Context, id string) error
 	ArchiveAllAbstractions(ctx context.Context) (int, error)
+}
 
-	// --- Scoped queries ---
-	SearchByProject(ctx context.Context, project string, query string, limit int) ([]Memory, error)
-	ListMemoriesByTimeRange(ctx context.Context, from, to time.Time, limit int) ([]Memory, error)
-	ListMemoriesBySession(ctx context.Context, sessionID string) ([]Memory, error)
-	GetProjectSummary(ctx context.Context, project string) (map[string]interface{}, error)
-	ListProjects(ctx context.Context) ([]string, error)
+// MetacognitionStore handles self-reflection and observation data.
+type MetacognitionStore interface {
+	WriteMetaObservation(ctx context.Context, obs MetaObservation) error
+	ListMetaObservations(ctx context.Context, observationType string, limit int) ([]MetaObservation, error)
+	DeleteOldMetaObservations(ctx context.Context, olderThan time.Time) (int, error)
+	GetSourceDistribution(ctx context.Context) (map[string]int, error)
+}
 
-	// --- Runtime exclusions ---
+// FeedbackStore handles retrieval feedback tracking.
+type FeedbackStore interface {
+	WriteRetrievalFeedback(ctx context.Context, fb RetrievalFeedback) error
+	GetRetrievalFeedback(ctx context.Context, queryID string) (RetrievalFeedback, error)
+	ListRecentRetrievalFeedback(ctx context.Context, since time.Time, limit int) ([]RetrievalFeedback, error)
+	PruneOldFeedback(ctx context.Context, olderThan time.Duration) (int, error)
+	GetMemoryFeedbackScores(ctx context.Context, memoryIDs []string) (map[string]float32, error)
+}
+
+// ConsolidationStore handles consolidation cycle tracking.
+type ConsolidationStore interface {
+	WriteConsolidation(ctx context.Context, record ConsolidationRecord) error
+	GetLastConsolidation(ctx context.Context) (ConsolidationRecord, error)
+}
+
+// SessionStore handles session queries.
+type SessionStore interface {
+	ListSessions(ctx context.Context, since time.Time, limit int) ([]SessionSummary, error)
+	GetSessionMemories(ctx context.Context, sessionID string, limit int) ([]Memory, error)
+}
+
+// ExclusionStore handles runtime watcher exclusions.
+type ExclusionStore interface {
 	AddRuntimeExclusion(ctx context.Context, pattern string) error
 	RemoveRuntimeExclusion(ctx context.Context, pattern string) error
 	ListRuntimeExclusions(ctx context.Context) ([]string, error)
+}
 
-	// --- Session queries ---
-	ListSessions(ctx context.Context, since time.Time, limit int) ([]SessionSummary, error)
-	GetSessionMemories(ctx context.Context, sessionID string, limit int) ([]Memory, error)
-
-	// --- Housekeeping ---
-	GetStatistics(ctx context.Context) (StoreStatistics, error)
-
-	// --- LLM usage tracking ---
+// UsageStore handles LLM and MCP tool usage tracking.
+type UsageStore interface {
 	RecordLLMUsage(ctx context.Context, record llm.LLMUsageRecord) error
 	GetLLMUsageSummary(ctx context.Context, since time.Time) (LLMUsageSummary, error)
 	GetLLMUsageLog(ctx context.Context, since time.Time, limit int) ([]llm.LLMUsageRecord, error)
 	GetLLMUsageChart(ctx context.Context, since time.Time, bucketSecs int) ([]LLMChartBucket, error)
-
-	// --- MCP tool usage tracking ---
 	RecordToolUsage(ctx context.Context, record ToolUsageRecord) error
 	GetToolUsageSummary(ctx context.Context, since time.Time) (ToolUsageSummary, error)
 	GetToolUsageLog(ctx context.Context, since time.Time, limit int) ([]ToolUsageRecord, error)
 	GetToolUsageChart(ctx context.Context, since time.Time, bucketSecs int) ([]ToolChartBucket, error)
+}
 
-	// --- Research analytics ---
+// ForumStore handles forum posts and threads.
+type ForumStore interface {
+	WriteForumCategory(ctx context.Context, cat ForumCategory) error
+	GetForumCategory(ctx context.Context, id string) (ForumCategory, error)
+	ListForumCategories(ctx context.Context) ([]ForumCategory, error)
+	ListForumCategorySummaries(ctx context.Context) ([]ForumCategorySummary, error)
+	WriteForumPost(ctx context.Context, post ForumPost) error
+	GetForumPost(ctx context.Context, id string) (ForumPost, error)
+	ListForumThreads(ctx context.Context, limit, offset int) ([]ForumThread, error)
+	ListForumThreadsByCategory(ctx context.Context, categoryID string, limit, offset int) ([]ForumThread, error)
+	ListForumPostsByThread(ctx context.Context, threadID string, limit int) ([]ForumPost, error)
+	UpdateForumPostState(ctx context.Context, id string, state string) error
+	CountForumPosts(ctx context.Context) (int, error)
+	GetDailyDigestThread(ctx context.Context, categoryID string, date time.Time) (ForumPost, error)
+}
+
+// AnalyticsStore handles research analytics and housekeeping.
+type AnalyticsStore interface {
+	GetStatistics(ctx context.Context) (StoreStatistics, error)
 	GetAnalytics(ctx context.Context) (AnalyticsData, error)
+}
+
+// Store is the full abstraction for persistent memory.
+// It composes all sub-interfaces — consumers that need only a subset
+// should accept the relevant sub-interface instead.
+type Store interface {
+	RawMemoryStore
+	MemoryStore
+	SearchStore
+	AssociationStore
+	ConceptStore
+	EpisodeStore
+	PatternStore
+	AbstractionStore
+	MetacognitionStore
+	FeedbackStore
+	ConsolidationStore
+	SessionStore
+	ExclusionStore
+	UsageStore
+	ForumStore
+	AnalyticsStore
 
 	// --- Lifecycle ---
 	Close() error

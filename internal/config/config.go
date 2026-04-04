@@ -29,6 +29,7 @@ type Config struct {
 	Abstraction    AbstractionConfig    `yaml:"abstraction"`
 	Orchestrator   OrchestratorConfig   `yaml:"orchestrator"`
 	Reactor        ReactorConfig        `yaml:"reactor"`
+	Forum          ForumConfig          `yaml:"forum"`
 	MemoryDefaults MemoryDefaultsConfig `yaml:"memory_defaults"`
 	MCP            MCPConfig            `yaml:"mcp"`
 	AgentSDK       AgentSDKConfig       `yaml:"agent_sdk"`
@@ -163,6 +164,19 @@ type HeuristicsConfig struct {
 	MaxContentLength   int `yaml:"max_content_length"`
 	FrequencyThreshold int `yaml:"frequency_threshold"`
 	FrequencyWindowMin int `yaml:"frequency_window_min"`
+
+	// Extra* fields extend the compiled-in defaults without replacing them.
+	ExtraIgnoredPatterns    []string `yaml:"extra_ignored_patterns"`
+	ExtraLockfileNames      []string `yaml:"extra_lockfile_names"`
+	ExtraAppInternalDirs    []string `yaml:"extra_app_internal_dirs"`
+	ExtraSensitiveNames     []string `yaml:"extra_sensitive_names"`
+	ExtraSourceExtensions   []string `yaml:"extra_source_extensions"`
+	ExtraTrivialCommands    []string `yaml:"extra_trivial_commands"`
+	ExtraHighSignalCommands []string `yaml:"extra_high_signal_commands"`
+	ExtraCodeIndicators     []string `yaml:"extra_code_indicators"`
+	ExtraHighSignalKeywords []string `yaml:"extra_high_signal_keywords"`
+	ExtraMediumKeywords     []string `yaml:"extra_medium_keywords"`
+	ExtraLowKeywords        []string `yaml:"extra_low_keywords"`
 }
 
 // EncodingConfig holds encoding settings.
@@ -287,7 +301,13 @@ type RetrievalConfig struct {
 	FeedbackWeight float64 `yaml:"feedback_weight"` // weight of user feedback score in ranking (default 0.15)
 
 	// Source-weighted scoring
-	SourceWeights map[string]float64 `yaml:"source_weights"` // per-source multipliers (default: mcp=1.0, terminal=0.8, clipboard=0.6, filesystem=0.5)
+	SourceWeights map[string]float64 `yaml:"source_weights"` // per-source multipliers (default: mcp=1.5, terminal=0.8, clipboard=0.6, filesystem=0.5)
+
+	// Memory type scoring
+	TypeWeights map[string]float64 `yaml:"type_weights"` // per-type multipliers (default: decision=1.3, error=1.25, insight=1.2, learning=1.15)
+
+	// Context boost source eligibility
+	ContextBoostSources []string `yaml:"context_boost_sources"` // sources eligible for context boost (default: [mcp, terminal])
 }
 
 // MetacognitionConfig holds metacognition settings.
@@ -364,6 +384,16 @@ type ReactorConfig struct {
 	Cooldowns map[string]string `yaml:"cooldowns"` // chain ID -> duration string (e.g., "30m", "1h")
 }
 
+// ForumConfig holds settings for the forum communication layer.
+type ForumConfig struct {
+	AgentPosting      bool    `yaml:"agent_posting"`       // agents auto-post on events (default: true)
+	MentionResponses  bool    `yaml:"mention_responses"`   // @mention triggers LLM response (default: true)
+	MentionMaxTokens  int     `yaml:"mention_max_tokens"`  // max tokens for @mention LLM responses (default: 512)
+	MentionTemp       float64 `yaml:"mention_temperature"` // temperature for @mention LLM responses (default: 0.7)
+	PerAgentSubforums bool    `yaml:"per_agent_subforums"` // route to per-agent sub-forums (default: true); false = shared "Agent Activity"
+	DigestPosting     bool    `yaml:"digest_posting"`      // batch agent posts into daily digest threads (default: true)
+}
+
 // MemoryDefaultsConfig holds shared defaults used by both MCP and API.
 type MemoryDefaultsConfig struct {
 	InitialSalienceGeneral  float32 `yaml:"initial_salience_general"`  // default: 0.7
@@ -409,10 +439,11 @@ type AgentSDKConfig struct {
 
 // APIConfig holds API server settings.
 type APIConfig struct {
-	Host              string `yaml:"host"`
-	Port              int    `yaml:"port"`
-	RequestTimeoutSec int    `yaml:"request_timeout_sec"`
-	Token             string `yaml:"token"` // bearer token for API auth (empty = no auth)
+	Host              string   `yaml:"host"`
+	Port              int      `yaml:"port"`
+	RequestTimeoutSec int      `yaml:"request_timeout_sec"`
+	Token             string   `yaml:"token"`           // bearer token for API auth (empty = no auth)
+	AllowedOrigins    []string `yaml:"allowed_origins"` // CORS/WebSocket allowed origins (empty = defaults)
 }
 
 // WebConfig holds web UI settings.
@@ -700,11 +731,18 @@ func Default() *Config {
 
 			FeedbackWeight: 0.15,
 			SourceWeights: map[string]float64{
-				"mcp":        1.0,
+				"mcp":        1.5,
 				"terminal":   0.8,
 				"clipboard":  0.6,
 				"filesystem": 0.5,
 			},
+			TypeWeights: map[string]float64{
+				"decision": 1.3,
+				"error":    1.25,
+				"insight":  1.2,
+				"learning": 1.15,
+			},
+			ContextBoostSources: []string{"mcp", "terminal"},
 		},
 		Metacognition: MetacognitionConfig{
 			Enabled:               true,
@@ -743,7 +781,7 @@ func Default() *Config {
 			Enabled:                    true,
 			IntervalRaw:                "6h",
 			Interval:                   6 * time.Hour,
-			MinStrength:                0.4,
+			MinStrength:                0.7,
 			MaxLLMCalls:                5,
 			StartupDelaySec:            300,
 			DefaultConfidence:          0.6,
@@ -766,6 +804,14 @@ func Default() *Config {
 			HealthReportInterval:    5 * time.Minute,
 		},
 		Reactor: ReactorConfig{},
+		Forum: ForumConfig{
+			AgentPosting:      true,
+			MentionResponses:  true,
+			MentionMaxTokens:  512,
+			MentionTemp:       0.7,
+			PerAgentSubforums: true,
+			DigestPosting:     true,
+		},
 		MemoryDefaults: MemoryDefaultsConfig{
 			InitialSalienceGeneral:  0.7,
 			InitialSalienceDecision: 0.85,

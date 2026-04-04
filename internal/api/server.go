@@ -22,7 +22,8 @@ type ServerConfig struct {
 	Host              string
 	Port              int
 	RequestTimeoutSec int
-	Token             string // bearer token for API auth (empty = no auth)
+	Token             string   // bearer token for API auth (empty = no auth)
+	AllowedOrigins    []string // CORS/WebSocket allowed origins (empty = defaults)
 }
 
 // ServerDeps holds dependencies injected into the server.
@@ -63,6 +64,7 @@ func NewServer(cfg ServerConfig, deps ServerDeps) *Server {
 		mux:    mux,
 	}
 
+	routes.SetAllowedOrigins(cfg.AllowedOrigins)
 	s.registerRoutes()
 
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
@@ -142,8 +144,11 @@ func (s *Server) registerRoutes() {
 	// Research analytics
 	s.mux.HandleFunc("GET /api/v1/analytics", routes.HandleAnalytics(s.deps.Store, s.deps.Log))
 
-	// Graph data for D3.js visualization
+	// Graph data for visualization
 	s.mux.HandleFunc("GET /api/v1/graph", routes.HandleGraph(s.deps.Store, s.deps.Log))
+
+	// Associations (for thread view quote blocks)
+	s.mux.HandleFunc("GET /api/v1/associations", routes.HandleListAssociations(s.deps.Store, s.deps.Log))
 
 	// Agent SDK evolution dashboard
 	if s.deps.AgentEvolutionDir != "" {
@@ -152,6 +157,15 @@ func (s *Server) registerRoutes() {
 		s.mux.HandleFunc("GET /api/v1/agent/sessions", routes.HandleAgentSessions(s.deps.AgentEvolutionDir, s.deps.Log))
 		s.mux.HandleFunc("GET /api/v1/agent/config", routes.HandleAgentConfig(s.deps.AgentWebPort, s.deps.Log))
 	}
+
+	// Forum
+	s.mux.HandleFunc("GET /api/v1/forum/categories", routes.HandleListForumCategories(s.deps.Store, s.deps.Log))
+	s.mux.HandleFunc("GET /api/v1/forum/threads", routes.HandleListForumThreads(s.deps.Store, s.deps.Log))
+	s.mux.HandleFunc("GET /api/v1/forum/threads/{id}", routes.HandleGetForumThread(s.deps.Store, s.deps.Log))
+	s.mux.HandleFunc("POST /api/v1/forum/posts", routes.HandleCreateForumPost(s.deps.Store, s.deps.Bus, s.deps.Log))
+	s.mux.HandleFunc("GET /api/v1/forum/posts/{id}", routes.HandleGetForumPost(s.deps.Store, s.deps.Log))
+	s.mux.HandleFunc("PATCH /api/v1/forum/posts/{id}", routes.HandleUpdateForumPost(s.deps.Store, s.deps.Log))
+	s.mux.HandleFunc("POST /api/v1/forum/posts/{id}/internalize", routes.HandleInternalizeForumPost(s.deps.Store, s.deps.Bus, s.deps.Log))
 
 	// WebSocket
 	s.mux.HandleFunc("GET /ws", routes.HandleWebSocket(s.deps.Bus, s.deps.Log))

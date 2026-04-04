@@ -3,6 +3,8 @@ package main
 import (
 	"math"
 	"testing"
+
+	"github.com/appsprout-dev/mnemonic/internal/agent/agentutil"
 )
 
 func TestCosineSim(t *testing.T) {
@@ -21,9 +23,9 @@ func TestCosineSim(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := cosineSim(tt.a, tt.b)
+			got := agentutil.CosineSimilarity(tt.a, tt.b)
 			if math.Abs(float64(got-tt.want)) > 0.01 {
-				t.Errorf("cosineSim() = %v, want %v", got, tt.want)
+				t.Errorf("CosineSimilarity() = %v, want %v", got, tt.want)
 			}
 		})
 	}

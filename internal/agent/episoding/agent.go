@@ -451,6 +451,43 @@ Respond with ONLY a JSON object (no prose, no fences):
 		ea.log.Warn("failed to close episode", "id", ep.ID, "error", err)
 	}
 
+	// Backfill episode_id on encoded memories that came from this episode's raw observations.
+	// The encoding agent runs faster than episoding, so memories are often encoded before
+	// they're assigned to an episode. This patches up the linkage after the fact.
+	linkedCount := 0
+	for _, rawID := range ep.RawMemoryIDs {
+		mem, err := ea.store.GetMemoryByRawID(ctx, rawID)
+		if err != nil {
+			continue // not encoded yet, or encoding failed
+		}
+		if mem.EpisodeID == ep.ID {
+			continue // already linked
+		}
+		mem.EpisodeID = ep.ID
+		if err := ea.store.UpdateMemory(ctx, mem); err != nil {
+			ea.log.Warn("failed to link memory to episode", "memory_id", mem.ID, "episode_id", ep.ID, "error", err)
+			continue
+		}
+		linkedCount++
+	}
+	if linkedCount > 0 {
+		ea.log.Info("backfilled episode_id on encoded memories", "episode_id", ep.ID, "linked", linkedCount)
+	}
+
+	// Also populate episode.MemoryIDs for the reverse link
+	var memIDs []string
+	for _, rawID := range ep.RawMemoryIDs {
+		mem, err := ea.store.GetMemoryByRawID(ctx, rawID)
+		if err != nil {
+			continue
+		}
+		memIDs = append(memIDs, mem.ID)
+	}
+	if len(memIDs) > 0 && len(ep.MemoryIDs) != len(memIDs) {
+		ep.MemoryIDs = memIDs
+		_ = ea.store.UpdateEpisode(ctx, *ep)
+	}
+
 	// Publish event
 	if ea.bus != nil {
 		_ = ea.bus.Publish(ctx, events.EpisodeClosed{
@@ -458,6 +495,7 @@ Respond with ONLY a JSON object (no prose, no fences):
 			Title:       ep.Title,
 			EventCount:  len(ep.RawMemoryIDs),
 			DurationSec: ep.DurationSec,
+			Project:     ep.Project,
 			Ts:          time.Now(),
 		})
 	}

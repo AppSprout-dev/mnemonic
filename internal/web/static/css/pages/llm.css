@@ -1,0 +1,46 @@
+/* Auto-extracted from index.html — llm */
+
+/* ── LLM Usage View ── */
+        .llm-view { padding: 24px; max-width: 1200px; margin: 0 auto; }
+        .llm-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+        .llm-header-title { font-size: 1.2rem; font-weight: 700; }
+        .llm-header-meta { display: flex; align-items: center; gap: 12px; }
+        .llm-updated { font-size: 0.75rem; color: var(--text-dim); }
+        .llm-cards { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 20px; }
+        .llm-card {
+            background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md);
+            padding: 16px; text-align: center;
+        }
+        .llm-card-label { font-size: 0.75rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+        .llm-card-value { font-size: 1.4rem; font-weight: 700; color: var(--accent-cyan); font-family: 'SF Mono', Monaco, monospace; }
+        .llm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .llm-panel {
+            background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 16px;
+        }
+        .llm-panel-title { font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 12px; }
+        .llm-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+        .llm-table th { text-align: left; color: var(--text-dim); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); }
+        .llm-table td { padding: 6px 8px; color: var(--text-secondary); border-bottom: 1px solid var(--border-subtle); }
+        .llm-table tr:last-child td { border-bottom: none; }
+        .llm-empty { text-align: center; color: var(--text-dim); padding: 20px; }
+        .llm-log-scroll { max-height: 400px; overflow-y: auto; }
+        .llm-status-ok { color: var(--accent-green); }
+        .llm-status-err { color: var(--accent-red); }
+        .llm-bar { fill: var(--accent-cyan); rx: 2; }
+        .llm-bar-label { fill: var(--text-dim); font-size: 10px; font-family: 'SF Mono', Monaco, monospace; }
+        .llm-card-sub { font-size: 0.7rem; color: var(--text-dim); margin-top: 4px; font-family: 'SF Mono', Monaco, monospace; }
+        .llm-range-tabs { display: flex; gap: 2px; }
+        .llm-range-tab { padding: 3px 10px; border-radius: var(--radius-sm); border: 1px solid transparent; font-size: 0.75rem; color: var(--text-dim); cursor: pointer; background: none; transition: all 0.15s; }
+        .llm-range-tab:hover { color: var(--text-primary); background: var(--bg-tertiary); }
+        .llm-range-tab.active { color: var(--accent-cyan); background: rgba(6,182,212,0.1); border-color: rgba(6,182,212,0.2); }
+        .llm-chart-wrap { position: relative; }
+        .llm-chart-legend { display: flex; gap: 14px; }
+        .llm-legend-item { display: flex; align-items: center; gap: 5px; font-size: 0.7rem; color: var(--text-dim); }
+        .llm-legend-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+        .llm-chart-tooltip { position: absolute; background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 6px 10px; font-size: 0.72rem; color: var(--text-primary); pointer-events: none; display: none; z-index: 20; white-space: nowrap; line-height: 1.7; }
+        .llm-log-row-err td { background: rgba(239,68,68,0.04); }
+        .llm-error-detail { font-size: 0.75rem; color: var(--accent-red); padding: 4px 12px !important; word-break: break-word; opacity: 0.85; border-top: none !important; }
+        .llm-header-sub { font-size: 0.72rem; color: var(--text-dim); margin-top: 2px; }
+        .llm-completion-val { color: var(--accent-violet) !important; }
+
+        

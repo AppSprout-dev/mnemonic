@@ -6,6 +6,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/appsprout-dev/mnemonic/internal/agent/agentutil"
 	"github.com/appsprout-dev/mnemonic/internal/store"
 )
 
@@ -61,9 +62,9 @@ func TestCosineSimilarity(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := cosineSimilarity(tt.a, tt.b)
+			got := agentutil.CosineSimilarity(tt.a, tt.b)
 			if math.Abs(float64(got-tt.want)) > 0.01 {
-				t.Errorf("cosineSimilarity() = %v, want %v", got, tt.want)
+				t.Errorf("CosineSimilarity() = %v, want %v", got, tt.want)
 			}
 		})
 	}

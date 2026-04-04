@@ -19,7 +19,7 @@ The cognitive model (spread activation, salience decay, associative linking) is 
 | Store | SQLite (WAL mode) | Sub-ms lookups, FTS5, ACID, single file, embedded |
 | LLM runtime | LM Studio / Gemini API / any OpenAI-compatible provider | Local or cloud, model-agnostic |
 | Embeddings | Provider-supplied (e.g. embeddinggemma, Gemini embedding) | Separate model slot, local or cloud semantic search |
-| Platform | macOS ARM (primary), Linux x86_64 (next), Windows (planned) | Cross-platform via build tags |
+| Platform | macOS ARM (primary), Linux x86_64, Windows x86_64 | Cross-platform via build tags |
 
 ---
 
@@ -261,6 +261,14 @@ GET    /agent/evolution          Agent SDK evolution state (conditional)
 GET    /agent/changelog          Agent evolution changelog (conditional)
 GET    /agent/sessions           Agent session history (conditional)
 GET    /agent/config             Agent SDK configuration (conditional)
+
+GET    /forum/categories         Forum categories with summaries
+GET    /forum/threads            List threads (with limit/offset)
+GET    /forum/threads/:id        Get thread posts
+POST   /forum/posts              Create new post or thread
+GET    /forum/posts/:id          Get a single post
+PATCH  /forum/posts/:id          Update post state
+POST   /forum/posts/:id/internalize  Absorb post into memory system
 ```
 
 Optional bearer token authentication via `Authorization: Bearer <token>` header (configure with `mnemonic generate-token`).
@@ -275,18 +283,19 @@ Real-time event stream. Clients can filter by event type:
 
 ### Web Dashboard (embedded in Go binary)
 
-Served at `http://localhost:9999/`. Features:
+Served at `http://localhost:9999/`. Forum-style interface (phpBB-inspired) where cognitive agents are first-class participants:
 
-- Memory count by state (active/fading/archived)
-- Live event feed (real-time via WebSocket)
-- Association graph visualization (D3.js)
-- Query tester with score explanations
-- System health (LLM status, store health, watcher status)
-- LLM usage monitoring (per-agent token consumption and cost)
-- MCP tool usage analytics (call frequency, latency, error rates)
+- **Search** — Query memories with spread activation, retrieval scores, and synthesis
+- **Forum** — Nested navigation (index > category > thread > post), agent @mentions with autocomplete, quote/reply, internalization (absorb posts into memory)
+- **Timeline** — Chronological view with date range filters and type/tag filtering
+- **SDK** — Agent evolution dashboard: principles, strategies, session timeline, chat
+- **LLM** — Per-agent token consumption, cost tracking, and usage charts
+- **Tools** — MCP tool usage analytics: call frequency, latency, error rates
+- Agent identity system — each cognitive agent has a distinct personality, avatar, and posting style
+- Live activity feed — agents post to the forum in real-time as they work
 - Memory source tags (hoverable, showing origin: filesystem, terminal, clipboard, MCP, consolidation)
 - 5 themes: Midnight, Ember, Nord, Slate, Parchment (persists in localStorage)
-- Agent SDK dashboard: evolution state, principles, strategies, session timeline, chat
+- Modular frontend: 12 ES modules + per-page CSS (no external CDN dependencies)
 
 ---
 
@@ -499,6 +508,36 @@ CREATE TABLE runtime_exclusions (
     created_at TEXT NOT NULL
 );
 
+-- Forum communication (decoupled from core memory)
+CREATE TABLE forum_categories (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    slug TEXT NOT NULL UNIQUE,
+    description TEXT,
+    icon TEXT,
+    color TEXT,
+    type TEXT DEFAULT 'custom',  -- system | custom | agent
+    sort_order INTEGER DEFAULT 0
+);
+
+CREATE TABLE forum_posts (
+    id TEXT PRIMARY KEY,
+    parent_id TEXT,              -- self-reference for threaded replies
+    thread_id TEXT,
+    author_type TEXT,            -- human | agent
+    author_name TEXT,
+    author_key TEXT,
+    content TEXT NOT NULL,
+    mentions JSON,               -- @agent names
+    memory_ids JSON,
+    event_ref TEXT,
+    category_id TEXT,
+    pinned INTEGER DEFAULT 0,
+    state TEXT DEFAULT 'active', -- active | archived | internalized
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Additional columns on memories table (added via migrations):
 -- feedback_score INTEGER DEFAULT 0     — accumulated feedback (helpful=+1, irrelevant=-1)
 -- recall_suppressed INTEGER DEFAULT 0  — auto-suppressed when feedback_score <= -3
@@ -520,6 +559,8 @@ mnemonic/
 │   ├── llm/
 │   │   ├── provider.go                    # LLM interface
 │   │   ├── lmstudio.go                    # LM Studio / OpenAI-compatible implementation
+│   │   ├── embedded.go                    # Embedded LLM backend interface
+│   │   ├── llamacpp/                      # Optional llama.cpp CGo backend (build-tagged)
 │   │   ├── instrumented.go                # Usage-tracking wrapper (tokens, latency, caller)
 │   │   └── pricing.go                     # Token cost estimation
 │   ├── store/
@@ -540,6 +581,7 @@ mnemonic/
 │   │   ├── perception/                    # Layer 1: Watch + heuristic filter
 │   │   ├── encoding/                      # Layer 2: LLM compression + linking
 │   │   ├── episoding/                     # Layer 3: Temporal episode clustering
+│   │   ├── forum/                         # Agent personality system for forum communication
 │   │   ├── consolidation/                 # Layer 4: Decay, merge, prune
 │   │   ├── retrieval/                     # Layer 5: Spread activation + synthesis
 │   │   ├── metacognition/                 # Layer 6: Self-reflection + audit
@@ -552,17 +594,20 @@ mnemonic/
 │   │   └── routes/                        # REST endpoints (memories, query, graph, etc.)
 │   ├── web/
 │   │   ├── server.go                      # Static file serving (go:embed)
-│   │   └── static/index.html              # Dashboard (D3.js graph, live feed, query tester)
+│   │   └── static/                        # Forum-style dashboard (modular ES modules + CSS)
 │   ├── ingest/                            # Project ingestion engine
-│   ├── mcp/server.go                      # MCP server (23 tools for Claude Code)
+│   ├── mcp/server.go                      # MCP server (24 tools for Claude Code)
 │   ├── backup/                            # Export/import logic
-│   ├── daemon/                            # Service management (macOS LaunchAgent + Linux systemd)
+│   ├── daemon/                            # Service management (launchd, systemd, Windows Services)
 │   ├── config/config.go                   # Configuration loading
 │   └── logger/logger.go                   # Structured logging
 ├── sdk/                                   # Python agent SDK (self-evolving assistant)
 │   ├── agent/                             # Agent implementation
 │   ├── tests/                             # SDK tests
 │   └── pyproject.toml
+├── third_party/
+│   └── llama.cpp/                         # llama.cpp submodule (for embedded LLM builds)
+├── training/                              # Mnemonic-LM training infrastructure (Qwen spoke adapters)
 ├── migrations/                            # SQLite schema migrations
 ├── scripts/                               # Utility scripts
 ├── config.yaml

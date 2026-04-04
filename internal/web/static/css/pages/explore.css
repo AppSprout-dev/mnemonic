@@ -1,0 +1,161 @@
+/* Auto-extracted from index.html — explore */
+
+/* ── Explore View ── */
+        .explore-view { padding: 20px 24px; }
+        .explore-header {
+            display: flex; align-items: center; gap: 12px;
+            margin-bottom: 16px; flex-wrap: wrap;
+        }
+        .explore-tabs { display: flex; gap: 2px; }
+        .explore-tab {
+            padding: 6px 14px; border-radius: var(--radius-sm);
+            font-size: 0.8rem; font-weight: 500;
+            color: var(--text-muted); cursor: pointer;
+            border: none; background: none; transition: all 0.2s;
+        }
+        .explore-tab:hover { color: var(--text-primary); background: var(--bg-tertiary); }
+        .explore-tab.active { color: var(--accent-cyan); background: color-mix(in srgb, var(--accent-cyan) 10%, transparent); }
+        .explore-search {
+            margin-left: auto; padding: 6px 12px;
+            background: var(--bg-secondary); border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm); color: var(--text-primary);
+            font-size: 0.8rem; outline: none; width: 200px;
+        }
+        .explore-search:focus { border-color: var(--accent-cyan); }
+        .explore-content { max-width: 1100px; }
+        .explore-section { display: none; }
+        .explore-section.active { display: block; }
+
+        /* Episode cards */
+        .episode-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            padding: 16px; margin-bottom: 10px;
+            cursor: pointer; transition: border-color 0.2s;
+        }
+        .episode-card:hover { border-color: var(--border-color); }
+        .episode-header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+        .episode-title { font-size: 0.95rem; font-weight: 600; flex: 1; }
+        .badge {
+            padding: 2px 8px; border-radius: 10px;
+            font-size: 0.7rem; font-weight: 600;
+        }
+        .badge-success { background: color-mix(in srgb, var(--accent-green) 15%, transparent); color: var(--accent-green); }
+        .badge-failure { background: color-mix(in srgb, var(--accent-red) 15%, transparent); color: var(--accent-red); }
+        .badge-ongoing { background: color-mix(in srgb, var(--accent-blue) 15%, transparent); color: var(--accent-blue); }
+        .badge-blocked { background: color-mix(in srgb, var(--accent-orange) 15%, transparent); color: var(--accent-orange); }
+        .badge-open { background: color-mix(in srgb, var(--accent-cyan) 15%, transparent); color: var(--accent-cyan); }
+        .badge-closed { background: color-mix(in srgb, var(--accent-green) 15%, transparent); color: var(--accent-green); }
+        .badge-paused { background: color-mix(in srgb, var(--accent-orange) 15%, transparent); color: var(--accent-orange); }
+        .badge-type { background: color-mix(in srgb, var(--accent-teal) 15%, transparent); color: var(--accent-teal); }
+        .badge-level { background: color-mix(in srgb, var(--accent-violet) 15%, transparent); color: var(--accent-violet); }
+        .episode-summary { font-size: 0.85rem; color: var(--text-muted); line-height: 1.5; margin-bottom: 8px; }
+        .episode-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .episode-concepts { display: flex; gap: 4px; flex-wrap: wrap; }
+        .episode-date { font-size: 0.75rem; color: var(--text-dim); margin-left: auto; }
+        .episode-expanded {
+            display: none; margin-top: 12px; padding-top: 12px;
+            border-top: 1px solid var(--border-subtle);
+        }
+        .episode-expanded.open { display: block; }
+        .episode-narrative {
+            font-size: 0.85rem; color: var(--text-muted); line-height: 1.6;
+            font-style: italic; border-left: 2px solid var(--accent-cyan);
+            padding-left: 12px; margin-bottom: 12px;
+        }
+        .episode-file {
+            font-size: 0.8rem; color: var(--accent-cyan);
+            font-family: 'SF Mono', Monaco, monospace; padding: 2px 0;
+        }
+
+        /* Memory cards */
+        .memory-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            padding: 16px 18px; margin-bottom: 10px;
+            cursor: pointer; transition: border-color 0.2s;
+        }
+        .memory-card:hover { border-color: var(--border-color); }
+        .memory-header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .memory-type-badge {
+            flex-shrink: 0; padding: 2px 8px;
+            border-radius: 4px; font-size: 0.7rem; font-weight: 600;
+        }
+        .type-decision { background: color-mix(in srgb, var(--accent-orange) 15%, transparent); color: var(--accent-orange); }
+        .type-error { background: color-mix(in srgb, var(--accent-red) 15%, transparent); color: var(--accent-red); }
+        .type-insight { background: color-mix(in srgb, var(--accent-violet) 15%, transparent); color: var(--accent-violet); }
+        .type-learning { background: color-mix(in srgb, var(--accent-blue) 15%, transparent); color: var(--accent-blue); }
+        .type-general { background: color-mix(in srgb, var(--text-muted) 10%, transparent); color: var(--text-muted); }
+        .memory-project {
+            font-size: 0.75rem; color: var(--accent-blue); opacity: 0.8;
+        }
+        .memory-header-spacer { flex: 1; }
+        .memory-date { font-size: 0.75rem; color: var(--text-dim); flex-shrink: 0; }
+        .memory-summary {
+            font-size: 0.9rem; line-height: 1.5; margin-top: 8px;
+            color: var(--text-primary);
+        }
+        .memory-content-preview {
+            font-size: 0.82rem; line-height: 1.55; color: var(--text-muted);
+            margin-top: 6px;
+            display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        .memory-stats-row {
+            display: flex; align-items: center; gap: 12px; margin-top: 10px;
+            font-size: 0.75rem; color: var(--text-dim); flex-wrap: wrap;
+        }
+        .memory-salience {
+            display: flex; align-items: center; gap: 6px;
+        }
+        .salience-bar { width: 80px; height: 5px; background: var(--bg-secondary); border-radius: 3px; overflow: hidden; }
+        .salience-fill { height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--accent-cyan), var(--accent-teal)); }
+        .salience-label { font-size: 0.72rem; color: var(--text-dim); }
+        .memory-stat-sep { color: var(--border-color); }
+        .memory-access-count { color: var(--accent-teal); }
+        .memory-state {
+            padding: 1px 6px;
+            border-radius: 3px; font-size: 0.7rem; font-weight: 600;
+        }
+        .state-active { background: color-mix(in srgb, var(--accent-green) 15%, transparent); color: var(--accent-green); }
+        .state-fading { background: color-mix(in srgb, var(--accent-orange) 15%, transparent); color: var(--accent-orange); }
+        .state-archived { background: color-mix(in srgb, var(--text-muted) 10%, transparent); color: var(--text-dim); }
+        .memory-gist-badge {
+            font-size: 0.72rem; color: var(--accent-violet); opacity: 0.9;
+        }
+        .memory-episode-link {
+            font-size: 0.72rem; color: var(--accent-cyan); opacity: 0.9;
+        }
+        .memory-meta-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+        .memory-expanded {
+            display: none; margin-top: 12px; padding-top: 12px;
+            border-top: 1px solid var(--border-subtle);
+        }
+        .memory-expanded.open { display: block; }
+        .memory-expanded-detail {
+            font-size: 0.75rem; color: var(--text-dim); margin-top: 8px;
+            display: flex; flex-wrap: wrap; gap: 12px;
+        }
+        .memory-expanded-detail span { opacity: 0.8; }
+        .memory-id-label {
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 0.7rem; color: var(--text-dim); opacity: 0.6;
+            cursor: pointer;
+        }
+        .memory-id-label:hover { opacity: 1; }
+
+        /* Pattern & Abstraction cards */
+        .pattern-card, .abstraction-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            padding: 16px; margin-bottom: 10px;
+        }
+        .pattern-title, .abstraction-title { font-size: 0.95rem; font-weight: 600; margin-bottom: 6px; }
+        .pattern-desc, .abstraction-desc { font-size: 0.85rem; color: var(--text-muted); line-height: 1.5; margin-bottom: 8px; }
+        .strength-bar { width: 80px; height: 4px; background: var(--bg-secondary); border-radius: 2px; overflow: hidden; display: inline-block; vertical-align: middle; }
+        .strength-fill { height: 100%; border-radius: 2px; background: linear-gradient(90deg, var(--accent-teal), var(--accent-green)); }
+
+        
