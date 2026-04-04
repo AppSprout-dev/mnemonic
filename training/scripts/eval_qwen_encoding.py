@@ -40,60 +40,56 @@ TRAINING_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(TRAINING_DIR / "scripts"))
 
 from validate import validate_encoding  # noqa: E402
-
-# Required fields for schema compliance
-FULL_REQUIRED_FIELDS = {
-    "gist", "summary", "content", "narrative", "concepts",
-    "structured_concepts", "significance", "emotional_tone",
-    "outcome", "salience",
-}
-
-MINIMAL_REQUIRED_FIELDS = {"summary", "concepts", "salience"}
+from training_constants import (  # noqa: E402
+    REQUIRED_FIELDS as FULL_REQUIRED_FIELDS,
+    MINIMAL_REQUIRED_FIELDS,
+    ENCODING_SYSTEM_PROMPT_SHORT,
+)
 
 # Novel inputs for generalization testing — completely outside training distribution
 NOVEL_INPUTS = [
     # Developer decisions
     {
-        "system": "You are a memory encoding agent. You receive raw events and output structured JSON with these required fields: gist (one-line summary), summary (2-3 sentences), content (preserved detail), narrative (context paragraph), concepts (keyword array), structured_concepts (object with topics, entities, actions, causality arrays), significance (importance level), emotional_tone (mood), outcome (result), salience (0.0-1.0 float). Never explain, never apologize. Output only valid JSON.",
+        "system": ENCODING_SYSTEM_PROMPT_SHORT,
         "user": "Decision: switched from REST to gRPC for inter-service communication because latency was too high at 200ms p99. The team evaluated both options over a week-long spike. gRPC brought it down to 12ms p99 but required regenerating all client stubs.",
     },
     {
-        "system": "You are a memory encoding agent. You receive raw events and output structured JSON with these required fields: gist (one-line summary), summary (2-3 sentences), content (preserved detail), narrative (context paragraph), concepts (keyword array), structured_concepts (object with topics, entities, actions, causality arrays), significance (importance level), emotional_tone (mood), outcome (result), salience (0.0-1.0 float). Never explain, never apologize. Output only valid JSON.",
+        "system": ENCODING_SYSTEM_PROMPT_SHORT,
         "user": "We decided to use SQLite WAL mode instead of rollback journal because the benchmark showed 3x write throughput improvement with concurrent readers. The downside is WAL files can grow unbounded if checkpointing fails.",
     },
     # Error reports
     {
-        "system": "You are a memory encoding agent. You receive raw events and output structured JSON with these required fields: gist (one-line summary), summary (2-3 sentences), content (preserved detail), narrative (context paragraph), concepts (keyword array), structured_concepts (object with topics, entities, actions, causality arrays), significance (importance level), emotional_tone (mood), outcome (result), salience (0.0-1.0 float). Never explain, never apologize. Output only valid JSON.",
+        "system": ENCODING_SYSTEM_PROMPT_SHORT,
         "user": "Bug: the consolidation agent crashes with a nil pointer when processing memories that have zero associations. Root cause was a missing nil check in spread_activation.go line 142. Fixed by guarding the association slice access.",
     },
     {
-        "system": "You are a memory encoding agent. You receive raw events and output structured JSON with these required fields: gist (one-line summary), summary (2-3 sentences), content (preserved detail), narrative (context paragraph), concepts (keyword array), structured_concepts (object with topics, entities, actions, causality arrays), significance (importance level), emotional_tone (mood), outcome (result), salience (0.0-1.0 float). Never explain, never apologize. Output only valid JSON.",
+        "system": ENCODING_SYSTEM_PROMPT_SHORT,
         "user": "Error: PyTorch ROCm 2.9.1 segfaults when calling torch.compile with fullgraph=True on the RX 7800 XT. Only happens with bf16 tensors larger than 2GB. Workaround: disable fullgraph mode or use float32.",
     },
     # Code/architecture discussions
     {
-        "system": "You are a memory encoding agent. You receive raw events and output structured JSON with these required fields: gist (one-line summary), summary (2-3 sentences), content (preserved detail), narrative (context paragraph), concepts (keyword array), structured_concepts (object with topics, entities, actions, causality arrays), significance (importance level), emotional_tone (mood), outcome (result), salience (0.0-1.0 float). Never explain, never apologize. Output only valid JSON.",
+        "system": ENCODING_SYSTEM_PROMPT_SHORT,
         "user": "The event bus uses an in-memory pub/sub pattern. Agents subscribe to event types and receive callbacks. The orchestrator publishes health checks every 30 seconds. There's no persistence — if the daemon restarts, all subscriptions are re-established from agent init code.",
     },
     {
-        "system": "You are a memory encoding agent. You receive raw events and output structured JSON with these required fields: gist (one-line summary), summary (2-3 sentences), content (preserved detail), narrative (context paragraph), concepts (keyword array), structured_concepts (object with topics, entities, actions, causality arrays), significance (importance level), emotional_tone (mood), outcome (result), salience (0.0-1.0 float). Never explain, never apologize. Output only valid JSON.",
+        "system": ENCODING_SYSTEM_PROMPT_SHORT,
         "user": "Refactored the embedding pipeline to batch requests. Previously each memory was embedded individually (1 API call per memory). Now we batch up to 32 memories per call, reducing total embedding time from 45 seconds to 3 seconds for a typical consolidation cycle of 200 memories.",
     },
     # Edge cases
     {
-        "system": "You are a memory encoding agent. You receive raw events and output structured JSON with these required fields: gist (one-line summary), summary (2-3 sentences), content (preserved detail), narrative (context paragraph), concepts (keyword array), structured_concepts (object with topics, entities, actions, causality arrays), significance (importance level), emotional_tone (mood), outcome (result), salience (0.0-1.0 float). Never explain, never apologize. Output only valid JSON.",
+        "system": ENCODING_SYSTEM_PROMPT_SHORT,
         "user": "ok",
     },
     {
-        "system": "You are a memory encoding agent. You receive raw events and output structured JSON with these required fields: gist (one-line summary), summary (2-3 sentences), content (preserved detail), narrative (context paragraph), concepts (keyword array), structured_concepts (object with topics, entities, actions, causality arrays), significance (importance level), emotional_tone (mood), outcome (result), salience (0.0-1.0 float). Never explain, never apologize. Output only valid JSON.",
+        "system": ENCODING_SYSTEM_PROMPT_SHORT,
         "user": "```go\nfunc (s *Store) GetMemory(id string) (*Memory, error) {\n\trow := s.db.QueryRow(\"SELECT id, content, salience FROM memories WHERE id = ?\", id)\n\tvar m Memory\n\tif err := row.Scan(&m.ID, &m.Content, &m.Salience); err != nil {\n\t\treturn nil, fmt.Errorf(\"get memory %s: %w\", id, err)\n\t}\n\treturn &m, nil\n}\n```",
     },
     {
-        "system": "You are a memory encoding agent. You receive raw events and output structured JSON with these required fields: gist (one-line summary), summary (2-3 sentences), content (preserved detail), narrative (context paragraph), concepts (keyword array), structured_concepts (object with topics, entities, actions, causality arrays), significance (importance level), emotional_tone (mood), outcome (result), salience (0.0-1.0 float). Never explain, never apologize. Output only valid JSON.",
+        "system": ENCODING_SYSTEM_PROMPT_SHORT,
         "user": "The quarterly review meeting was held on March 15, 2026 at the downtown office. Sarah Chen presented the Q1 results: revenue up 23% year-over-year to $4.2M, customer churn reduced from 8.1% to 5.3%, and the new enterprise tier launched with 12 initial customers. The board approved the Series B timeline for Q3.",
     },
     {
-        "system": "You are a memory encoding agent. You receive raw events and output structured JSON with these required fields: gist (one-line summary), summary (2-3 sentences), content (preserved detail), narrative (context paragraph), concepts (keyword array), structured_concepts (object with topics, entities, actions, causality arrays), significance (importance level), emotional_tone (mood), outcome (result), salience (0.0-1.0 float). Never explain, never apologize. Output only valid JSON.",
+        "system": ENCODING_SYSTEM_PROMPT_SHORT,
         "user": "Mnemonic daemon健康状態: すべてのエージェントが正常に動作しています。メモリ数は1,234件、エンコーディングキューは空です。",
     },
 ]

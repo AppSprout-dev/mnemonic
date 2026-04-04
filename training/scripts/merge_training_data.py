@@ -26,14 +26,9 @@ from transformers import AutoTokenizer
 
 REMOVE_TASKS = {"compression", "decompression"}
 
-ENCODING_SYSTEM_PROMPT = (
-    "You are a memory encoding agent. You receive raw events and output structured JSON "
-    "with these required fields: gist (one-line summary), summary (2-3 sentences), "
-    "content (preserved detail), narrative (context paragraph), concepts (keyword array), "
-    "structured_concepts (object with topics, entities, actions, causality arrays), "
-    "significance (importance level), emotional_tone (mood), outcome (result), "
-    "salience (0.0-1.0 float). Never explain, never apologize. Output only valid JSON."
-)
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from training_constants import ENCODING_SYSTEM_PROMPT_SHORT as ENCODING_SYSTEM_PROMPT  # noqa: E402
 
 
 def content_hash(text: str) -> str:

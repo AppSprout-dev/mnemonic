@@ -7,12 +7,12 @@ from pathlib import Path
 
 # Add scripts dir to path
 sys.path.insert(0, str(Path(__file__).parent))
-from validate import validate_encoding, validate_example, ValidationResult
+from validate import validate_encoding, validate_schema, validate_fidelity, ValidationResult
 
 
-def good_encoding() -> str:
-    """Return a valid encoding JSON response."""
-    return json.dumps({
+def good_encoding() -> dict:
+    """Return a valid encoding dict."""
+    return {
         "gist": "User modified auth middleware",
         "summary": "Updated authentication middleware to validate JWT tokens on every request",
         "content": "The auth middleware was updated to check JWT expiry and validate signatures.",
@@ -25,14 +25,16 @@ def good_encoding() -> str:
             "causality": [{"relation": "caused_by", "description": "security review identified gap"}],
         },
         "significance": "important",
-        "emotional_tone": "satisfying",
-        "outcome": "success",
+        "emotional_tone": "analytical",
+        "outcome": "Auth middleware now validates JWT tokens on every request",
         "salience": 0.7,
-    })
+    }
 
+
+# --- Level 1: Schema Tests ---
 
 def test_valid_encoding():
-    result = validate_encoding(good_encoding())
+    result = validate_encoding(json.dumps(good_encoding()))
     assert result.valid, f"Expected valid, got failures: {result.hard_failures}"
     assert not result.hard_failures
     print("PASS: test_valid_encoding")
@@ -53,25 +55,16 @@ def test_missing_fields():
 
 
 def test_gist_too_long():
-    data = json.loads(good_encoding())
-    data["gist"] = "x" * 61
+    data = good_encoding()
+    data["gist"] = "x" * 81
     result = validate_encoding(json.dumps(data))
     assert not result.valid
     assert any("gist_too_long" in f for f in result.hard_failures)
     print("PASS: test_gist_too_long")
 
 
-def test_summary_too_long():
-    data = json.loads(good_encoding())
-    data["summary"] = "x" * 101
-    result = validate_encoding(json.dumps(data))
-    assert not result.valid
-    assert any("summary_too_long" in f for f in result.hard_failures)
-    print("PASS: test_summary_too_long")
-
-
 def test_salience_out_of_range():
-    data = json.loads(good_encoding())
+    data = good_encoding()
     data["salience"] = 1.5
     result = validate_encoding(json.dumps(data))
     assert not result.valid
@@ -80,7 +73,7 @@ def test_salience_out_of_range():
 
 
 def test_invalid_significance():
-    data = json.loads(good_encoding())
+    data = good_encoding()
     data["significance"] = "super_important"
     result = validate_encoding(json.dumps(data))
     assert not result.valid
@@ -88,8 +81,38 @@ def test_invalid_significance():
     print("PASS: test_invalid_significance")
 
 
+def test_valid_significance_trivial():
+    """'trivial' is a valid significance value."""
+    data = good_encoding()
+    data["significance"] = "trivial"
+    data["salience"] = 0.1
+    result = validate_encoding(json.dumps(data))
+    assert result.valid, f"Unexpected failures: {result.hard_failures}"
+    print("PASS: test_valid_significance_trivial")
+
+
+def test_invalid_emotional_tone():
+    data = good_encoding()
+    data["emotional_tone"] = "satisfying"  # Old enum, no longer valid
+    result = validate_encoding(json.dumps(data))
+    assert not result.valid
+    assert any("invalid_emotional_tone" in f for f in result.hard_failures)
+    print("PASS: test_invalid_emotional_tone")
+
+
+def test_valid_emotional_tones():
+    """All canonical emotional tones should pass."""
+    valid_tones = ["positive", "negative", "neutral", "frustrated", "excited", "analytical", "reflective"]
+    for tone in valid_tones:
+        data = good_encoding()
+        data["emotional_tone"] = tone
+        result = validate_encoding(json.dumps(data))
+        assert result.valid, f"Tone '{tone}' rejected: {result.hard_failures}"
+    print("PASS: test_valid_emotional_tones")
+
+
 def test_placeholder_gist():
-    data = json.loads(good_encoding())
+    data = good_encoding()
     data["gist"] = "user did something"
     result = validate_encoding(json.dumps(data))
     assert not result.valid
@@ -98,7 +121,7 @@ def test_placeholder_gist():
 
 
 def test_empty_content():
-    data = json.loads(good_encoding())
+    data = good_encoding()
     data["content"] = "   "
     result = validate_encoding(json.dumps(data))
     assert not result.valid
@@ -106,25 +129,8 @@ def test_empty_content():
     print("PASS: test_empty_content")
 
 
-def test_soft_warning_low_vocab_coverage():
-    data = json.loads(good_encoding())
-    data["concepts"] = ["xyzzy", "plugh", "plover", "frobnicate"]
-    result = validate_encoding(json.dumps(data))
-    assert result.valid  # soft gate, not a hard failure
-    assert any("low_vocab_coverage" in w for w in result.soft_warnings)
-    print("PASS: test_soft_warning_low_vocab_coverage")
-
-
-def test_soft_warning_strict_mode():
-    data = json.loads(good_encoding())
-    data["concepts"] = ["xyzzy", "plugh", "plover", "frobnicate"]
-    result = validate_encoding(json.dumps(data), strict=True)
-    assert not result.valid  # strict mode rejects soft warnings
-    print("PASS: test_soft_warning_strict_mode")
-
-
 def test_soft_warning_high_salience_routine():
-    data = json.loads(good_encoding())
+    data = good_encoding()
     data["salience"] = 0.95
     data["significance"] = "routine"
     result = validate_encoding(json.dumps(data))
@@ -133,25 +139,105 @@ def test_soft_warning_high_salience_routine():
     print("PASS: test_soft_warning_high_salience_routine")
 
 
-def test_validate_example_with_error():
-    example = {"task_type": "encoding", "error": "connection refused", "response": {"content": ""}}
-    result = validate_example(example)
-    assert not result.valid
-    print("PASS: test_validate_example_with_error")
+# --- Level 2: Semantic Fidelity Tests ---
+
+def test_fidelity_file_line_preserved():
+    raw = "Bug in spread.go:142 where the index is out of range, called from agent.go:89"
+    encoded = good_encoding()
+    encoded["content"] = "Index out of range in spread.go:142, caller at agent.go:89"
+    warnings = validate_fidelity(raw, encoded)
+    assert not any("missing_file_lines" in w for w in warnings), f"Unexpected: {warnings}"
+    print("PASS: test_fidelity_file_line_preserved")
+
+
+def test_fidelity_file_line_missing():
+    raw = "Bug in spread.go:142 where the index is out of range, called from agent.go:89"
+    encoded = good_encoding()
+    encoded["content"] = "Index out of range bug in spread.go, called from agent module"
+    warnings = validate_fidelity(raw, encoded)
+    assert any("missing_file_lines" in w for w in warnings), f"Expected file_line warning: {warnings}"
+    print("PASS: test_fidelity_file_line_missing")
+
+
+def test_fidelity_proper_nouns_preserved():
+    raw = "Jason reported that Sarah fixed the FTS5 bug on the Mac Mini"
+    encoded = good_encoding()
+    encoded["content"] = "Jason reported FTS5 bug fix by Sarah on Mac Mini"
+    encoded["structured_concepts"]["entities"] = [
+        {"name": "Jason", "type": "person", "context": "reporter"},
+        {"name": "Sarah", "type": "person", "context": "fixer"},
+    ]
+    warnings = validate_fidelity(raw, encoded)
+    assert not any("missing_proper_nouns" in w for w in warnings), f"Unexpected: {warnings}"
+    print("PASS: test_fidelity_proper_nouns_preserved")
+
+
+def test_fidelity_proper_nouns_missing():
+    raw = "Jason reported that Sarah fixed the FTS5 bug on the Mac Mini"
+    encoded = good_encoding()
+    encoded["content"] = "FTS5 bug was fixed on the Mac Mini"
+    encoded["structured_concepts"]["entities"] = []
+    warnings = validate_fidelity(raw, encoded)
+    assert any("missing_proper_nouns" in w for w in warnings), f"Expected noun warning: {warnings}"
+    print("PASS: test_fidelity_proper_nouns_missing")
+
+
+def test_fidelity_sparse_input_disproportionate():
+    raw = "fixed it"
+    encoded = good_encoding()
+    encoded["content"] = "The system underwent extensive troubleshooting involving network diagnostics, database schema verification, environment variable configuration, and load balancer health checks before the issue was successfully resolved and verified."
+    encoded["salience"] = 0.8
+    warnings = validate_fidelity(raw, encoded)
+    assert any("disproportionate_output" in w for w in warnings), f"Expected proportion warning: {warnings}"
+    assert any("high_salience_sparse_input" in w for w in warnings), f"Expected salience warning: {warnings}"
+    print("PASS: test_fidelity_sparse_input_disproportionate")
+
+
+def test_fidelity_sparse_input_proportionate():
+    raw = "fixed it"
+    encoded = good_encoding()
+    encoded["content"] = "Issue resolved."
+    encoded["salience"] = 0.1
+    warnings = validate_fidelity(raw, encoded)
+    assert not any("disproportionate" in w for w in warnings), f"Unexpected: {warnings}"
+    print("PASS: test_fidelity_sparse_input_proportionate")
+
+
+def test_fidelity_fabricated_person():
+    raw = "The database migration completed successfully after fixing the schema issue"
+    encoded = good_encoding()
+    encoded["structured_concepts"]["entities"] = [
+        {"name": "Alex", "type": "person", "context": "performed migration"},
+    ]
+    warnings = validate_fidelity(raw, encoded)
+    assert any("fabricated_entity" in w for w in warnings), f"Expected fabrication warning: {warnings}"
+    print("PASS: test_fidelity_fabricated_person")
 
 
 if __name__ == "__main__":
-    test_valid_encoding()
-    test_invalid_json()
-    test_missing_fields()
-    test_gist_too_long()
-    test_summary_too_long()
-    test_salience_out_of_range()
-    test_invalid_significance()
-    test_placeholder_gist()
-    test_empty_content()
-    test_soft_warning_low_vocab_coverage()
-    test_soft_warning_strict_mode()
-    test_soft_warning_high_salience_routine()
-    test_validate_example_with_error()
-    print(f"\nAll {13} tests passed.")
+    tests = [
+        # Level 1
+        test_valid_encoding,
+        test_invalid_json,
+        test_missing_fields,
+        test_gist_too_long,
+        test_salience_out_of_range,
+        test_invalid_significance,
+        test_valid_significance_trivial,
+        test_invalid_emotional_tone,
+        test_valid_emotional_tones,
+        test_placeholder_gist,
+        test_empty_content,
+        test_soft_warning_high_salience_routine,
+        # Level 2
+        test_fidelity_file_line_preserved,
+        test_fidelity_file_line_missing,
+        test_fidelity_proper_nouns_preserved,
+        test_fidelity_proper_nouns_missing,
+        test_fidelity_sparse_input_disproportionate,
+        test_fidelity_sparse_input_proportionate,
+        test_fidelity_fabricated_person,
+    ]
+    for t in tests:
+        t()
+    print(f"\nAll {len(tests)} tests passed.")

@@ -27,8 +27,13 @@ import json
 import os
 import random
 import sys
+from pathlib import Path
 
 import aiohttp
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from training_constants import REQUIRED_FIELDS  # noqa: E402
 
 API_KEY = os.environ.get("LLM_API_KEY", "")
 API_BASE = "https://generativelanguage.googleapis.com/v1beta/openai"
@@ -57,11 +62,6 @@ Then write EXACTLY the separator: ---JSON---
 Then write ONLY the JSON object with these 10 fields: gist, summary, content, narrative, concepts, structured_concepts, significance, emotional_tone, outcome, salience.
 
 Do NOT use markdown fences around the JSON."""
-
-REQUIRED_FIELDS = {"gist", "summary", "content", "narrative", "concepts",
-                   "structured_concepts", "significance", "emotional_tone",
-                   "outcome", "salience"}
-
 
 async def call_gemini(session: aiohttp.ClientSession, system: str, user: str,
                       semaphore: asyncio.Semaphore) -> str | None:

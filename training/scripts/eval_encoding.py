@@ -41,17 +41,8 @@ import torch.nn.functional as F
 TRAINING_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(TRAINING_DIR / "scripts"))
 
+from training_constants import MINIMAL_REQUIRED_FIELDS, REQUIRED_FIELDS  # noqa: E402
 from validate import validate_encoding  # noqa: E402
-
-# Required fields for schema compliance (minimal set that every encoding must have)
-REQUIRED_FIELDS = {"summary", "concepts", "salience"}
-
-# Full required fields matching the encoding schema
-FULL_REQUIRED_FIELDS = {
-    "gist", "summary", "content", "narrative", "concepts",
-    "structured_concepts", "significance", "emotional_tone",
-    "outcome", "salience",
-}
 
 # ---------------------------------------------------------------------------
 # Model loading (matches train_mnemonic_lm.py patterns)
@@ -323,11 +314,11 @@ def evaluate_generation(
         return result
 
     # Schema compliance: check minimal required fields
-    has_required = all(f in data for f in REQUIRED_FIELDS)
+    has_required = all(f in data for f in MINIMAL_REQUIRED_FIELDS)
     result["schema_compliant"] = has_required
 
     # Check full required fields
-    has_full = all(f in data for f in FULL_REQUIRED_FIELDS)
+    has_full = all(f in data for f in REQUIRED_FIELDS)
     result["full_schema_compliant"] = has_full
 
     # Field quality checks
