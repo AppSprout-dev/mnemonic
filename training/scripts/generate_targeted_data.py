@@ -197,43 +197,107 @@ SPARSE_INPUTS = [
     "same as before", "still broken", "no change", "tried that already",
 ]
 
-SPARSE_GISTS = [
-    "Issue resolved", "Task completed", "Change approved", "Deployment done",
-    "Fix applied", "Build passing", "Tests passing", "Status acknowledged",
-    "Investigation ongoing", "Cannot reproduce", "Further review needed",
-    "Change reverted", "Cache cleared", "Service restarted", "Config updated",
-]
+# Map sparse inputs to appropriate gists and concepts
+SPARSE_MAPPING = {
+    # Completion/success
+    "fixed it": {"gist": "Issue fixed", "concepts": ["fix", "debugging"], "tone": "positive"},
+    "done": {"gist": "Task done", "concepts": ["task completion"], "tone": "positive"},
+    "LGTM": {"gist": "Code approved", "concepts": ["code review"], "tone": "positive"},
+    "merged": {"gist": "PR merged", "concepts": ["git", "code review"], "tone": "positive"},
+    "deployed": {"gist": "Deployment completed", "concepts": ["deployment"], "tone": "positive"},
+    "tests pass": {"gist": "Tests passing", "concepts": ["testing"], "tone": "positive"},
+    "looks good": {"gist": "Change approved", "concepts": ["code review"], "tone": "positive"},
+    "it works": {"gist": "Verification passed", "concepts": ["testing"], "tone": "positive"},
+    "ship it": {"gist": "Ready to release", "concepts": ["deployment", "release"], "tone": "excited"},
+    "approved": {"gist": "Change approved", "concepts": ["code review"], "tone": "positive"},
+    "ok": {"gist": "Acknowledged", "concepts": ["status update"], "tone": "neutral"},
+    "works now": {"gist": "Issue resolved", "concepts": ["fix", "debugging"], "tone": "positive"},
+    "resolved": {"gist": "Issue resolved", "concepts": ["fix"], "tone": "positive"},
+    "closed": {"gist": "Issue closed", "concepts": ["task completion"], "tone": "neutral"},
+    "builds now": {"gist": "Build fixed", "concepts": ["build", "fix"], "tone": "positive"},
+    "compiles": {"gist": "Build passing", "concepts": ["build"], "tone": "positive"},
+    "no more errors": {"gist": "Errors cleared", "concepts": ["debugging", "fix"], "tone": "positive"},
+    "green": {"gist": "CI passing", "concepts": ["ci", "testing"], "tone": "positive"},
+    "all clear": {"gist": "All checks passed", "concepts": ["testing"], "tone": "positive"},
+    # Acknowledgment
+    "checked": {"gist": "Item checked", "concepts": ["review"], "tone": "neutral"},
+    "verified": {"gist": "Verification done", "concepts": ["testing"], "tone": "neutral"},
+    "confirmed": {"gist": "Confirmed working", "concepts": ["testing"], "tone": "positive"},
+    "acknowledged": {"gist": "Status noted", "concepts": ["status update"], "tone": "neutral"},
+    "noted": {"gist": "Information noted", "concepts": ["status update"], "tone": "neutral"},
+    # Git operations
+    "synced with main": {"gist": "Branch synced", "concepts": ["git"], "tone": "neutral"},
+    "rebased": {"gist": "Branch rebased", "concepts": ["git"], "tone": "neutral"},
+    "cherry-picked": {"gist": "Commit cherry-picked", "concepts": ["git"], "tone": "neutral"},
+    "reverted": {"gist": "Change reverted", "concepts": ["git", "rollback"], "tone": "neutral"},
+    # Quick fixes
+    "nvm found it": {"gist": "Root cause found", "concepts": ["debugging"], "tone": "positive"},
+    "figured it out": {"gist": "Solution found", "concepts": ["debugging"], "tone": "positive"},
+    "never mind": {"gist": "Issue dismissed", "concepts": ["status update"], "tone": "neutral"},
+    "false alarm": {"gist": "False alarm", "concepts": ["debugging"], "tone": "neutral"},
+    "my bad": {"gist": "Self-correction", "concepts": ["error"], "tone": "neutral"},
+    # Operations
+    "restarted the service": {"gist": "Service restarted", "concepts": ["deployment", "daemon"], "tone": "neutral"},
+    "rolled back": {"gist": "Rollback completed", "concepts": ["deployment", "rollback"], "tone": "frustrated"},
+    "pushed the fix": {"gist": "Fix pushed", "concepts": ["git", "fix"], "tone": "positive"},
+    "tagged the release": {"gist": "Release tagged", "concepts": ["release", "git"], "tone": "positive"},
+    "updated the config": {"gist": "Config updated", "concepts": ["configuration"], "tone": "neutral"},
+    "ran the migration": {"gist": "Migration executed", "concepts": ["database", "migration"], "tone": "neutral"},
+    "cleared the cache": {"gist": "Cache cleared", "concepts": ["performance"], "tone": "neutral"},
+    # Negative
+    "still broken": {"gist": "Issue persists", "concepts": ["debugging"], "tone": "frustrated"},
+    "no change": {"gist": "No improvement", "concepts": ["debugging"], "tone": "frustrated"},
+    "tried that already": {"gist": "Approach exhausted", "concepts": ["debugging"], "tone": "frustrated"},
+    "can't reproduce": {"gist": "Cannot reproduce", "concepts": ["debugging", "testing"], "tone": "frustrated"},
+    "works on my machine": {"gist": "Environment-specific", "concepts": ["debugging", "environment"], "tone": "frustrated"},
+    "same as before": {"gist": "No progress", "concepts": ["debugging"], "tone": "frustrated"},
+    # In progress
+    "investigating": {"gist": "Investigation started", "concepts": ["debugging"], "tone": "analytical"},
+    "looking into it": {"gist": "Investigation started", "concepts": ["debugging"], "tone": "analytical"},
+    "on it": {"gist": "Task accepted", "concepts": ["task completion"], "tone": "neutral"},
+    "in progress": {"gist": "Work in progress", "concepts": ["task completion"], "tone": "neutral"},
+    "will look at it later": {"gist": "Task deferred", "concepts": ["planning"], "tone": "neutral"},
+    "need more info": {"gist": "Blocked on info", "concepts": ["debugging"], "tone": "neutral"},
+    # Slightly longer
+    "the thing is fixed": {"gist": "Issue fixed", "concepts": ["fix"], "tone": "positive"},
+    "got it working again": {"gist": "Service restored", "concepts": ["fix", "debugging"], "tone": "positive"},
+    "yeah that did it": {"gist": "Fix confirmed", "concepts": ["fix", "debugging"], "tone": "positive"},
+}
+
+# Default for variations not in the mapping
+SPARSE_DEFAULT = {"gist": "Status update", "concepts": ["status update"], "tone": "neutral"}
 
 
 def generate_sparse_example(raw: str) -> dict:
     """Template-generate a minimal encoding for a sparse input."""
-    # Determine appropriate minimal fields
-    is_positive = any(w in raw.lower() for w in ["fixed", "done", "works", "pass", "good", "approved", "ship", "green", "clear", "confirmed"])
-    is_negative = any(w in raw.lower() for w in ["broken", "can't", "still", "no change", "false alarm"])
-    is_neutral = not is_positive and not is_negative
+    # Look up mapping, fall back to default
+    mapping = SPARSE_MAPPING.get(raw, None)
+    if mapping is None:
+        # Try base form (before " — suffix")
+        base = raw.split(" — ")[0].strip() if " — " in raw else raw
+        mapping = SPARSE_MAPPING.get(base, SPARSE_DEFAULT)
 
-    if is_positive:
-        tone = "positive"
+    tone = mapping["tone"]
+    concepts = mapping["concepts"]
+    gist = mapping["gist"]
+
+    if tone in ("positive", "excited"):
         significance = "routine"
-    elif is_negative:
-        tone = "frustrated"
+    elif tone == "frustrated":
         significance = "routine"
     else:
-        tone = "neutral"
         significance = "trivial"
-
-    gist = random.choice(SPARSE_GISTS)
 
     return {
         "raw_input": raw,
         "encoded": {
             "gist": gist,
-            "summary": f"Brief status update: {raw}",
+            "summary": f"Brief update: {raw}",
             "content": raw,
-            "narrative": f"A brief status update was recorded.",
-            "concepts": ["status update"],
+            "narrative": "A brief status update was recorded.",
+            "concepts": concepts,
             "structured_concepts": {
-                "topics": [{"label": "status", "path": "workflow/status"}],
+                "topics": [{"label": c, "path": f"workflow/{c}"} for c in concepts[:2]],
                 "entities": [],
                 "actions": [],
                 "causality": [],
