@@ -177,8 +177,9 @@ def download_results(job_name: str, output_path: str, raw_input_path: str):
         results.append({
             "raw_input": raw.get("raw_input", ""),
             "encoded": encoded,
-            "source": f"swebench_{raw.get('repo', 'unknown')}",
-            "task_type": "encoding",
+            "source": raw.get("source", f"swebench_{raw.get('repo', 'unknown')}"),
+            "task_type": raw.get("task_type", "encoding"),
+            **({"category": raw["category"]} if "category" in raw else {}),
         })
         success += 1
 
