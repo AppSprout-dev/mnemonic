@@ -48,7 +48,7 @@ def create_batch_file(input_path: str, batch_path: str) -> int:
                     "system_instruction": {"parts": [{"text": ENCODING_SYSTEM_PROMPT}]},
                     "generation_config": {
                         "temperature": 0.7,
-                        "max_output_tokens": 2048,
+                        "max_output_tokens": 8192,
                     },
                 },
             }
