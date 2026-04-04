@@ -837,9 +837,23 @@ Rotation parameter overhead per layer (rank=64):
 - **Variable:** (1) Training data: v5 11.4K → v6 ~12.6K (cleaned v5 11.1K + 1.5K targeted), with 3-level quality validation pipeline. (2) Hardware: RX 7800 XT 16GB → DO MI300X 192GB, enabling batch 16 with no gradient accumulation, no gradient checkpointing, 5 epochs.
 - **Control:** EXP-18 (v5 data, 11,436 train, 100% novel schema, 5/7 stress test, eval loss 0.7134)
 - **Prediction:** Stress test 7/7 (currently 5/7 — stack trace file:line and multi-topic entity name are the targets), novel schema 100% (maintained), eval loss < 0.70
-- **Config:** Qwen 3.5 2B (frozen, bf16, no quantization) + 4 spokes rank 64 on all 24 layers (~25M trainable params, 0.7% overhead), batch 16, grad_accum 1, seq_len 2048, LR 3e-4, scalar_lr_scale=0.1, Muon + AdamW, cosine decay with 10% warmup, patience 5, eval_interval 200, no gradient checkpointing
-- **Data:** v6 dataset (~12,600 train / ~1,400 eval, encoding-only + targeted categories). Targeted categories: (A) 400 stack trace examples with file:line preservation, (B) 250 named entity examples with person name preservation, (C) 400 sparse input examples with minimal output templates, (D) 200 domain terminology examples with no synonym substitution, (E) 250 numerical precision examples with exact number preservation. All data validated through 3-level pipeline (schema, semantic fidelity, dataset health).
-- **Hardware:** DigitalOcean MI300X droplet, 192GB HBM3, ROCm 7.2, Ubuntu 24.04
-- **Data quality improvements over v5:** Removed 139 gist-too-long examples, 26 duplicate gists, 1 invalid enum. Updated system prompt to explicitly instruct file:line and entity preservation. Reconciled enum definitions across all training scripts via shared training_constants.py.
+- **Config:** Qwen 3.5 2B (frozen, bf16, no quantization) + 4 spokes rank 64 on all 24 layers (~25M trainable params, 0.7% overhead), batch 16, grad_accum 1, seq_len 2048, LR 3e-4, scalar_lr_scale=0.1, Muon + AdamW, cosine decay with 10% warmup, patience 5, eval_interval 100, no gradient checkpointing, epochs 8
+- **Data:** v6 dataset (4,255 train / 472 eval). Composition: curated v5 base (2,626 pre-nuke + synthetic), targeted precision (1,099 stack_trace + named_entity + numerical + domain_terms), mnemonic-specific (254 + 96 scenarios), procedural (500 codebase-grounded), distribution balance (114 long_form + code_format + low_significance + emotional_variety), sparse templates (51). All data validated through 3-level pipeline (schema, semantic fidelity, dataset health). Dropped 8,487 SWE-bench examples (76% of old v5) for relevance.
+- **Hardware:** DigitalOcean MI300X droplet, 192GB HBM3e, ROCm 7.2, Ubuntu 24.04
+- **Smoke test (local, RX 7800 XT):** 1000 steps, batch 1, grad_accum 8. Eval loss 0.9354 → 0.6319. **Stress test: 7/7** (up from 5/7 on v5). Both previously failing tests pass.
+- **Result:** (pending)
+- **Verdict:** (pending)
+
+### EXP-21: MI300X Bottleneck Rotation — V6 Dataset
+
+- **Date:** 2026-04-04
+- **Status:** REGISTERED
+- **Hypothesis:** Adding bottleneck-space rotation (per_spoke_rope) to the spoke adapter will improve encoding quality on v6 data. EXP-15b found minor benefit on v1 data (poisoned); clean v6 data may show a clearer signal. Rotation enables per-spoke task specialization by rotating the bottleneck representation differently per spoke.
+- **Variable:** Bottleneck rotation (none → per_spoke_rope). All other config identical to EXP-20.
+- **Control:** EXP-20 (v6 data, no rotation, same hardware)
+- **Prediction:** Eval loss comparable or slightly better than EXP-20. Stress test maintained at 7/7. If rotation helps, expect tighter gate differentiation across layers.
+- **Config:** Same as EXP-20 except: --bottleneck-rotation per_spoke_rope
+- **Data:** Same v6 dataset as EXP-20 (4,255 train / 472 eval)
+- **Hardware:** Same MI300X droplet as EXP-20 (sequential run)
 - **Result:** (pending)
 - **Verdict:** (pending)
