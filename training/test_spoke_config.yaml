@@ -1,0 +1,96 @@
+# Test config: Qwen spoke model as encoding LLM
+# Usage: ./bin/mnemonic serve --config training/test_spoke_config.yaml
+
+projects:
+  - name: "spoke-test"
+    paths:
+      - "~/Projects/mem"
+
+embedding:
+  provider: hugot
+
+llm:
+  provider: "api"
+  endpoint: "http://localhost:8899/v1"
+  chat_model: "qwen-spokes"
+  max_tokens: 1024
+  temperature: 0.0
+  timeout_sec: 120
+  max_concurrent: 1
+
+store:
+  db_path: "/tmp/mnemonic-spoke-test.db"
+  journal_mode: "wal"
+
+memory:
+  max_working_memory: 12
+
+# Disable perception — we're testing encoding only
+perception:
+  enabled: false
+
+encoding:
+  enabled: true
+  max_concepts: 8
+  find_similar_limit: 10
+  enable_contextual_encoding: false
+  max_concurrent_encodings: 1
+  enable_llm_classification: false
+  deduplication_threshold: 0.95
+  completion_max_tokens: 1024
+
+consolidation:
+  enabled: false
+
+retrieval:
+  max_hops: 3
+  activation_threshold: 0.1
+  decay_factor: 0.7
+  max_results: 10
+  merge_alpha: 0.6
+  dual_hit_bonus: 0.15
+  feedback_weight: 0.15
+
+metacognition:
+  enabled: false
+
+dreaming:
+  enabled: false
+
+episoding:
+  enabled: false
+
+abstraction:
+  enabled: false
+
+orchestrator:
+  enabled: true
+  adaptive_intervals: false
+  auto_recovery: true
+  monitor_interval: "5m"
+
+forum:
+  agent_posting: false
+  mention_responses: false
+
+mcp:
+  enabled: false
+
+agent_sdk:
+  enabled: false
+  web_port: 9996
+
+training:
+  capture_enabled: false
+
+api:
+  host: "127.0.0.1"
+  port: 9997
+
+web:
+  enabled: true
+
+logging:
+  level: "info"
+  format: "text"
+  file: "/tmp/spoke-test-mnemonic.log"

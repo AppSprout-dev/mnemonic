@@ -54,46 +54,46 @@ MINIMAL_REQUIRED_FIELDS = {"summary", "concepts", "salience"}
 NOVEL_INPUTS = [
     # Developer decisions
     {
-        "system": "You are a memory encoder. You receive events and output structured JSON. Never explain, never apologize.",
+        "system": "You are a memory encoding agent. You receive raw events and output structured JSON with these required fields: gist (one-line summary), summary (2-3 sentences), content (preserved detail), narrative (context paragraph), concepts (keyword array), structured_concepts (object with topics, entities, actions, causality arrays), significance (importance level), emotional_tone (mood), outcome (result), salience (0.0-1.0 float). Never explain, never apologize. Output only valid JSON.",
         "user": "Decision: switched from REST to gRPC for inter-service communication because latency was too high at 200ms p99. The team evaluated both options over a week-long spike. gRPC brought it down to 12ms p99 but required regenerating all client stubs.",
     },
     {
-        "system": "You are a memory encoder. You receive events and output structured JSON. Never explain, never apologize.",
+        "system": "You are a memory encoding agent. You receive raw events and output structured JSON with these required fields: gist (one-line summary), summary (2-3 sentences), content (preserved detail), narrative (context paragraph), concepts (keyword array), structured_concepts (object with topics, entities, actions, causality arrays), significance (importance level), emotional_tone (mood), outcome (result), salience (0.0-1.0 float). Never explain, never apologize. Output only valid JSON.",
         "user": "We decided to use SQLite WAL mode instead of rollback journal because the benchmark showed 3x write throughput improvement with concurrent readers. The downside is WAL files can grow unbounded if checkpointing fails.",
     },
     # Error reports
     {
-        "system": "You are a memory encoder. You receive events and output structured JSON. Never explain, never apologize.",
+        "system": "You are a memory encoding agent. You receive raw events and output structured JSON with these required fields: gist (one-line summary), summary (2-3 sentences), content (preserved detail), narrative (context paragraph), concepts (keyword array), structured_concepts (object with topics, entities, actions, causality arrays), significance (importance level), emotional_tone (mood), outcome (result), salience (0.0-1.0 float). Never explain, never apologize. Output only valid JSON.",
         "user": "Bug: the consolidation agent crashes with a nil pointer when processing memories that have zero associations. Root cause was a missing nil check in spread_activation.go line 142. Fixed by guarding the association slice access.",
     },
     {
-        "system": "You are a memory encoder. You receive events and output structured JSON. Never explain, never apologize.",
+        "system": "You are a memory encoding agent. You receive raw events and output structured JSON with these required fields: gist (one-line summary), summary (2-3 sentences), content (preserved detail), narrative (context paragraph), concepts (keyword array), structured_concepts (object with topics, entities, actions, causality arrays), significance (importance level), emotional_tone (mood), outcome (result), salience (0.0-1.0 float). Never explain, never apologize. Output only valid JSON.",
         "user": "Error: PyTorch ROCm 2.9.1 segfaults when calling torch.compile with fullgraph=True on the RX 7800 XT. Only happens with bf16 tensors larger than 2GB. Workaround: disable fullgraph mode or use float32.",
     },
     # Code/architecture discussions
     {
-        "system": "You are a memory encoder. You receive events and output structured JSON. Never explain, never apologize.",
+        "system": "You are a memory encoding agent. You receive raw events and output structured JSON with these required fields: gist (one-line summary), summary (2-3 sentences), content (preserved detail), narrative (context paragraph), concepts (keyword array), structured_concepts (object with topics, entities, actions, causality arrays), significance (importance level), emotional_tone (mood), outcome (result), salience (0.0-1.0 float). Never explain, never apologize. Output only valid JSON.",
         "user": "The event bus uses an in-memory pub/sub pattern. Agents subscribe to event types and receive callbacks. The orchestrator publishes health checks every 30 seconds. There's no persistence — if the daemon restarts, all subscriptions are re-established from agent init code.",
     },
     {
-        "system": "You are a memory encoder. You receive events and output structured JSON. Never explain, never apologize.",
+        "system": "You are a memory encoding agent. You receive raw events and output structured JSON with these required fields: gist (one-line summary), summary (2-3 sentences), content (preserved detail), narrative (context paragraph), concepts (keyword array), structured_concepts (object with topics, entities, actions, causality arrays), significance (importance level), emotional_tone (mood), outcome (result), salience (0.0-1.0 float). Never explain, never apologize. Output only valid JSON.",
         "user": "Refactored the embedding pipeline to batch requests. Previously each memory was embedded individually (1 API call per memory). Now we batch up to 32 memories per call, reducing total embedding time from 45 seconds to 3 seconds for a typical consolidation cycle of 200 memories.",
     },
     # Edge cases
     {
-        "system": "You are a memory encoder. You receive events and output structured JSON. Never explain, never apologize.",
+        "system": "You are a memory encoding agent. You receive raw events and output structured JSON with these required fields: gist (one-line summary), summary (2-3 sentences), content (preserved detail), narrative (context paragraph), concepts (keyword array), structured_concepts (object with topics, entities, actions, causality arrays), significance (importance level), emotional_tone (mood), outcome (result), salience (0.0-1.0 float). Never explain, never apologize. Output only valid JSON.",
         "user": "ok",
     },
     {
-        "system": "You are a memory encoder. You receive events and output structured JSON. Never explain, never apologize.",
+        "system": "You are a memory encoding agent. You receive raw events and output structured JSON with these required fields: gist (one-line summary), summary (2-3 sentences), content (preserved detail), narrative (context paragraph), concepts (keyword array), structured_concepts (object with topics, entities, actions, causality arrays), significance (importance level), emotional_tone (mood), outcome (result), salience (0.0-1.0 float). Never explain, never apologize. Output only valid JSON.",
         "user": "```go\nfunc (s *Store) GetMemory(id string) (*Memory, error) {\n\trow := s.db.QueryRow(\"SELECT id, content, salience FROM memories WHERE id = ?\", id)\n\tvar m Memory\n\tif err := row.Scan(&m.ID, &m.Content, &m.Salience); err != nil {\n\t\treturn nil, fmt.Errorf(\"get memory %s: %w\", id, err)\n\t}\n\treturn &m, nil\n}\n```",
     },
     {
-        "system": "Compress the following text into the most compact representation possible while preserving all key facts. Output only the compressed form.",
+        "system": "You are a memory encoding agent. You receive raw events and output structured JSON with these required fields: gist (one-line summary), summary (2-3 sentences), content (preserved detail), narrative (context paragraph), concepts (keyword array), structured_concepts (object with topics, entities, actions, causality arrays), significance (importance level), emotional_tone (mood), outcome (result), salience (0.0-1.0 float). Never explain, never apologize. Output only valid JSON.",
         "user": "The quarterly review meeting was held on March 15, 2026 at the downtown office. Sarah Chen presented the Q1 results: revenue up 23% year-over-year to $4.2M, customer churn reduced from 8.1% to 5.3%, and the new enterprise tier launched with 12 initial customers. The board approved the Series B timeline for Q3.",
     },
     {
-        "system": "You are a memory encoder. You receive events and output structured JSON. Never explain, never apologize.",
+        "system": "You are a memory encoding agent. You receive raw events and output structured JSON with these required fields: gist (one-line summary), summary (2-3 sentences), content (preserved detail), narrative (context paragraph), concepts (keyword array), structured_concepts (object with topics, entities, actions, causality arrays), significance (importance level), emotional_tone (mood), outcome (result), salience (0.0-1.0 float). Never explain, never apologize. Output only valid JSON.",
         "user": "Mnemonic daemon健康状態: すべてのエージェントが正常に動作しています。メモリ数は1,234件、エンコーディングキューは空です。",
     },
 ]
@@ -187,26 +187,41 @@ class EvalResults:
 
 
 def load_model(base_model_path: str, spoke_path: str | None, device: torch.device):
-    """Load Qwen 3.5 2B with optional spoke weights."""
-    from qwen_spoke_adapter import QwenWithSpokes, SpokeConfig
+    """Load base model with optional spoke weights. Auto-detects Qwen vs Gemma."""
+    from qwen_spoke_adapter import SpokeConfig
 
     if spoke_path:
-        # Load spoke config from checkpoint
         data = torch.load(spoke_path, weights_only=True, map_location="cpu")
         spoke_config = SpokeConfig(**data["spoke_config"])
     else:
         spoke_config = SpokeConfig()
 
-    model = QwenWithSpokes.from_pretrained(
-        base_model_path,
-        spoke_config=spoke_config,
-        torch_dtype=torch.bfloat16,
-    )
+    # Auto-detect model type
+    name_lower = base_model_path.lower()
+    if "gemma" in name_lower:
+        from gemma_spoke_adapter import GemmaWithSpokes
+        model = GemmaWithSpokes.from_pretrained(
+            base_model_path,
+            spoke_config=spoke_config,
+            offload_ple=False,  # Keep PLE on GPU for inference (no backward = fits in VRAM)
+        )
+    else:
+        from qwen_spoke_adapter import QwenWithSpokes
+        model = QwenWithSpokes.from_pretrained(
+            base_model_path,
+            spoke_config=spoke_config,
+            dtype=torch.bfloat16,
+        )
 
     if spoke_path:
         model.load_spokes(spoke_path)
 
-    model.to(device)
+    # Quantized models are already on GPU via device_map
+    if not hasattr(model.base_model, 'hf_device_map'):
+        model.to(device)
+    else:
+        model.spokes.to(device)
+
     model.eval()
     return model
 

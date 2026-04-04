@@ -31,6 +31,123 @@ class SpokeConfig:
     num_spokes: int = 4
     spoke_rank: int = 64
     spoke_every_n: int = 1  # Apply spokes every N layers (1 = all layers)
+    # Full-space rotation (EXP-15: applied to d_model before bottleneck)
+    rotation: str = "none"  # "none", "rope1", "rope4", "householder"
+    householder_k: int = 16  # Number of reflections for householder rotation
+    # Bottleneck-space rotation (EXP-15b: applied in rank-r space after W_down)
+    bottleneck_rotation: str = "none"  # "none", "bottleneck_rope", "per_spoke_rope"
+
+
+# ---------------------------------------------------------------------------
+# Orthogonal rotation modules (Felix-LM helical trajectory, Definition 2.5)
+#
+# The design paper specifies h^(l+1) = Q^(l) * (g^(l) ⊙ f^(l)(h^(l)))
+# where Q^(l) is a per-layer orthogonal rotation. These modules implement
+# Q^(l) as a learned, parameter-efficient orthogonal transform.
+# ---------------------------------------------------------------------------
+
+
+class RoPERotation(nn.Module):
+    """Learned paired-dimension rotation (RoPE-style, single round).
+
+    Applies d/2 independent 2D rotations parameterized by learned angles.
+    Equivalent to a block-diagonal orthogonal matrix with 2x2 rotation blocks.
+
+    Params: d_model / 2 angles per layer.
+    """
+
+    def __init__(self, d_model: int):
+        super().__init__()
+        self.d_model = d_model
+        # Learned rotation angles, initialized near zero (start as identity)
+        self.angles = nn.Parameter(torch.zeros(d_model // 2))
+
+    def forward(self, h: torch.Tensor) -> torch.Tensor:
+        # h: [B, T, d]
+        cos_a = torch.cos(self.angles)
+        sin_a = torch.sin(self.angles)
+        x1 = h[..., 0::2]  # even dims
+        x2 = h[..., 1::2]  # odd dims
+        r1 = x1 * cos_a - x2 * sin_a
+        r2 = x1 * sin_a + x2 * cos_a
+        out = torch.stack((r1, r2), dim=-1).flatten(-2)
+        return out
+
+
+class MultiRoundRoPERotation(nn.Module):
+    """Multi-round RoPE rotation with stride permutations.
+
+    Applies `n_rounds` of paired-dimension rotations, with a fixed stride
+    permutation between rounds to mix across dimension pairs. This achieves
+    cross-dimension mixing that single-round RoPE cannot.
+
+    Params: d_model / 2 * n_rounds angles per layer.
+    """
+
+    def __init__(self, d_model: int, n_rounds: int = 4):
+        super().__init__()
+        self.d_model = d_model
+        self.n_rounds = n_rounds
+        self.rotations = nn.ModuleList([RoPERotation(d_model) for _ in range(n_rounds)])
+
+        # Fixed stride permutation: shift by d_model // (2 * n_rounds)
+        # This ensures each round pairs different dimensions
+        stride = max(1, d_model // (2 * n_rounds))
+        perm = torch.roll(torch.arange(d_model), shifts=stride)
+        self.register_buffer("perm", perm)
+        self.register_buffer("inv_perm", torch.argsort(perm))
+
+    def forward(self, h: torch.Tensor) -> torch.Tensor:
+        for i, rot in enumerate(self.rotations):
+            h = rot(h)
+            if i < self.n_rounds - 1:
+                h = h[..., self.perm]
+        # Undo the last permutation so output dimensions align with input
+        if self.n_rounds > 1:
+            h = h[..., self.inv_perm]
+        return h
+
+
+class HouseholderRotation(nn.Module):
+    """Orthogonal rotation via chain of Householder reflections.
+
+    Q = H_1 * H_2 * ... * H_k where H_i = I - 2 * v_i * v_i^T / ||v_i||^2.
+    Each reflection is parameterized by one d-dimensional vector.
+    k reflections give a rank-k perturbation from identity.
+
+    Params: k * d_model per layer.
+    """
+
+    def __init__(self, d_model: int, k: int = 16):
+        super().__init__()
+        self.d_model = d_model
+        self.k = k
+        # Initialize vectors small so we start near identity
+        self.vectors = nn.Parameter(torch.randn(k, d_model) * 0.01)
+
+    def forward(self, h: torch.Tensor) -> torch.Tensor:
+        # Apply k Householder reflections: H_i(x) = x - 2 * (v_i . x) * v_i / ||v_i||^2
+        for i in range(self.k):
+            v = self.vectors[i]  # [d]
+            v_norm_sq = torch.dot(v, v).clamp(min=1e-8)
+            # h: [B, T, d], v: [d]
+            proj = torch.einsum("...d,d->...", h, v)  # [B, T]
+            h = h - (2.0 / v_norm_sq) * proj.unsqueeze(-1) * v
+        return h
+
+
+def build_rotation(d_model: int, config: SpokeConfig) -> nn.Module | None:
+    """Factory for rotation modules based on config."""
+    if config.rotation == "none":
+        return None
+    elif config.rotation == "rope1":
+        return RoPERotation(d_model)
+    elif config.rotation == "rope4":
+        return MultiRoundRoPERotation(d_model, n_rounds=4)
+    elif config.rotation == "householder":
+        return HouseholderRotation(d_model, k=config.householder_k)
+    else:
+        raise ValueError(f"Unknown rotation type: {config.rotation}")
 
 
 class SpokeLayer(nn.Module):
@@ -48,11 +165,15 @@ class SpokeLayer(nn.Module):
     - Parameterless RMSNorm (no learnable scale, matches nanochat style)
     """
 
-    def __init__(self, d_model: int, num_spokes: int, rank: int, gate_init: float = 0.0):
+    def __init__(self, d_model: int, num_spokes: int, rank: int, gate_init: float = 0.0,
+                 rotation: nn.Module | None = None,
+                 bottleneck_rotation: str = "none"):
         super().__init__()
         self.num_spokes = num_spokes
         self.d_model = d_model
         self.rank = rank
+        self.rotation = rotation  # Full-space rotation (EXP-15)
+        self.bottleneck_rotation_type = bottleneck_rotation
 
         self.w_down = nn.ModuleList(
             [nn.Linear(d_model, rank, bias=False) for _ in range(num_spokes)]
@@ -61,6 +182,14 @@ class SpokeLayer(nn.Module):
             [nn.Linear(rank, d_model, bias=False) for _ in range(num_spokes)]
         )
         self.gate_bias = nn.Parameter(torch.tensor(gate_init))
+
+        # Bottleneck-space rotation (EXP-15b)
+        self.bn_rotation = None
+        self.bn_rotations = None
+        if bottleneck_rotation == "bottleneck_rope":
+            self.bn_rotation = RoPERotation(rank)
+        elif bottleneck_rotation == "per_spoke_rope":
+            self.bn_rotations = nn.ModuleList([RoPERotation(rank) for _ in range(num_spokes)])
 
         self._init_weights()
 
@@ -76,14 +205,27 @@ class SpokeLayer(nn.Module):
         input_dtype = h.dtype
         h_fp32 = h.float()
 
-        # Parameterless RMSNorm
+        # Step 1: Learned orthogonal rotation (helical trajectory component)
+        # Q^(l) from Felix-LM Definition 2.5: h' = Q^(l) * h
+        if self.rotation is not None:
+            h_fp32 = self.rotation(h_fp32)
+
+        # Step 2: Parameterless RMSNorm
         h_norm = F.rms_norm(h_fp32, (h_fp32.size(-1),))
 
+        # Step 3: Spoke bottleneck (descend -> [rotate] -> activate -> ascend)
         updates = []
         for s in range(self.num_spokes):
-            view = F.silu(self.w_down[s](h_norm))
+            down = self.w_down[s](h_norm)  # [B, T, rank]
+            # Apply bottleneck-space rotation if configured
+            if self.bottleneck_rotation_type == "bottleneck_rope":
+                down = self.bn_rotation(down)
+            elif self.bottleneck_rotation_type == "per_spoke_rope":
+                down = self.bn_rotations[s](down)
+            view = F.silu(down)
             updates.append(self.w_up[s](view))
 
+        # Step 4: Gate into residual stream
         mean_update = torch.stack(updates, dim=0).mean(dim=0)
         gate = torch.sigmoid(self.gate_bias)
         result = h_fp32 + gate * mean_update
@@ -91,9 +233,12 @@ class SpokeLayer(nn.Module):
 
     def extra_repr(self) -> str:
         gate_val = torch.sigmoid(self.gate_bias).item()
+        rot_name = type(self.rotation).__name__ if self.rotation else "none"
+        bn_rot = self.bottleneck_rotation_type
         return (
             f"d_model={self.d_model}, rank={self.rank}, "
-            f"num_spokes={self.num_spokes}, gate={gate_val:.3f}"
+            f"num_spokes={self.num_spokes}, gate={gate_val:.3f}, "
+            f"rotation={rot_name}, bn_rotation={bn_rot}"
         )
 
 
@@ -130,11 +275,14 @@ class QwenWithSpokes(nn.Module):
         for i in range(n_layers):
             if i % spoke_config.spoke_every_n == 0:
                 gate_init = gate_init_for_layer(i, n_layers)
+                rotation = build_rotation(d_model, spoke_config)
                 self.spokes[str(i)] = SpokeLayer(
                     d_model=d_model,
                     num_spokes=spoke_config.num_spokes,
                     rank=spoke_config.spoke_rank,
                     gate_init=gate_init,
+                    rotation=rotation,
+                    bottleneck_rotation=spoke_config.bottleneck_rotation,
                 )
 
         # Keep spokes in fp32 for optimizer stability (Muon NaN in bf16).
@@ -185,6 +333,7 @@ class QwenWithSpokes(nn.Module):
         print(f"  Per layer: {spoke_params // len(self.spokes):>11,} params")
         print(f"Total:       {total_params:>12,} params")
         print(f"Spoke layers: {len(self.spokes)} (every {self.spoke_config.spoke_every_n} layers)")
+        print(f"Rotation:     {self.spoke_config.rotation}")
 
         # Print gate init schedule
         gates = []
@@ -239,7 +388,7 @@ class QwenWithSpokes(nn.Module):
 
         Returns dict with:
         - 'matrices': W_down and W_up weights (2D tensors -> Muon optimizer)
-        - 'scalars': gate_bias parameters (0D tensors -> AdamW optimizer)
+        - 'scalars': gate_bias and rotation params (non-2D tensors -> AdamW optimizer)
         """
         matrices = []
         scalars = []
@@ -250,6 +399,17 @@ class QwenWithSpokes(nn.Module):
             for up in spoke.w_up:
                 matrices.append(up.weight)
             scalars.append(spoke.gate_bias)
+            # Rotation parameters go to AdamW (angles, vectors — not 2D weight matrices)
+            if spoke.rotation is not None:
+                for p in spoke.rotation.parameters():
+                    scalars.append(p)
+            # Bottleneck rotation parameters
+            if spoke.bn_rotation is not None:
+                for p in spoke.bn_rotation.parameters():
+                    scalars.append(p)
+            if spoke.bn_rotations is not None:
+                for p in spoke.bn_rotations.parameters():
+                    scalars.append(p)
 
         return {"matrices": matrices, "scalars": scalars}
 

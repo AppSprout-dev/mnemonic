@@ -1005,7 +1005,12 @@ func (ea *EncodingAgent) encodeMemory(ctx context.Context, rawID string) error {
 
 	// Step 2: Call LLM to compress and extract concepts (skipped if Tier 2 dedup triggered)
 	var compression *compressionResponse
-	if skipCompression {
+	if raw.Type == "handoff" {
+		// Handoff memories are structured session notes written by the agent.
+		// Preserve the full content verbatim — LLM compression loses critical
+		// detail (file paths, commands, comparison data, known issues).
+		compression = ea.handoffCompression(raw)
+	} else if skipCompression {
 		compression = ea.fallbackCompression(raw)
 	} else {
 		compression, err = ea.compressAndExtractConcepts(ctx, raw)
@@ -1556,6 +1561,38 @@ func (ea *EncodingAgent) fallbackCompression(raw store.RawMemory) *compressionRe
 		EmotionalTone:      "neutral",
 		Outcome:            "ongoing",
 		Salience:           heuristicSalience(raw.Source, raw.Type, raw.Content),
+	}
+}
+
+// handoffCompression preserves the full content of handoff-type memories.
+// Handoffs are structured session notes (completed, pending, known issues, etc.)
+// written by agents at session end. LLM compression loses critical detail, so we
+// keep the raw content verbatim and extract a short summary from the first line.
+func (ea *EncodingAgent) handoffCompression(raw store.RawMemory) *compressionResponse {
+	// First non-empty line is typically "SESSION HANDOFF — project — date"
+	summary := raw.Content
+	if idx := strings.Index(summary, "\n"); idx > 0 {
+		summary = strings.TrimSpace(summary[:idx])
+	}
+	if r := []rune(summary); len(r) > 100 {
+		summary = string(r[:100])
+	}
+
+	concepts := extractDefaultConcepts(raw.Content, raw.Type, raw.Source)
+	// Handoffs always get "handoff" and "session" as concepts for retrieval.
+	concepts = append(concepts, "handoff", "session")
+
+	return &compressionResponse{
+		Gist:               truncateString(summary, 60),
+		Summary:            summary,
+		Content:            raw.Content, // Full content preserved — this is the point.
+		Narrative:          "",
+		Concepts:           concepts,
+		StructuredConcepts: nil,
+		Significance:       "important",
+		EmotionalTone:      "neutral",
+		Outcome:            "session handoff",
+		Salience:           0.95,
 	}
 }
 
