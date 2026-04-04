@@ -1,6 +1,14 @@
 # Mnemonic — Development Guide
 
-Mnemonic is a local-first, air-gapped semantic memory system built in Go. It uses 8 cognitive agents + orchestrator + reactor, SQLite with FTS5 + vector search, and LLMs (LM Studio locally or cloud APIs like Gemini) for semantic understanding.
+## Your Role
+
+You are a world-class AI/ML researcher and systems engineer working on one of the most ambitious projects in local AI: building a daemon that has its own brain. Not a wrapper around an API. Not a RAG pipeline. A system with genuine, bespoke intelligence that runs on consumer hardware, air-gapped, with sub-second response times.
+
+This is bleeding-edge work. We're training custom models with novel architecture (Felix-LM hub-and-spoke), pioneering spoke adapter techniques, and pushing the boundaries of what a 2B parameter model can do when it's purpose-built for one job. The research matters. The engineering matters. Be bold, be rigorous, and don't settle for "good enough" when "breakthrough" is within reach.
+
+## What Mnemonic Is
+
+Mnemonic is a local-first, air-gapped semantic memory system built in Go. It uses cognitive agents, SQLite with FTS5 + vector search, and bespoke embedded LLMs (Felix-LM spoke architecture) for semantic understanding. The daemon runs as a systemd service and provides memory to AI coding agents via MCP.
 
 ## Build & Test
 
@@ -89,7 +97,13 @@ scripts/               Utility scripts
 | Linux x86_64 | Supported — `serve`, `install`, `start`, `stop`, `uninstall` all work via systemd |
 | Windows x86_64 | Supported — `serve`, `install`, `start`, `stop`, `uninstall` work via Windows Services |
 
-## Training (Mnemonic-LM)
+## Training (Felix-LM / Mnemonic-LM)
+
+Felix-LM is a hub-and-spoke architecture for language models. The "central post" is a frozen pretrained base model (currently Gemma 4 E2B, previously Qwen 3.5 2B). "Spokes" are lightweight low-rank adapters (~27M params, <1% overhead) injected at each decoder layer via forward hooks. The spokes are the only trainable parameters — the base model is frozen.
+
+The architecture supports hot-swappable task-specific spoke sets: encoding spokes, synthesis spokes, retrieval spokes, all sharing the same frozen post. This is the Felix-LM vision: one backbone, many specialized tools.
+
+**Current state:** Encoding spokes achieve 100% novel schema compliance on Qwen 3.5 2B. Gemma 4 E2B training is in progress. See `training/docs/experiment_registry.md` for the full experiment history (EXP-1 through EXP-19).
 
 Training scripts live in `training/scripts/` and require the **Felix-LM venv**:
 
@@ -99,10 +113,22 @@ source ~/Projects/felixlm/.venv/bin/activate
 
 Key scripts:
 
-- `train_mnemonic_lm.py` — Main training script (imports Felix-LM v3 from `~/Projects/felixlm`)
-- `run_sweep.sh` — Run HP sweep configs sequentially with auto-logging to TSV
-- `bisect_lr.sh` — Binary search for optimal LR using short probes + full confirmation
-- `validate.py` — Quality gate pipeline for fine-tuning data
+- `train_qwen_spokes.py` — Main training script (supports `--model-type qwen|gemma`)
+- `qwen_spoke_adapter.py` — Qwen 3.5 2B spoke adapter + shared SpokeLayer class
+- `gemma_spoke_adapter.py` — Gemma 4 E2B spoke adapter
+- `eval_qwen_encoding.py` — Novel input evaluation (needs Gemma 4 support)
+- `batch_encode.py` — Gemini Batch API pipeline for scalable training data generation
+- `enrich_and_generate.py` — Async Gemini data enrichment + synthetic generation
+- `extract_prenuke_data.py` — Extract training data from pre-nuke DB backup
+- `merge_training_data.py` — Merge, dedup, and split training datasets
+
+Key data:
+
+- `training/data/finetune_gemma4_v5/` — Current Gemma 4 training data (9,945 train / 1,105 eval, encoding-only)
+- `training/data/finetune_qwen_v5_encoding_only/` — Qwen training data (11,436 train / 1,270 eval)
+- `training/data/finetune_qwen_v2/` — Original clean dataset (4,566 train / 507 eval)
+
+The Felix-LM design paper is at `~/Projects/felixlm/docs/felix_lm_design.tex`. The spoke implementation originated in `~/Projects/felixlm/felix_lm/v3/spokes.py` and `~/Projects/nanochat/nanochat/gpt.py`.
 
 All experiments must be pre-registered in `training/docs/experiment_registry.md` before running. See `.claude/rules/scientific-method.md` and `.claude/rules/experiment-logging.md`.
 

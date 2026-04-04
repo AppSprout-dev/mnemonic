@@ -37,7 +37,8 @@ from torch.utils.data import DataLoader, Dataset
 TRAINING_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(TRAINING_DIR / "scripts"))
 
-from qwen_spoke_adapter import QwenWithSpokes, SpokeConfig, SpokeLayer, gate_init_for_layer  # noqa: E402
+from qwen_spoke_adapter import QwenWithSpokes, SpokeConfig, SpokeLayer, build_rotation, gate_init_for_layer  # noqa: E402
+from gemma_spoke_adapter import GemmaWithSpokes  # noqa: E402
 
 
 # --- Dataset ---
@@ -173,15 +174,32 @@ def train(args):
         num_spokes=args.num_spokes,
         spoke_rank=args.spoke_rank,
         spoke_every_n=args.spoke_every_n,
+        rotation=args.rotation,
+        householder_k=args.householder_k,
+        bottleneck_rotation=args.bottleneck_rotation,
     )
 
+    # Detect model type
+    model_type = args.model_type
+    if model_type == "auto":
+        name_lower = args.base_model.lower()
+        if "gemma" in name_lower:
+            model_type = "gemma"
+        else:
+            model_type = "qwen"
+    print(f"\nModel type: {model_type}")
+
     # Load model
-    print(f"\nLoading base model: {args.base_model}")
-    model = QwenWithSpokes.from_pretrained(
+    print(f"Loading base model: {args.base_model}")
+    ModelClass = GemmaWithSpokes if model_type == "gemma" else QwenWithSpokes
+    extra_kwargs = {}
+    if model_type == "qwen":
+        extra_kwargs["attn_implementation"] = "eager"  # Flash attention may not work with hooks
+    model = ModelClass.from_pretrained(
         args.base_model,
         spoke_config=spoke_config,
         dtype=torch.bfloat16,
-        attn_implementation="eager",  # Flash attention may not work with hooks
+        **extra_kwargs,
     )
 
     # Handle custom spoke placement (e.g., --spoke-layers 3,7,11,15,19,23)
@@ -196,11 +214,14 @@ def train(args):
         layer_indices = [int(x) for x in args.spoke_layers.split(",")]
         for i in layer_indices:
             gate_init = gate_init_for_layer(i, n_layers)
+            rotation = build_rotation(d_model, spoke_config)
             model.spokes[str(i)] = SpokeLayer(
                 d_model=d_model,
                 num_spokes=spoke_config.num_spokes,
                 rank=spoke_config.spoke_rank,
                 gate_init=gate_init,
+                rotation=rotation,
+                bottleneck_rotation=spoke_config.bottleneck_rotation,
             )
 
         # Re-install hooks
@@ -235,7 +256,12 @@ def train(args):
         print(f"LoRA params: {lora_params:,}")
         print(f"Total trainable: {lora_params + sum(p.numel() for p in model.spokes.parameters()):,}")
 
-    model.to(device)
+    # Move to device (skip if already placed by device_map="auto" from quantization)
+    if not getattr(model.base_model, 'is_quantized', False) and not hasattr(model.base_model, 'hf_device_map'):
+        model.to(device)
+    else:
+        # Quantized model is already on GPU via device_map; move spokes to match
+        model.spokes.to(device)
 
     # Resume from checkpoint if provided
     start_step = 0
@@ -289,6 +315,7 @@ def train(args):
     print(f"\n--- Training Config ---")
     print(f"  Base model:     {args.base_model}")
     print(f"  Spokes:         {len(model.spokes)} layers, {args.num_spokes} spokes, rank {args.spoke_rank}")
+    print(f"  Rotation:       {args.rotation}" + (f" (k={args.householder_k})" if args.rotation == "householder" else ""))
     print(f"  Batch size:     {args.batch_size} x {args.grad_accum} accum = {args.batch_size * args.grad_accum} effective")
     print(f"  Seq len:        {args.seq_len}")
     print(f"  Train examples: {len(train_data)}")
@@ -308,6 +335,9 @@ def train(args):
     init_eval_loss = evaluate(model, eval_loader, device)
     init_ppl = math.exp(min(init_eval_loss, 100))
     print(f"  Initial eval loss: {init_eval_loss:.4f}, PPL: {init_ppl:.1f}")
+
+    # Free eval memory before training — critical for NF4 models on tight VRAM
+    torch.cuda.empty_cache()
 
     # Training loop
     model.train()
@@ -334,27 +364,35 @@ def train(args):
             labels = labels.to(device)
             attention_mask = attention_mask.to(device)
 
-            with torch.amp.autocast("cuda", dtype=torch.bfloat16, enabled=args.autocast):
-                outputs = model(input_ids=input_ids, labels=labels, attention_mask=attention_mask)
+            try:
+                with torch.amp.autocast("cuda", dtype=torch.bfloat16, enabled=args.autocast):
+                    outputs = model(input_ids=input_ids, labels=labels, attention_mask=attention_mask)
 
-                # Loss in fp32 for stability
-                logits = outputs.logits.float()
-                shift_logits = logits[..., :-1, :].contiguous()
-                shift_labels = labels[..., 1:].contiguous()
+                    # F.cross_entropy handles bf16→fp32 upcast internally;
+                    # .float() here creates a 1.89 GiB fp32 copy that OOMs at seq_len 2048
+                    logits = outputs.logits
+                    shift_logits = logits[..., :-1, :].contiguous()
+                    shift_labels = labels[..., 1:].contiguous()
 
-                # Skip if all labels are masked (truncated examples with no completion)
-                if (shift_labels == -100).all():
-                    global_step += 1
-                    continue
+                    # Skip if all labels are masked (truncated examples with no completion)
+                    if (shift_labels == -100).all():
+                        global_step += 1
+                        continue
 
-                loss = F.cross_entropy(
-                    shift_logits.view(-1, shift_logits.size(-1)),
-                    shift_labels.view(-1),
-                    ignore_index=-100,
-                )
-                loss = loss / args.grad_accum
+                    loss = F.cross_entropy(
+                        shift_logits.view(-1, shift_logits.size(-1)),
+                        shift_labels.view(-1),
+                        ignore_index=-100,
+                    )
+                    loss = loss / args.grad_accum
 
-            loss.backward()
+                loss.backward()
+            except torch.cuda.OutOfMemoryError:
+                # Skip long examples that OOM — free memory and continue
+                print(f"  [OOM] Skipped step {global_step} (seq_len={input_ids.shape[1]})")
+                torch.cuda.empty_cache()
+                global_step += 1
+                continue
 
             if (global_step + 1) % args.grad_accum == 0:
                 opt_step_count += 1
@@ -504,11 +542,21 @@ def main():
 
     # Model
     parser.add_argument("--base-model", default="Qwen/Qwen3.5-2B", help="Base model path or HF name")
+    parser.add_argument("--model-type", default="auto", choices=["auto", "qwen", "gemma"],
+                        help="Base model type (auto-detects from model name)")
     parser.add_argument("--num-spokes", type=int, default=4)
     parser.add_argument("--spoke-rank", type=int, default=64)
     parser.add_argument("--spoke-every-n", type=int, default=1, help="Apply spokes every N layers (1=all)")
     parser.add_argument("--spoke-layers", type=str, default=None,
                         help="Comma-separated layer indices for custom placement (overrides spoke-every-n)")
+    parser.add_argument("--rotation", type=str, default="none",
+                        choices=["none", "rope1", "rope4", "householder"],
+                        help="Rotation type for helical trajectory (Felix-LM Definition 2.5)")
+    parser.add_argument("--householder-k", type=int, default=16,
+                        help="Number of Householder reflections (only used with --rotation householder)")
+    parser.add_argument("--bottleneck-rotation", type=str, default="none",
+                        choices=["none", "bottleneck_rope", "per_spoke_rope"],
+                        help="Rotation in bottleneck space (EXP-15b)")
 
     # Data
     parser.add_argument("--train-data", default=str(TRAINING_DIR / "data/finetune_qwen/train.jsonl"))
