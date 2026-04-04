@@ -4,6 +4,21 @@ All notable changes to Mnemonic will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.35.0](https://github.com/AppSprout-dev/mnemonic/compare/v0.34.1...v0.35.0) (2026-04-04)
+
+
+### Features
+
+* add serve_spokes.py for OpenAI-compatible spoke model serving ([26613ab](https://github.com/AppSprout-dev/mnemonic/commit/26613ab252d16fb0cab3dfdf0fd12764e4a30ff6))
+* EXP-15 through EXP-19, Gemma 4 adapter, data pipeline, quality testing ([e4b94e7](https://github.com/AppSprout-dev/mnemonic/commit/e4b94e7feccf31d537aab9bc6b42310f39518b5c))
+* EXP-15-19 training research, Gemma 4 adapter, data pipeline ([f6ce427](https://github.com/AppSprout-dev/mnemonic/commit/f6ce427200ab818a4e8b453398a985edeb8319a8))
+
+
+### Bug Fixes
+
+* preserve full content in handoff-type memories ([831a9fe](https://github.com/AppSprout-dev/mnemonic/commit/831a9fe5780014013b675e8cc161ee8b8eebd69d))
+* preserve full content in handoff-type memories ([ac17492](https://github.com/AppSprout-dev/mnemonic/commit/ac17492f7ee3d07fd43fe7bdfc84aea803332351))
+
 ## [0.34.1](https://github.com/AppSprout-dev/mnemonic/compare/v0.34.0...v0.34.1) (2026-03-29)
 
 
