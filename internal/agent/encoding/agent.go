@@ -113,7 +113,7 @@ func DefaultConfig() EncodingConfig {
 		MaxSimilarSearchResults:   5,
 		EmbeddingModel:            "default",
 		CompletionModel:           "default",
-		CompletionMaxTokens:       1024,
+		CompletionMaxTokens:       4096,
 		CompletionTemperature:     0.3,
 		MaxConcurrentEncodings:    1,
 		EnableLLMClassification:   false,

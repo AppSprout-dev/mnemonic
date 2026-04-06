@@ -14,7 +14,7 @@ llm:
   endpoint: "http://localhost:8899/v1"
   chat_model: "qwen-spokes"
   embedding_model: "all-MiniLM-L6-v2"
-  max_tokens: 1024
+  max_tokens: 4096
   temperature: 0.0
   timeout_sec: 120
   max_concurrent: 1
@@ -38,7 +38,7 @@ encoding:
   max_concurrent_encodings: 1
   enable_llm_classification: false
   deduplication_threshold: 0.95
-  completion_max_tokens: 1024
+  completion_max_tokens: 4096
 
 consolidation:
   enabled: false

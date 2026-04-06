@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Export Qwen 3.5 2B + trained spoke weights to a single GGUF file.
 
-Subclasses llama.cpp's convert_hf_to_gguf.py Qwen3_5TextModel to inject
-spoke tensors and metadata during the standard conversion pipeline. This
-preserves all the complex Qwen 3.5 conversion logic (V head reordering,
-linear attention tensors, tokenizer arrays, etc.) while adding spokes.
+Two-phase approach: (1) convert the base HF model to GGUF using llama.cpp's
+standard converter, then (2) patch the GGUF to add spoke tensors and metadata
+using the gguf library directly. This avoids fighting the converter's tensor
+mapping pipeline while preserving all Qwen 3.5 conversion logic.
 
 Usage:
     python training/scripts/export_qwen35_spokes.py \
@@ -16,19 +16,19 @@ Requires: pip install gguf numpy torch (in the felixlm venv)
 """
 
 import argparse
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
 import numpy as np
 import torch
 
-# Add llama.cpp converter to path
-LLAMACPP_DIR = Path(__file__).resolve().parent.parent.parent / "third_party" / "llama.cpp"
-sys.path.insert(0, str(LLAMACPP_DIR))
-
 # Add training scripts to path for spoke adapter import
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
+
+LLAMACPP_DIR = Path(__file__).resolve().parent.parent.parent / "third_party" / "llama.cpp"
 
 from qwen_spoke_adapter import SpokeConfig  # noqa: E402
 
@@ -60,11 +60,13 @@ def rename_spoke_tensor(key, tensor, d_model):
     param_path = parts[1]
     gguf_name = f"blk.{layer_idx}.spoke.{param_path}"
 
-    # Transpose W_down and W_up to match llama.cpp expectations:
-    #   PyTorch w_down: (rank, d_model) -> llama.cpp: {d_model, rank}
-    #   PyTorch w_up:   (d_model, rank) -> llama.cpp: {rank, d_model}
-    if "w_down" in key or "w_up" in key:
-        tensor = tensor.t().contiguous()
+    # llama.cpp stores matrices as {out_features, in_features} in GGUF
+    # but ggml_mul_mat computes: result = A * B where A is the weight matrix
+    # For w_down: PyTorch (rank, d_model) means in=d_model, out=rank
+    #   -> GGUF needs {d_model, rank} (no transpose needed, gguf reverses shape)
+    # For w_up: PyTorch (d_model, rank) means in=rank, out=d_model
+    #   -> GGUF needs {rank, d_model} (no transpose needed)
+    # The gguf writer will handle the numpy→ggml shape reversal automatically
 
     # Reshape scalar gate_bias to {1} (llama.cpp expects 1-element tensor)
     if "gate_bias" in key and tensor.ndim == 0:
@@ -104,8 +106,26 @@ def main():
     print(f"  Spokes:  {spoke_path}")
     print(f"  Output:  {output_path}")
 
-    # Load spoke checkpoint
-    print(f"\nLoading spoke checkpoint...")
+    # --- Phase 1: Convert base model to GGUF ---
+    base_gguf = output_path.parent / "qwen35-2b-f16.gguf"
+    if not base_gguf.exists():
+        print(f"\nPhase 1: Converting base model to GGUF...")
+        converter = LLAMACPP_DIR / "convert_hf_to_gguf.py"
+        cmd = [
+            sys.executable, str(converter),
+            str(model_path),
+            "--outtype", args.outtype,
+            "--outfile", str(base_gguf),
+        ]
+        result = subprocess.run(cmd, capture_output=False)
+        if result.returncode != 0:
+            print(f"ERROR: Base model conversion failed")
+            sys.exit(1)
+    else:
+        print(f"\nPhase 1: Base GGUF exists at {base_gguf}, skipping conversion")
+
+    # --- Phase 2: Load spokes and patch GGUF ---
+    print(f"\nPhase 2: Loading spoke checkpoint...")
     data = torch.load(str(spoke_path), weights_only=True, map_location="cpu")
     spoke_config = SpokeConfig(**data["spoke_config"])
     spoke_state = data["spoke_state_dict"]
@@ -136,69 +156,181 @@ def main():
 
     print(f"  Prepared {len(spoke_tensors)} spoke tensors ({len(norm_layers)} layers)")
 
-    # Import the converter classes
-    from convert_hf_to_gguf import Qwen3_5TextModel  # noqa: E402
+    # --- Phase 3: Copy base GGUF and patch with spokes ---
+    print(f"\nPhase 3: Patching GGUF with spoke tensors...")
 
-    # Subclass to inject spokes
+    # Copy the base GGUF first
+    shutil.copy2(str(base_gguf), str(output_path))
+
     import gguf
 
-    class Qwen35WithSpokesModel(Qwen3_5TextModel):
-        """Qwen 3.5 converter extended with spoke tensor export."""
+    # Read the base GGUF to get its structure
+    reader = gguf.GGUFReader(str(output_path))
+    base_tensor_count = len(reader.tensors)
+    print(f"  Base GGUF: {base_tensor_count} tensors")
 
-        model_arch = gguf.MODEL_ARCH.QWEN35
-        spoke_tensors_to_inject = spoke_tensors
-        spoke_cfg = spoke_config
+    # We need to rebuild the GGUF with additional tensors and metadata.
+    # The gguf library's GGUFWriter can create a new file from scratch.
+    # Read all existing KV pairs and tensors, then write a new file with spokes added.
 
-        def set_gguf_parameters(self):
-            super().set_gguf_parameters()
-            # Add spoke metadata
-            self.gguf_writer.add_uint32(f"qwen35.num_spokes", self.spoke_cfg.num_spokes)
-            self.gguf_writer.add_uint32(f"qwen35.spoke_rank", self.spoke_cfg.spoke_rank)
-            print(f"  Added spoke metadata: {self.spoke_cfg.num_spokes} spokes, rank {self.spoke_cfg.spoke_rank}")
+    # Collect existing metadata
+    kv_data = {}
+    for field in reader.fields.values():
+        # Skip internal GGUF fields
+        if field.name.startswith("GGUF."):
+            continue
+        kv_data[field.name] = field
 
-        def generate_extra_tensors(self):
-            # Yield spoke tensors to be included in the GGUF
-            f32_patterns = ("norm", "gate_bias")
-            for name, tensor in self.spoke_tensors_to_inject.items():
-                if any(p in name for p in f32_patterns):
-                    yield name, tensor.float()
-                else:
-                    yield name, tensor.half()
-            print(f"  Injected {len(self.spoke_tensors_to_inject)} spoke tensors")
+    # Collect existing tensor info
+    existing_tensors = []
+    for tensor_info in reader.tensors:
+        existing_tensors.append(tensor_info)
 
-    # Run the converter
-    print(f"\nConverting model + spokes to GGUF...")
+    print(f"  Reading {len(existing_tensors)} base tensors + {len(spoke_tensors)} spoke tensors")
 
-    # The converter expects command-line args, so we build them
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    # Create a new GGUF writer
+    writer = gguf.GGUFWriter(str(output_path), arch="qwen35", endianess=gguf.GGUFEndian.LITTLE)
 
-    # Use the converter's main infrastructure
-    from convert_hf_to_gguf import ModelBase
-    # Override the model registration so our subclass is used
-    original_registry = ModelBase._model_classes.copy()
+    # Copy all existing KV metadata
+    for field in reader.fields.values():
+        if field.name.startswith("GGUF."):
+            continue
+        # Re-add each field based on its type
+        parts = field.parts
+        field_type = field.types[0] if field.types else None
 
-    # Register our subclass for Qwen3.5
-    for model_type in ["Qwen3_5ForConditionalGeneration", "Qwen3_5ForCausalLM"]:
-        ModelBase._model_classes[model_type] = Qwen35WithSpokesModel
+        # Use raw data copy — read the field value from the reader
+        # The simplest approach: skip re-adding metadata manually and use
+        # the reader's data directly with add_key + add_val
+        pass  # Will handle below
 
-    # Build argv for the converter
-    sys.argv = [
-        "convert_hf_to_gguf.py",
-        str(model_path),
-        "--outtype", args.outtype,
-        "--outfile", str(output_path),
-    ]
+    # Actually, the cleanest approach is to use gguf-py's ability to
+    # add tensors to an existing file. Let me check if that's possible.
+    del writer
 
-    try:
-        from convert_hf_to_gguf import main as converter_main
-        converter_main()
-    finally:
-        # Restore original registry
-        ModelBase._model_classes = original_registry
+    # Alternative: use gguf's GGUFWriter in append mode or rebuild entirely
+    # The gguf library doesn't support appending. We need to rebuild.
+    # Let's use a different approach: write spoke tensors directly into the
+    # GGUF file by manipulating the binary format.
+
+    # Simplest correct approach: re-run the converter but write our own
+    # tensor writing loop that includes spoke tensors.
+    # Actually, the gguf library has a GGUFWriter that can write from scratch.
+    # But copying all metadata fields is complex.
+
+    # Let's try the simplest thing: use gguf-new to add to an existing file
+    # by creating a second GGUF and merging. Or better yet, use llama.cpp's
+    # gguf tool.
+
+    # Actually the cleanest approach: build a minimal script that:
+    # 1. Reads the base GGUF
+    # 2. Creates a new GGUFWriter
+    # 3. Copies all KV pairs
+    # 4. Adds spoke KV pairs
+    # 5. Copies all tensors
+    # 6. Adds spoke tensors
+
+    # Use GGUFReader to get raw bytes for tensor data
+    writer = gguf.GGUFWriter(str(output_path), arch="qwen35", endianess=gguf.GGUFEndian.LITTLE)
+
+    # Copy metadata from reader
+    # The GGUFReader stores fields with their raw values. We need to re-add them.
+    # For simplicity, re-set the key parameters manually since we know the model.
+    reader2 = gguf.GGUFReader(str(base_gguf))
+
+    # Use the writer's add methods for known fields
+    for field in reader2.fields.values():
+        name = field.name
+        if name.startswith("GGUF."):
+            continue
+
+        # Get the field data based on type
+        ft = field.types[-1] if field.types else None
+        data_parts = field.parts
+
+        if ft == gguf.GGUFValueType.STRING:
+            if len(field.types) > 1 and field.types[0] == gguf.GGUFValueType.ARRAY:
+                # String array
+                vals = [bytes(field.parts[idx]).decode("utf-8") for idx in field.data]
+                writer.add_array(name, vals)
+            else:
+                val = bytes(data_parts[-1]).decode("utf-8")
+                writer.add_string(name, val)
+        elif ft == gguf.GGUFValueType.UINT32:
+            if len(field.types) > 1 and field.types[0] == gguf.GGUFValueType.ARRAY:
+                vals = [int(data_parts[idx][0]) for idx in field.data]
+                writer.add_array(name, vals)
+            else:
+                writer.add_uint32(name, int(data_parts[-1][0]))
+        elif ft == gguf.GGUFValueType.INT32:
+            if len(field.types) > 1 and field.types[0] == gguf.GGUFValueType.ARRAY:
+                vals = [int(data_parts[idx][0]) for idx in field.data]
+                writer.add_array(name, vals)
+            else:
+                writer.add_int32(name, int(data_parts[-1][0]))
+        elif ft == gguf.GGUFValueType.FLOAT32:
+            if len(field.types) > 1 and field.types[0] == gguf.GGUFValueType.ARRAY:
+                vals = [float(data_parts[idx][0]) for idx in field.data]
+                writer.add_array(name, vals)
+            else:
+                writer.add_float32(name, float(data_parts[-1][0]))
+        elif ft == gguf.GGUFValueType.BOOL:
+            writer.add_bool(name, bool(data_parts[-1][0]))
+        elif ft == gguf.GGUFValueType.UINT64:
+            writer.add_uint64(name, int(data_parts[-1][0]))
+        elif ft == gguf.GGUFValueType.INT64:
+            writer.add_int64(name, int(data_parts[-1][0]))
+        elif ft == gguf.GGUFValueType.FLOAT64:
+            writer.add_float64(name, float(data_parts[-1][0]))
+        elif ft == gguf.GGUFValueType.UINT8:
+            writer.add_uint8(name, int(data_parts[-1][0]))
+        elif ft == gguf.GGUFValueType.INT8:
+            writer.add_int8(name, int(data_parts[-1][0]))
+        elif ft == gguf.GGUFValueType.UINT16:
+            writer.add_uint16(name, int(data_parts[-1][0]))
+        elif ft == gguf.GGUFValueType.INT16:
+            writer.add_int16(name, int(data_parts[-1][0]))
+        # Skip unknown types
+
+    # Add spoke metadata
+    writer.add_uint32("qwen35.num_spokes", spoke_config.num_spokes)
+    writer.add_uint32("qwen35.spoke_rank", spoke_config.spoke_rank)
+    print(f"  Added spoke metadata: {spoke_config.num_spokes} spokes, rank {spoke_config.spoke_rank}")
+
+    # Copy base tensors using properly typed numpy arrays from the reader
+    for tensor_info in reader2.tensors:
+        # tensor_info.data is a numpy memmap with correct dtype and shape
+        data = np.array(tensor_info.data)  # copy from mmap to regular array
+        writer.add_tensor(tensor_info.name, data)
+
+    print(f"  Copied {len(reader2.tensors)} base tensors")
+
+    # Add spoke tensors
+    f32_patterns = ("norm", "gate_bias")
+    spoke_count = 0
+    for name, tensor in sorted(spoke_tensors.items()):
+        if any(p in name for p in f32_patterns):
+            data = tensor.float().numpy()
+        else:
+            data = tensor.half().numpy()
+        writer.add_tensor(name, data)
+        spoke_count += 1
+
+    print(f"  Added {spoke_count} spoke tensors")
+
+    # Write the final GGUF
+    print(f"\n  Writing GGUF...")
+    writer.write_header_to_file()
+    writer.write_kv_data_to_file()
+    writer.write_tensors_to_file()
+    writer.close()
 
     file_size = output_path.stat().st_size / (1024 * 1024)
+    total_tensors = len(reader2.tensors) + spoke_count
     print(f"\n=== Export Complete ===")
-    print(f"  Output: {output_path} ({file_size:.1f} MB)")
+    print(f"  Output: {output_path} ({file_size:.1f} MiB)")
+    print(f"  Tensors: {total_tensors} ({len(reader2.tensors)} base + {spoke_count} spoke)")
+
     print(f"\nTo test:")
     print(f"  ./third_party/llama.cpp/build/bin/llama-cli -m {output_path} -p 'Hello' -n 32 -ngl 99")
 

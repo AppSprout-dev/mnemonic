@@ -82,7 +82,7 @@ func DefaultConfig() RetrievalConfig {
 		DecayFactor:         0.7,
 		MaxResults:          7,
 		MaxToolCalls:        5,
-		SynthesisMaxTokens:  1024,
+		SynthesisMaxTokens:  4096,
 		MergeAlpha:          0.6,
 		DualHitBonus:        0.15,
 
