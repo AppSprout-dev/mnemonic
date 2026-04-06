@@ -253,10 +253,36 @@ def gate_init_for_layer(layer_idx: int, n_layers: int) -> float:
     return -2.0 + t * 4.0  # sigmoid(-2)~0.12, sigmoid(2)~0.88
 
 
+class SpokeWrappedLayer(nn.Module):
+    """Wraps a transformer decoder layer with a spoke layer applied after it.
+
+    This is a torch.compile-friendly alternative to forward hooks. The spoke
+    computation is part of the module's forward() method, so torch.compile can
+    trace through it without graph breaks.
+    """
+
+    def __init__(self, decoder_layer: nn.Module, spoke_layer: SpokeLayer):
+        super().__init__()
+        self.decoder_layer = decoder_layer
+        self.spoke_layer = spoke_layer
+
+    def forward(self, *args, **kwargs):
+        output = self.decoder_layer(*args, **kwargs)
+        if isinstance(output, tuple):
+            hidden_states = output[0]
+            hidden_states = self.spoke_layer(hidden_states)
+            return (hidden_states,) + output[1:]
+        else:
+            return self.spoke_layer(output)
+
+
 class QwenWithSpokes(nn.Module):
     """Qwen 3.5 base model wrapped with Felix spoke layers.
 
-    Injects a SpokeLayer after each transformer block's forward pass.
+    Injects a SpokeLayer after each transformer block via inline module
+    wrapping (not forward hooks). This is torch.compile-compatible — the
+    entire forward pass can be traced as a single graph.
+
     The base model weights can be frozen while training only spoke parameters.
     """
 
@@ -289,26 +315,41 @@ class QwenWithSpokes(nn.Module):
         # The forward pass casts to base model dtype automatically.
         self.spokes.float()
 
-        # Install forward hooks on the transformer blocks
-        self._hooks = []
-        self._install_hooks()
+        # Wrap transformer layers inline (torch.compile-friendly, no hooks)
+        self._hooks = []  # kept for backward compat with remove_hooks()
+        self._wrap_layers()
 
         # Print param summary
         self._print_param_summary()
 
+    def _wrap_layers(self):
+        """Replace transformer layers with SpokeWrappedLayer modules.
+
+        This inlines spoke computation into the forward pass, making it
+        compatible with torch.compile(fullgraph=True). The original decoder
+        layer is preserved as a submodule of the wrapper.
+        """
+        layers = self._get_transformer_layers()
+        for i in range(len(layers)):
+            if str(i) in self.spokes:
+                layers[i] = SpokeWrappedLayer(layers[i], self.spokes[str(i)])
+
     def _install_hooks(self):
-        """Register forward hooks to inject spoke computation after each block."""
+        """Legacy hook-based injection (kept for backward compatibility).
+
+        Use _wrap_layers() instead for torch.compile support.
+        """
         layers = self._get_transformer_layers()
         for i, layer in enumerate(layers):
+            # Handle both wrapped and unwrapped layers
+            target = layer.decoder_layer if isinstance(layer, SpokeWrappedLayer) else layer
             if str(i) in self.spokes:
-                hook = layer.register_forward_hook(self._make_spoke_hook(str(i)))
+                hook = target.register_forward_hook(self._make_spoke_hook(str(i)))
                 self._hooks.append(hook)
 
     def _make_spoke_hook(self, layer_key: str):
-        """Create a forward hook closure for a specific spoke layer."""
+        """Create a forward hook closure for a specific spoke layer (legacy)."""
         def hook(module, input, output):
-            # Qwen's decoder layer returns a tuple: (hidden_states, ..., ...)
-            # The first element is the hidden state tensor
             if isinstance(output, tuple):
                 hidden_states = output[0]
                 hidden_states = self.spokes[layer_key](hidden_states)
@@ -552,7 +593,22 @@ class QwenWithSpokes(nn.Module):
         print(f"Loaded spoke weights from: {path}")
 
     def remove_hooks(self):
-        """Remove all forward hooks (for clean serialization)."""
+        """Remove all forward hooks (for clean serialization).
+
+        If using inline wrapping (default), this is a no-op since there are
+        no hooks to remove.
+        """
         for hook in self._hooks:
             hook.remove()
         self._hooks.clear()
+
+    def unwrap_layers(self):
+        """Restore original decoder layers by removing SpokeWrappedLayer wrappers.
+
+        This is the inverse of _wrap_layers(). Useful for serialization or
+        switching back to hook-based injection.
+        """
+        layers = self._get_transformer_layers()
+        for i in range(len(layers)):
+            if isinstance(layers[i], SpokeWrappedLayer):
+                layers[i] = layers[i].decoder_layer

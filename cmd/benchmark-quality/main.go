@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/appsprout-dev/mnemonic/internal/agent/abstraction"
@@ -100,8 +101,9 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error loading config: %v\n", cfgErr)
 			os.Exit(1)
 		}
-		if cfg.LLM.APIKey == "" {
-			fmt.Fprintln(os.Stderr, "Error: LLM_API_KEY environment variable is required for --llm mode")
+		isLocal := strings.Contains(cfg.LLM.Endpoint, "localhost") || strings.Contains(cfg.LLM.Endpoint, "127.0.0.1")
+		if cfg.LLM.APIKey == "" && !isLocal {
+			fmt.Fprintln(os.Stderr, "Error: LLM_API_KEY environment variable is required for --llm mode (not required for localhost)")
 			os.Exit(1)
 		}
 		provider = llm.NewLMStudioProvider(
