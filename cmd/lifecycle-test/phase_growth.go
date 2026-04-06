@@ -9,8 +9,11 @@ import (
 	"github.com/appsprout-dev/mnemonic/internal/agent/retrieval"
 )
 
-// PhaseGrowth scales the system to 700-1000 memories over simulated months 1-3.
-type PhaseGrowth struct{}
+// PhaseGrowth scales the system over simulated months, generating ~200 memories per month.
+// Months defaults to 3 if unset.
+type PhaseGrowth struct {
+	Months int
+}
 
 func (p *PhaseGrowth) Name() string { return "growth" }
 
@@ -23,8 +26,13 @@ func (p *PhaseGrowth) Run(ctx context.Context, h *Harness, verbose bool) (*Phase
 	rng := rand.New(rand.NewSource(99))
 	totalAdded := 0
 
-	// Simulate months 1-3: generate ~200 memories per month in weekly batches.
-	for month := 1; month <= 3; month++ {
+	months := p.Months
+	if months <= 0 {
+		months = 3
+	}
+
+	// Simulate months: generate ~200 memories per month in weekly batches.
+	for month := 1; month <= months; month++ {
 		for week := 0; week < 4; week++ {
 			h.Clock.Advance(7 * 24 * time.Hour)
 

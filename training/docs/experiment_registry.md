@@ -857,3 +857,16 @@ Rotation parameter overhead per layer (rank=64):
 - **Hardware:** Same MI300X droplet as EXP-20 (sequential run)
 - **Result:** (pending)
 - **Verdict:** (pending)
+
+### EXP-22: TurboQuant KV Cache Compression — Phase 1 (Prompt Cache)
+
+- **Date:** 2026-04-06
+- **Status:** REGISTERED
+- **Hypothesis:** Compressing prompt cache KV states with TurboQuant (3-bit keys, 4-bit values) will reduce prompt cache VRAM by ~4x with negligible quality impact (cosine similarity >0.97 per the reference impl benchmark). This enables more cached prompts before eviction, reducing recomputation during bursty encoding workloads.
+- **Variable:** Prompt cache storage format (uncompressed fp16 → TurboQuant compressed, per-layer, K=3-bit V=4-bit)
+- **Control:** Current llama-server prompt cache (fp16, no compression). Lifecycle test baseline: 62 prompts = 4,718 MiB.
+- **Prediction:** Prompt cache VRAM reduced to ~1,100 MiB for same 62 prompts. Cache hit latency increases <5ms (decompress overhead). Encoding quality unchanged (compression only affects cached state, not active generation). No lifecycle test assertion regressions.
+- **Config:** llama.cpp fork, Qwen 3.5 2B + spokes GGUF, RX 7800 XT. Integration via per-layer compress on cache save, decompress on cache load in server-context.cpp.
+- **Metrics:** VRAM usage (prompt cache), cache hit latency, lifecycle test pass/fail, encoding cosine similarity vs uncompressed baseline.
+- **Result:** (pending)
+- **Verdict:** (pending)
