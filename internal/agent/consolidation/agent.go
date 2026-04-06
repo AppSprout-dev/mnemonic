@@ -721,7 +721,7 @@ Respond with ONLY a JSON object:
 	now := time.Now()
 	return store.Memory{
 		ID:           uuid.New().String(),
-		RawID:        uuid.New().String(), // gist gets its own raw_id (cluster sources tracked via gist_of)
+		RawID:        "", // gist has no raw source (cluster sources tracked via gist_of)
 		Timestamp:    now,
 		Content:      gistContent,
 		Summary:      gistSummary,

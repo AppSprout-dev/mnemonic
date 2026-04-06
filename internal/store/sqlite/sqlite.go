@@ -350,6 +350,19 @@ func scanRawMemoryRows(rows *sql.Rows) ([]store.RawMemory, error) {
 // memoryColumns is the standard column list for memory queries.
 const memoryColumns = `id, raw_id, timestamp, type, content, summary, concepts, embedding, salience, access_count, last_accessed, state, gist_of, episode_id, source, project, session_id, created_at, updated_at, feedback_score, recall_suppressed`
 
+// aliasedMemoryColumns returns memoryColumns with a table alias prefix to avoid ambiguity in JOINs.
+func aliasedMemoryColumns(alias string) string {
+	cols := []string{"id", "raw_id", "timestamp", "type", "content", "summary", "concepts", "embedding", "salience", "access_count", "last_accessed", "state", "gist_of", "episode_id", "source", "project", "session_id", "created_at", "updated_at", "feedback_score", "recall_suppressed"}
+	result := ""
+	for i, c := range cols {
+		if i > 0 {
+			result += ", "
+		}
+		result += alias + "." + c
+	}
+	return result
+}
+
 // scanMemory scans a memory row from the database.
 func scanMemoryFrom(s scanner) (store.Memory, error) {
 	var mem store.Memory
@@ -1249,7 +1262,7 @@ func (s *SQLiteStore) SearchByConcepts(ctx context.Context, concepts []string, l
 	}
 
 	query := `
-	SELECT ` + memoryColumns + `
+	SELECT ` + aliasedMemoryColumns("m") + `
 	FROM memories m
 	JOIN memories_fts ON m.rowid = memories_fts.rowid
 	WHERE memories_fts MATCH ?
@@ -1277,7 +1290,7 @@ func (s *SQLiteStore) SearchByConceptsInProject(ctx context.Context, concepts []
 
 	args := []interface{}{ftsQuery}
 	query := `
-	SELECT ` + memoryColumns + `
+	SELECT ` + aliasedMemoryColumns("m") + `
 	FROM memories m
 	JOIN memories_fts ON m.rowid = memories_fts.rowid
 	WHERE memories_fts MATCH ?`
@@ -1572,7 +1585,7 @@ func (s *SQLiteStore) BatchMergeMemories(ctx context.Context, sourceIDs []string
 
 	_, err = tx.ExecContext(ctx, writeQuery,
 		gist.ID,
-		gist.RawID,
+		nullableString(gist.RawID),
 		gist.Timestamp.Format(time.RFC3339),
 		nullableString(gist.Type),
 		gist.Content,
