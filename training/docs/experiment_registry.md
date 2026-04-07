@@ -869,8 +869,22 @@ Rotation parameter overhead per layer (rank=64):
 - **Config:** Same as EXP-20b except: LR 1e-4 (lower for continuation), 1000 steps max, patience 3, resume from EXP-20b best_spokes.pt
 - **Data:** v6 dataset re-tokenized with EOS token appended (4,254 train / 472 eval, finetune_gemma4_v6_eos/)
 - **Hardware:** Same MI300X droplet
-- **Result:** Best eval loss **0.6080** (PPL 1.8) at step 400. Early stopped at step 900 (5/3 patience). Init eval 0.6167 → final eval 0.6084. Train loss stable at 0.51 throughout (already converged from EXP-20b). Training time: 19 min. wandb: [exp20b_eos_fix_mi300x](https://wandb.ai/appsprout/mnemonic-lm/runs/fnyv9g2c)
-- **Verdict:** (pending stress test — expecting same 6/7 with clean EOS termination)
+- **Result:** Best eval loss **0.6080** (PPL 1.8) at step 400. Early stopped at step 900 (5/3 patience). Stress test: **3/7** — model learned to stop too early, producing truncated JSON (content: N/A on most tests). wandb: [exp20b_eos_fix_mi300x](https://wandb.ai/appsprout/mnemonic-lm/runs/fnyv9g2c)
+- **Verdict:** REFUTED — Continuation fine-tuning for EOS degraded output quality from 6/7 to 3/7. The model learned "stop quickly" instead of "stop after complete JSON." EOS behavior requires training from scratch on corrected data. See EXP-20d.
+
+### EXP-20d: MI300X Full Retrain with EOS-Fixed Data — Gemma 4 E2B
+
+- **Date:** 2026-04-07
+- **Status:** COMPLETED
+- **Hypothesis:** Training from scratch on EOS-corrected v6 data will produce a model that both generates complete encodings AND terminates cleanly, matching EXP-20b quality while fixing the generation termination bug.
+- **Variable:** Training data EOS token (missing → present). Full retrain from scratch (not continuation).
+- **Control:** EXP-20b (same architecture, same data without EOS, 6/7 stress test)
+- **Prediction:** Stress test 6/7+ with clean JSON termination. Eval loss within 5% of 0.6082.
+- **Config:** Same as EXP-20b. LR 3e-4, batch 8, grad_accum 2, 8 epochs, patience 5, eval_interval 100.
+- **Data:** v6 dataset re-tokenized with EOS token appended (4,254 train / 472 eval, finetune_gemma4_v6_eos/). All examples verified to end with EOS token (including 12 truncated examples).
+- **Hardware:** Same MI300X droplet
+- **Result:** Best eval loss **0.6072** (PPL 1.8) at step 3200 — best ever across all experiments. Early stopped at step 3700. Stress test: **5/7**. Test 4 (stack trace) now PASSES (was the persistent failure in all prior runs). But Test 2 (dense numbers) and Test 6 (foreign language) regressed to FAIL with content: N/A — model stops before filling detail fields on dense inputs. wandb: [exp20d_eos_retrain_mi300x_b8x2](https://wandb.ai/appsprout/mnemonic-lm/runs/08ov99fd)
+- **Verdict:** PARTIAL — Best eval loss ever (0.6072). EOS termination works. But 5/7 stress test (down from 20b's 6/7). The EOS token causes premature stopping on dense inputs. Root cause: training data detail fields may be too short for dense inputs, teaching the model to truncate. Neither 20b (6/7, no EOS) nor 20d (5/7, with EOS) is clearly superior. Next step: improve training data for dense-content examples.
 
 ### EXP-21: MI300X Bottleneck Rotation — Gemma 4 E2B + V6 Dataset
 
