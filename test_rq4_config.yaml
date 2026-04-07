@@ -1,0 +1,30 @@
+# Test config for RQ4 Gemma 4 E2B lifecycle test
+# Points to llama-server on port 8899 running gemma4-e2b-spokes-rq4-v4.gguf
+
+projects:
+  - name: "mnemonic"
+    paths:
+      - "~/Projects/mem"
+
+embedding:
+  provider: hugot
+
+llm:
+  provider: "api"
+  endpoint: "http://localhost:8899/v1"
+  chat_model: "gemma4-e2b-spokes-rq4"
+  embedding_model: "gemma4-e2b-spokes-rq4"
+  max_tokens: 2500
+  temperature: 0.1
+  timeout_sec: 120
+  max_concurrent: 1
+
+api:
+  host: "127.0.0.1"
+  port: 9998
+
+web:
+  enabled: false
+
+logging:
+  level: "info"
