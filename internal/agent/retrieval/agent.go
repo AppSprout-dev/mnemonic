@@ -131,7 +131,6 @@ func DefaultConfig() RetrievalConfig {
 	}
 }
 
-
 // QueryRequest is the input for a retrieval query.
 type QueryRequest struct {
 	Query               string
@@ -317,6 +316,32 @@ func (ra *RetrievalAgent) Query(ctx context.Context, req QueryRequest) (QueryRes
 		}
 	}
 
+	// Step 3c: When type filter is set, fetch memories of that type as entry points
+	// so they participate in spread activation rather than being silently dropped
+	var typeResults []store.Memory
+	if req.Type != "" {
+		var typeList []string
+		if strings.Contains(req.Type, ",") {
+			typeList = strings.Split(req.Type, ",")
+		} else {
+			typeList = []string{req.Type}
+		}
+		// Use a larger candidate pool for type search — like FTS and embedding
+		// searches, this is a candidate fetch, not a final output limit.
+		// Without this, memories with slightly decayed salience get cut before
+		// they can participate in scoring.
+		typeFetchLimit := maxResults * 3
+		if typeFetchLimit < 20 {
+			typeFetchLimit = 20
+		}
+		typeResults, err = ra.store.SearchByType(ctx, typeList, typeFetchLimit)
+		if err != nil {
+			ra.log.Warn("type search failed", "query_id", queryID, "error", err)
+		} else {
+			ra.log.Debug("type search completed", "query_id", queryID, "types", typeList, "results_count", len(typeResults))
+		}
+	}
+
 	// Step 4: Merge and deduplicate entry points
 	entryPoints := ra.mergeEntryPoints(ftsResults, embeddingResults)
 
@@ -328,14 +353,27 @@ func (ra *RetrievalAgent) Query(ctx context.Context, req QueryRequest) (QueryRes
 			entryPoints[mem.ID] = timeBase + timeSalWt*mem.Salience
 		}
 	}
+
+	// Inject type-filtered results as entry points with a high base score.
+	// Use max to ensure the type score overrides a lower FTS/embedding score —
+	// otherwise, a type-filtered memory found by FTS with a low rank gets stuck
+	// at the FTS score and never benefits from its high type-filter entry weight.
+	for _, mem := range typeResults {
+		score := float32(0.5) + float32(0.3)*mem.Salience
+		if existing, ok := entryPoints[mem.ID]; !ok || score > existing {
+			entryPoints[mem.ID] = score
+		}
+	}
 	ra.log.Debug("entry points merged and deduplicated", "query_id", queryID, "entry_points_count", len(entryPoints))
 
 	// Step 5: Spread activation across the association graph
 	activated, traversedAssocs := ra.spreadActivation(ctx, entryPoints)
 	ra.log.Debug("spread activation completed", "query_id", queryID, "activated_memories_count", len(activated), "traversals", len(traversedAssocs))
 
-	// Step 6: Rank results by combined score
-	ranked := ra.rankResults(ctx, activated, req.IncludeReasoning)
+	// Step 6: Rank results by combined score.
+	// When a type filter is active, disable the activity bonus — within a type,
+	// accumulated traversal count correlates with age, not relevance.
+	ranked := ra.rankResults(ctx, activated, req.IncludeReasoning, req.Type != "")
 
 	// Step 7: Apply filters (project, time, source, state, salience)
 	if req.Project != "" || !req.TimeFrom.IsZero() || !req.TimeTo.IsZero() || req.Source != "" || req.State != "" || req.Type != "" || req.MinSalience > 0 {
@@ -347,8 +385,13 @@ func (ra *RetrievalAgent) Query(ctx context.Context, req QueryRequest) (QueryRes
 		ranked = ranked[:maxResults]
 	}
 
-	// Step 8b: Apply MMR diversity filter to reduce near-duplicate results
-	ranked = ra.applyDiversityFilter(ranked)
+	// Step 8b: Apply MMR diversity filter to reduce near-duplicate results.
+	// Skip when an explicit type filter is set — the user asked for memories
+	// of a specific type, so we should not drop them as "near-duplicates"
+	// (e.g. handoffs all have similar structure but distinct content).
+	if req.Type == "" {
+		ranked = ra.applyDiversityFilter(ranked)
+	}
 
 	// Step 9: Side effect - increment access counts for returned memories
 	for _, result := range ranked {
@@ -616,7 +659,9 @@ func (ra *RetrievalAgent) spreadActivation(ctx context.Context, entryPoints map[
 }
 
 // rankResults sorts activated memories by a combined score and prepares results.
-func (ra *RetrievalAgent) rankResults(ctx context.Context, activated map[string]activationState, includeReasoning bool) []store.RetrievalResult {
+// When typeFiltered is true, the activity bonus is suppressed — within a single
+// memory type, accumulated traversal count correlates with age rather than relevance.
+func (ra *RetrievalAgent) rankResults(ctx context.Context, activated map[string]activationState, includeReasoning bool, typeFiltered bool) []store.RetrievalResult {
 	type scoredMemory struct {
 		mem            store.Memory
 		activation     float32
@@ -652,21 +697,24 @@ func (ra *RetrievalAgent) rankResults(ctx context.Context, activated map[string]
 			continue
 		}
 
-		// Calculate recency bonus — use CreatedAt for never-accessed memories
-		var daysSinceAccess float32
-		if mem.LastAccessed.IsZero() {
-			daysSinceAccess = float32(time.Since(mem.CreatedAt).Hours() / 24)
-		} else {
-			daysSinceAccess = float32(time.Since(mem.LastAccessed).Hours() / 24)
-		}
+		// Calculate recency bonus based on creation time.
+		// Using CreatedAt (not LastAccessed) prevents a feedback loop where
+		// frequently-recalled memories continually reset their recency bonus
+		// via IncrementAccess. The activity bonus already rewards frequent access.
+		daysSinceCreated := float32(time.Since(mem.CreatedAt).Hours() / 24)
 		recencyWt := agentutil.Float32Or(ra.config.RecencyBoostWeight, 0.2)
 		recencyHL := agentutil.Float32Or(ra.config.RecencyHalfLifeDays, 30)
-		recencyBonus := recencyWt * float32(math.Exp(float64(-daysSinceAccess/recencyHL)))
+		recencyBonus := recencyWt * float32(math.Exp(float64(-daysSinceCreated/recencyHL)))
 
-		// Hebbian activity bonus — frequently traversed associations indicate relevance
-		actMax := float64(agentutil.Float32Or(ra.config.ActivityBonusMax, 0.2))
-		actScale := float64(agentutil.Float32Or(ra.config.ActivityBonusScale, 0.02))
-		activityBonus := float32(math.Min(actMax, actScale*math.Log1p(float64(state.activationCount))))
+		// Hebbian activity bonus — frequently traversed associations indicate relevance.
+		// Suppressed for type-filtered queries where traversal count correlates with
+		// age (older memories accumulate more traversals) rather than relevance.
+		var activityBonus float32
+		if !typeFiltered {
+			actMax := float64(agentutil.Float32Or(ra.config.ActivityBonusMax, 0.2))
+			actScale := float64(agentutil.Float32Or(ra.config.ActivityBonusScale, 0.02))
+			activityBonus = float32(math.Min(actMax, actScale*math.Log1p(float64(state.activationCount))))
+		}
 
 		// Context boost from recent watcher activity (only for eligible sources)
 		var contextBoost float32
@@ -729,9 +777,20 @@ func (ra *RetrievalAgent) rankResults(ctx context.Context, activated map[string]
 		})
 	}
 
-	// Sort by final score descending
+	// Sort by final score descending; break near-ties by creation time (newest first).
+	// When scores are within a negligible epsilon, the most recently created memory
+	// surfaces first — critical for type-filtered queries where all candidates share
+	// similar activation/salience profiles (e.g. handoffs).
+	const scoreTieEpsilon float32 = 0.001
 	sort.Slice(scored, func(i, j int) bool {
-		return scored[i].finalScore > scored[j].finalScore
+		diff := scored[i].finalScore - scored[j].finalScore
+		if diff > scoreTieEpsilon {
+			return true
+		}
+		if diff < -scoreTieEpsilon {
+			return false
+		}
+		return scored[i].mem.CreatedAt.After(scored[j].mem.CreatedAt)
 	})
 
 	// Build results from already-fetched memories
@@ -1199,7 +1258,6 @@ func hasAnyConcept(memoryConcepts, excluded []string) bool {
 	}
 	return false
 }
-
 
 // applyDiversityFilter reranks results using Maximal Marginal Relevance (MMR).
 // It iteratively selects results that balance relevance (original score) against

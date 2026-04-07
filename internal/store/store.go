@@ -454,6 +454,7 @@ type SearchStore interface {
 	SearchByEntity(ctx context.Context, name string, entityType string, limit int) ([]Memory, error)
 	ListMemoriesByTimeRange(ctx context.Context, from, to time.Time, limit int) ([]Memory, error)
 	ListMemoriesBySession(ctx context.Context, sessionID string) ([]Memory, error)
+	SearchByType(ctx context.Context, types []string, limit int) ([]Memory, error)
 	GetProjectSummary(ctx context.Context, project string) (map[string]interface{}, error)
 	ListProjects(ctx context.Context) ([]string, error)
 }
