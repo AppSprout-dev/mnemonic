@@ -195,6 +195,12 @@ def train(args):
     extra_kwargs = {}
     if model_type == "qwen":
         extra_kwargs["attn_implementation"] = "eager"  # Flash attention may not work with hooks
+    if model_type == "gemma" and not args.gradient_checkpointing:
+        # No gradient checkpointing implies high-VRAM hardware — skip NF4 and PLE offload
+        extra_kwargs["no_quantize"] = True
+        extra_kwargs["offload_ple"] = False
+    if model_type == "gemma":
+        extra_kwargs["attn_implementation"] = "sdpa"  # Memory-efficient attention (no materialized scores)
     model = ModelClass.from_pretrained(
         args.base_model,
         spoke_config=spoke_config,
@@ -326,6 +332,38 @@ def train(args):
     print(f"  LR:             {args.lr} (scalars at {args.lr * args.scalar_lr_scale})")
     print(f"  LR schedule:    cosine decay to {args.lr * 0.1}")
 
+    # wandb
+    if not args.no_wandb:
+        import wandb
+
+        run_name = args.wandb_name or f"spokes_{Path(args.train_data).parent.name}_b{args.batch_size}x{args.grad_accum}"
+        wandb.init(
+            project="mnemonic-lm",
+            name=run_name,
+            config={
+                "task": "spoke_training",
+                "base_model": args.base_model,
+                "num_spokes": args.num_spokes,
+                "spoke_rank": args.spoke_rank,
+                "rotation": args.rotation,
+                "bottleneck_rotation": args.bottleneck_rotation,
+                "lr": args.lr,
+                "scalar_lr_scale": args.scalar_lr_scale,
+                "batch_size": args.batch_size,
+                "grad_accum": args.grad_accum,
+                "effective_batch": args.batch_size * args.grad_accum,
+                "seq_len": args.seq_len,
+                "epochs": args.epochs,
+                "total_steps": total_steps,
+                "opt_steps": opt_steps,
+                "warmup_steps": warmup_steps,
+                "use_muon": args.use_muon,
+                "gradient_checkpointing": args.gradient_checkpointing,
+                "train_examples": len(train_data),
+                "eval_examples": len(eval_data),
+            },
+        )
+
     # Checkpoint dir
     ckpt_dir = Path(args.checkpoint_dir)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -430,6 +468,16 @@ def train(args):
                     f"lr {lr:.2e} | {steps_sec:.1f} steps/s"
                 )
 
+                if not args.no_wandb:
+                    import wandb
+                    wandb.log({
+                        "train/loss": avg_recent,
+                        "train/ppl": ppl,
+                        "train/lr": lr,
+                        "train/steps_per_sec": steps_sec,
+                        "train/epoch": epoch,
+                    }, step=global_step)
+
             # Gate monitoring (spoke diagnostic)
             if global_step % (args.log_interval * 10) == 0:
                 gates = []
@@ -443,6 +491,18 @@ def train(args):
                 eval_loss = evaluate(model, eval_loader, device)
                 eval_ppl = math.exp(min(eval_loss, 100))
                 print(f"\n  >> Eval step {global_step}: loss={eval_loss:.4f}, PPL={eval_ppl:.1f}")
+
+                if not args.no_wandb:
+                    import wandb
+                    eval_log = {
+                        "eval/loss": eval_loss,
+                        "eval/ppl": eval_ppl,
+                    }
+                    # Log gate values per layer
+                    for key in sorted(model.spokes.keys(), key=int):
+                        g = torch.sigmoid(model.spokes[key].gate_bias).item()
+                        eval_log[f"gates/layer_{int(key)}"] = g
+                    wandb.log(eval_log, step=global_step)
 
                 # Early stopping check
                 if eval_loss < best_eval_loss:
@@ -534,6 +594,19 @@ def train(args):
         g = torch.sigmoid(model.spokes[key].gate_bias).item()
         print(f"    Layer {int(key):2d}: {g:.4f}")
 
+    # Finish wandb
+    if not args.no_wandb:
+        import wandb
+        wandb.log({
+            "final/eval_loss": eval_loss,
+            "final/eval_ppl": eval_ppl,
+            "final/best_eval_loss": best_eval_loss,
+            "final/init_eval_loss": init_eval_loss,
+            "final/total_steps": global_step,
+            "final/train_time_hours": total_time / 3600,
+        })
+        wandb.finish()
+
     model.remove_hooks()
 
 
@@ -589,6 +662,10 @@ def main():
     parser.add_argument("--checkpoint-dir", default="checkpoints/qwen_spokes")
     parser.add_argument("--resume", type=str, default=None, help="Resume from checkpoint")
 
+    # Logging
+    parser.add_argument("--wandb-name", type=str, default=None, help="Wandb run name (default: auto-generated)")
+    parser.add_argument("--no-wandb", action="store_true", help="Disable wandb logging")
+
     # Modes
     parser.add_argument("--smoke-test", action="store_true", help="Run 100 steps only")
     parser.add_argument("--device", default="auto")
@@ -603,7 +680,8 @@ def main():
         args.eval_interval = 50
         args.log_interval = 5
         args.checkpoint_dir = "checkpoints/qwen_spokes_smoke"
-        print("=== SMOKE TEST MODE (100 steps) ===\n")
+        args.no_wandb = True
+        print("=== SMOKE TEST MODE (100 steps, no wandb) ===\n")
 
     train(args)
 

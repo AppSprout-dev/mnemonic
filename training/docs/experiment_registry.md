@@ -855,7 +855,22 @@ Rotation parameter overhead per layer (rank=64):
 - **Data:** v6 dataset re-tokenized for Gemma (4,254 train / 472 eval). Tokenized with google/gemma-4-E2B-it chat template.
 - **Hardware:** DigitalOcean MI300X droplet, 192GB HBM3e, ROCm 7.2, Ubuntu 24.04
 - **Result:** Best eval loss **0.6082** (PPL 1.8) at step 3700. Early stopped at step 4200 (5/5 patience). Init eval 1.2030 → final eval 0.6092. Train loss first 100: 1.1938, last 100: 0.5142. Gates: monotonic 0.12 (layer 0) → 0.88 (layer 34). Training time: 1.5h at 0.8 steps/s. wandb: [exp20_gemma4_v6_mi300x_b8x2](https://wandb.ai/appsprout/mnemonic-lm/runs/zgsbijbt)
-- **Verdict:** (pending stress test)
+- **Stress test:** **6/7** — best score ever (Qwen was 5/7). Only failure: Test 4 (stack trace) missing `agent.go:89` but preserved `spread.go:142` and `spreadActivation`. Note: initial stress test runs showed 1-2/7 due to JSON parsing bug (model generates valid JSON then continues with extra objects; parser needed brace-depth extraction). Fixed parser, re-ran, got 6/7. Also discovered training data lacked EOS token — model doesn't learn to stop generating. See EXP-20c for EOS fix.
+- **Verdict:** CONFIRMED — Gemma 4 E2B spokes achieve 6/7 stress test (best ever), eval loss 0.6082. Training data EOS bug identified and fixed in EXP-20c.
+
+### EXP-20c: MI300X EOS Fix Continuation — Gemma 4 E2B
+
+- **Date:** 2026-04-07
+- **Status:** REGISTERED
+- **Hypothesis:** Resuming from EXP-20b checkpoint on EOS-corrected training data (EOS token appended after closing brace) will teach the model to stop generating after producing the JSON object, without degrading encoding quality.
+- **Variable:** Training data EOS token (missing → present). Resume from EXP-20b best checkpoint.
+- **Control:** EXP-20b (same data without EOS, same checkpoint)
+- **Prediction:** Eval loss stays within 5% of 0.6082. Model stops generating after `}` + EOS instead of continuing with extra JSON objects.
+- **Config:** Same as EXP-20b except: LR 1e-4 (lower for continuation), 1000 steps max, patience 3, resume from EXP-20b best_spokes.pt
+- **Data:** v6 dataset re-tokenized with EOS token appended (4,254 train / 472 eval, finetune_gemma4_v6_eos/)
+- **Hardware:** Same MI300X droplet
+- **Result:** Best eval loss **0.6080** (PPL 1.8) at step 400. Early stopped at step 900 (5/3 patience). Init eval 0.6167 → final eval 0.6084. Train loss stable at 0.51 throughout (already converged from EXP-20b). Training time: 19 min. wandb: [exp20b_eos_fix_mi300x](https://wandb.ai/appsprout/mnemonic-lm/runs/fnyv9g2c)
+- **Verdict:** (pending stress test — expecting same 6/7 with clean EOS termination)
 
 ### EXP-21: MI300X Bottleneck Rotation — Gemma 4 E2B + V6 Dataset
 
@@ -882,8 +897,8 @@ Rotation parameter overhead per layer (rank=64):
 - **Config:** Gemma 4 E2B (frozen, bf16, SDPA) + 4 spokes rank 64 on all 35 layers, batch 8, grad_accum 2, seq_len 2048, LR 3e-4, scalar_lr_scale=0.1, Muon + AdamW, 20 epochs (small dataset needs more passes), patience 5, eval_interval 20
 - **Data:** 176 train / 19 eval synthesis examples (from Gemini distillation). Tokenized with Gemma-4-E2B-it template.
 - **Hardware:** Same MI300X droplet as EXP-20
-- **Result:** (pending)
-- **Verdict:** (pending)
+- **Result:** Best eval loss **0.8105** (PPL 2.2) at step 440. Ran all 20 epochs, no early stop. Init eval 1.4062 → final eval 0.8105. Train loss last 100: 0.6624 (overfitting gap: 0.15). Training time: 8 min. wandb: [exp23_synthesis_mi300x](https://wandb.ai/appsprout/mnemonic-lm/runs/83noraot)
+- **Verdict:** CONFIRMED (proof-of-concept) — Spokes can learn synthesis task. Eval loss dropped 42% from init. Train/eval gap confirms overfitting on 176 examples. Need more synthesis data for production quality.
 
 ### EXP-24: MI300X Multi-Task Spoke — Encoding + Synthesis
 
@@ -896,8 +911,8 @@ Rotation parameter overhead per layer (rank=64):
 - **Config:** Gemma 4 E2B (frozen, bf16, SDPA) + 4 spokes rank 64 on all 35 layers, batch 8, grad_accum 2, seq_len 2048, LR 3e-4, scalar_lr_scale=0.1, Muon + AdamW, 8 epochs, patience 5, eval_interval 100
 - **Data:** 5,663 train / 627 eval (4,254 encoding v6 + 1,233 distillation encoding + 176 synthesis). Tokenized with Gemma-4-E2B-it template.
 - **Hardware:** Same MI300X droplet as EXP-20
-- **Result:** (pending)
-- **Verdict:** (pending)
+- **Result:** Best eval loss **0.6291** (PPL 1.9) at step 3500. Early stopped at step 4000 (5/5 patience). Init eval 1.2384 → final eval 0.6292. Train loss first 100: 1.2348, last 100: 0.5459. Gates: monotonic 0.12 → 0.88, no task-dependent differentiation observed. Training time: 1.5h at 0.8 steps/s. wandb: [exp24_multitask_mi300x_b8x2](https://wandb.ai/appsprout/mnemonic-lm/runs/lccknju8)
+- **Verdict:** CONFIRMED — Mixed encoding + synthesis training produces eval loss within 3.4% of encoding-only EXP-20 (0.6291 vs 0.6082), inside the 5% prediction. Adding synthesis + distillation data did not degrade encoding quality. Gates did not differentiate by task — same depth-weighted pattern as single-task runs. Synthesis quality pending manual inspection / stress test.
 
 ### EXP-22: TurboQuant KV Cache Compression — Phase 1 (Prompt Cache)
 
@@ -907,7 +922,7 @@ Rotation parameter overhead per layer (rank=64):
 - **Variable:** Prompt cache storage format (uncompressed fp16 → TurboQuant compressed, per-layer, K=3-bit V=4-bit)
 - **Control:** Current llama-server prompt cache (fp16, no compression). Lifecycle test baseline: 62 prompts = 4,718 MiB.
 - **Prediction:** Prompt cache VRAM reduced to ~1,100 MiB for same 62 prompts. Cache hit latency increases <5ms (decompress overhead). Encoding quality unchanged (compression only affects cached state, not active generation). No lifecycle test assertion regressions.
-- **Config:** llama.cpp fork, Qwen 3.5 2B + spokes GGUF, RX 7800 XT. Integration via per-layer compress on cache save, decompress on cache load in server-context.cpp.
+- **Config:** llama.cpp fork, Gemma 4 E2B + spokes GGUF (primary) or Qwen 3.5 2B + spokes GGUF (fallback), RX 7800 XT. Integration via per-layer compress on cache save, decompress on cache load in server-context.cpp. Note: Gemma spoke GGUF export requires llama.cpp Gemma3 spoke support (not yet implemented). TurboQuant implementation is model-agnostic (operates on KV tensors regardless of architecture).
 - **Metrics:** VRAM usage (prompt cache), cache hit latency, lifecycle test pass/fail, encoding cosine similarity vs uncompressed baseline.
 - **Result:** (pending)
 - **Verdict:** (pending)
