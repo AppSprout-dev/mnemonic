@@ -275,6 +275,9 @@ func (MockStore) ListMemoriesByTimeRange(context.Context, time.Time, time.Time, 
 func (MockStore) ListMemoriesBySession(context.Context, string) ([]store.Memory, error) {
 	return nil, nil
 }
+func (MockStore) SearchByType(context.Context, []string, int) ([]store.Memory, error) {
+	return nil, nil
+}
 func (MockStore) GetProjectSummary(context.Context, string) (map[string]interface{}, error) {
 	return nil, nil
 }

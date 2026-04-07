@@ -2232,9 +2232,11 @@ func (s *SQLiteStore) PruneOldFeedback(ctx context.Context, olderThan time.Durat
 	return int(rows), nil
 }
 
-// GetMemoryFeedbackScores computes a normalized feedback score for each memory ID
+// GetMemoryFeedbackScores computes a time-weighted feedback score for each memory ID
 // by scanning retrieval_feedback rows where the memory appears in retrieved_memory_ids.
-// "helpful" = +1, "irrelevant" = -1, "partial" = 0. Returns sum/count per memory.
+// "helpful" = +1, "irrelevant" = -1, "partial" = 0. Recent feedback is weighted more
+// heavily than old feedback using exponential decay (30-day half-life), preventing
+// ancient feedback from permanently dominating newer memories' ranking.
 func (s *SQLiteStore) GetMemoryFeedbackScores(ctx context.Context, memoryIDs []string) (map[string]float32, error) {
 	if len(memoryIDs) == 0 {
 		return nil, nil
@@ -2246,27 +2248,31 @@ func (s *SQLiteStore) GetMemoryFeedbackScores(ctx context.Context, memoryIDs []s
 		targetSet[id] = true
 	}
 
-	// Query all feedback rows that have a non-empty feedback rating
+	// Query all feedback rows with their timestamps for time-weighted scoring
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT retrieved_memory_ids, feedback FROM retrieval_feedback WHERE feedback != '' AND feedback IS NOT NULL`)
+		`SELECT retrieved_memory_ids, feedback, created_at FROM retrieval_feedback WHERE feedback != '' AND feedback IS NOT NULL`)
 	if err != nil {
 		return nil, fmt.Errorf("querying retrieval feedback scores: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
 	type accumulator struct {
-		sum   float32
-		count int
+		weightedSum float64
+		weightSum   float64
 	}
 	accum := make(map[string]*accumulator)
 
+	const feedbackHalfLifeDays = 30.0
+	now := time.Now()
+
 	for rows.Next() {
 		var idsJSON, feedback string
-		if err := rows.Scan(&idsJSON, &feedback); err != nil {
+		var createdAtStr sql.NullString
+		if err := rows.Scan(&idsJSON, &feedback, &createdAtStr); err != nil {
 			return nil, fmt.Errorf("scanning retrieval feedback row: %w", err)
 		}
 
-		var feedbackScore float32
+		var feedbackScore float64
 		switch feedback {
 		case "helpful":
 			feedbackScore = 1.0
@@ -2276,6 +2282,15 @@ func (s *SQLiteStore) GetMemoryFeedbackScores(ctx context.Context, memoryIDs []s
 			feedbackScore = 0.0
 		default:
 			continue
+		}
+
+		// Calculate time-decay weight: recent feedback counts more
+		weight := 1.0
+		if createdAtStr.Valid && createdAtStr.String != "" {
+			if t, err := time.Parse(time.RFC3339, createdAtStr.String); err == nil {
+				daysSince := now.Sub(t).Hours() / 24
+				weight = math.Exp(-daysSince / feedbackHalfLifeDays)
+			}
 		}
 
 		var retrievedIDs []string
@@ -2288,18 +2303,20 @@ func (s *SQLiteStore) GetMemoryFeedbackScores(ctx context.Context, memoryIDs []s
 			if accum[memID] == nil {
 				accum[memID] = &accumulator{}
 			}
-			accum[memID].sum += feedbackScore
-			accum[memID].count++
+			accum[memID].weightedSum += feedbackScore * weight
+			accum[memID].weightSum += weight
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterating retrieval feedback rows: %w", err)
 	}
 
-	// Normalize: sum / count
+	// Normalize: weightedSum / weightSum (weighted average, preserves [-1, 1] range)
 	result := make(map[string]float32, len(accum))
 	for memID, a := range accum {
-		result[memID] = a.sum / float32(a.count)
+		if a.weightSum > 0 {
+			result[memID] = float32(a.weightedSum / a.weightSum)
+		}
 	}
 	return result, nil
 }
@@ -2593,7 +2610,6 @@ func boolToInt(b bool) int {
 	}
 	return 0
 }
-
 
 // --- MCP tool usage tracking ---
 
