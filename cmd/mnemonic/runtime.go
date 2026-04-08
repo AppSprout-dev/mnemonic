@@ -187,9 +187,26 @@ func buildEncodingConfig(cfg *config.Config) encoding.EncodingConfig {
 	}
 }
 
+// newAPIProvider creates an API-based LLM provider from config.
+func newAPIProvider(cfg *config.Config) llm.Provider {
+	timeout := time.Duration(cfg.LLM.TimeoutSec) * time.Second
+	if timeout == 0 {
+		timeout = 30 * time.Second
+	}
+	return llm.NewLMStudioProvider(
+		cfg.LLM.Endpoint,
+		cfg.LLM.ChatModel,
+		cfg.LLM.EmbeddingModel,
+		cfg.LLM.APIKey,
+		timeout,
+		cfg.LLM.MaxConcurrent,
+	)
+}
+
 // newLLMProvider creates the appropriate LLM provider based on config.
 // For "api" (default), it creates an LMStudioProvider for OpenAI-compatible APIs.
-// For "embedded", it creates an EmbeddedProvider for in-process llama.cpp inference.
+// For "embedded", it creates a SwitchableProvider with embedded as primary
+// and API as a fallback that can be toggled at runtime.
 func newLLMProvider(cfg *config.Config) llm.Provider {
 	switch cfg.LLM.Provider {
 	case "embedded":
@@ -215,19 +232,15 @@ func newLLMProvider(cfg *config.Config) llm.Provider {
 		} else {
 			slog.Warn("embedded provider selected but llama.cpp not compiled in (build with: make build-embedded)")
 		}
-		return ep
-	default: // "api" or ""
-		timeout := time.Duration(cfg.LLM.TimeoutSec) * time.Second
-		if timeout == 0 {
-			timeout = 30 * time.Second
+
+		// Create API provider as runtime fallback (Gemini, etc.)
+		var apiProvider llm.Provider
+		if cfg.LLM.Endpoint != "" {
+			apiProvider = newAPIProvider(cfg)
 		}
-		return llm.NewLMStudioProvider(
-			cfg.LLM.Endpoint,
-			cfg.LLM.ChatModel,
-			cfg.LLM.EmbeddingModel,
-			cfg.LLM.APIKey,
-			timeout,
-			cfg.LLM.MaxConcurrent,
-		)
+
+		return llm.NewSwitchableProvider(ep, apiProvider, cfg.LLM.ChatModel)
+	default: // "api" or ""
+		return newAPIProvider(cfg)
 	}
 }

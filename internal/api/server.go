@@ -30,6 +30,7 @@ type ServerConfig struct {
 type ServerDeps struct {
 	Store                 store.Store
 	LLM                   llm.Provider
+	ModelManager          llm.ModelManager        // can be nil if not using embedded provider
 	Bus                   events.Bus
 	Retriever             *retrieval.RetrievalAgent
 	Consolidator          routes.ConsolidationRunner // can be nil if disabled
@@ -131,6 +132,11 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("PATCH /api/v1/patterns/{id}", routes.HandleArchivePattern(s.deps.Store, s.deps.Log))
 	s.mux.HandleFunc("GET /api/v1/abstractions", routes.HandleListAbstractions(s.deps.Store, s.deps.Log))
 	s.mux.HandleFunc("GET /api/v1/projects", routes.HandleListProjects(s.deps.Store, s.deps.Log))
+
+	// Model management (control center)
+	s.mux.HandleFunc("GET /api/v1/models", routes.HandleListModels(s.deps.ModelManager, s.deps.Log))
+	s.mux.HandleFunc("GET /api/v1/models/active", routes.HandleActiveModel(s.deps.ModelManager, s.deps.Log))
+	s.mux.HandleFunc("POST /api/v1/models/active", routes.HandleSwapModel(s.deps.ModelManager, s.deps.Log))
 
 	// LLM usage monitoring
 	s.mux.HandleFunc("GET /api/v1/llm/usage", routes.HandleLLMUsage(s.deps.Store, s.deps.Log))

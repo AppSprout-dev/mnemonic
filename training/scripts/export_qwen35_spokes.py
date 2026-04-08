@@ -154,6 +154,37 @@ def main():
         for layer_idx in norm_layers:
             spoke_tensors[f"blk.{layer_idx}.spoke.norm.weight"] = torch.ones(d_model, dtype=torch.float32)
 
+    # Build fused spoke matrices for fewer GPU kernel launches
+    # w_down_fused = cat([w_down[0], ..., w_down[n-1]], dim=0) -> (rank*n_spokes, d_model)
+    # w_up_fused   = cat([w_up[0],   ..., w_up[n-1]],   dim=1) -> (d_model, rank*n_spokes)
+    n_spokes = spoke_config.num_spokes
+    fused_count = 0
+    for layer_idx in sorted(norm_layers):
+        w_downs = []
+        w_ups = []
+        for s in range(n_spokes):
+            down_key = f"blk.{layer_idx}.spoke.w_down.{s}.weight"
+            up_key = f"blk.{layer_idx}.spoke.w_up.{s}.weight"
+            if down_key in spoke_tensors and up_key in spoke_tensors:
+                w_downs.append(spoke_tensors[down_key])
+                w_ups.append(spoke_tensors[up_key])
+
+        if len(w_downs) == n_spokes:
+            # w_down[s] shape: (rank, d_model) -> concat along dim 0 -> (rank*n_spokes, d_model)
+            w_down_fused = torch.cat(w_downs, dim=0)
+            # w_up[s] shape: (d_model, rank) -> concat along dim 1 -> (d_model, rank*n_spokes)
+            w_up_fused = torch.cat(w_ups, dim=1)
+            spoke_tensors[f"blk.{layer_idx}.spoke.w_down_fused.weight"] = w_down_fused
+            spoke_tensors[f"blk.{layer_idx}.spoke.w_up_fused.weight"] = w_up_fused
+            # Remove individual spoke tensors (fused replaces them)
+            for s in range(n_spokes):
+                spoke_tensors.pop(f"blk.{layer_idx}.spoke.w_down.{s}.weight", None)
+                spoke_tensors.pop(f"blk.{layer_idx}.spoke.w_up.{s}.weight", None)
+            fused_count += 1
+
+    if fused_count > 0:
+        print(f"  Created {fused_count} fused spoke matrix pairs (2 matmuls/layer instead of {2 * n_spokes})")
+
     print(f"  Prepared {len(spoke_tensors)} spoke tensors ({len(norm_layers)} layers)")
 
     # --- Phase 3: Copy base GGUF and patch with spokes ---

@@ -111,6 +111,28 @@ type Provider interface {
 	ModelInfo(ctx context.Context) (ModelMetadata, error)
 }
 
+// ModelManager is the interface for runtime model management.
+// Implemented by SwitchableProvider (embedded + API) or EmbeddedProvider alone.
+type ModelManager interface {
+	// ListAvailableModels returns models from the manifest.
+	ListAvailableModels() ([]AvailableModel, error)
+
+	// ActiveModel returns the currently loaded model status.
+	ActiveModel() ModelStatus
+
+	// SwapChatModel hot-swaps the chat model to a different GGUF file.
+	SwapChatModel(filename string) error
+
+	// SwapEmbedModel hot-swaps the embedding model. Empty string clears it.
+	SwapEmbedModel(filename string) error
+
+	// SetProviderMode switches between "embedded" and "api" at runtime.
+	SetProviderMode(mode string) error
+
+	// ProviderMode returns the current mode ("embedded" or "api").
+	ProviderMode() string
+}
+
 // ErrProviderUnavailable is returned when the LLM backend is not reachable.
 type ErrProviderUnavailable struct {
 	Endpoint string

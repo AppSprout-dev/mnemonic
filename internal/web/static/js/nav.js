@@ -18,7 +18,7 @@ export function switchView(name) {
     if (tab) tab.classList.add('active');
     window.location.hash = name;
     // Update breadcrumbs
-    var crumbMap = { recall: 'Search', explore: 'Forum', timeline: 'Timeline', agent: 'SDK', llm: 'LLM Usage', tools: 'Tools' };
+    var crumbMap = { recall: 'Search', explore: 'Forum', timeline: 'Timeline', agent: 'SDK', llm: 'LLM Usage', tools: 'Tools', models: 'Models' };
     var bc = document.getElementById('breadcrumbs');
     if (bc && crumbMap[name]) bc.innerHTML = '<a href="#" onclick="switchView(\'explore\')">mnemonic</a><span class="sep"> › </span>' + crumbMap[name];
     if (name === 'explore') {
@@ -30,6 +30,7 @@ export function switchView(name) {
     if (name === 'agent' && !state.agentLoaded) window.loadAgentData();
     if (name === 'llm' && !state.llmLoaded) window.loadLLMUsage();
     if (name === 'tools' && !state.toolsLoaded) window.loadToolUsage();
+    if (name === 'models' && !state.modelsLoaded) window.loadModels();
 }
 
 export function switchExploreTab(tab) {
@@ -67,7 +68,7 @@ export function handleHash() {
         if (catId) window.loadForumCategory(catId, catId);
         return;
     }
-    if (['recall', 'explore', 'timeline', 'agent', 'llm', 'tools'].includes(hash)) switchView(hash);
+    if (['recall', 'explore', 'timeline', 'agent', 'llm', 'tools', 'models'].includes(hash)) switchView(hash);
 }
 window.addEventListener('hashchange', handleHash);
 
@@ -84,6 +85,7 @@ document.addEventListener('keydown', function(e) {
         case '4': switchView('agent'); break;
         case '5': switchView('llm'); break;
         case '6': switchView('tools'); break;
+        case '7': switchView('models'); break;
     }
 });
 
