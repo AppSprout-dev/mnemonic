@@ -28,6 +28,7 @@ import { loadAgentData, refreshAgentData, renderAgentDashboard, sendChatMessage,
          toggleChatHistory, startNewConversation, onModelChange,
          checkForUpdate, triggerUpdate, renderMarkdown } from './agent.js';
 import { formatBytes } from './llm.js';
+import { loadModels, swapChatModel, swapEmbedModel, switchProviderMode } from './models.js';
 
 // ── Wire to window for HTML onclick handlers ──
 Object.assign(window, {
@@ -58,6 +59,8 @@ Object.assign(window, {
     loadAgentData, refreshAgentData, renderAgentDashboard, sendChatMessage,
     toggleChatHistory, startNewConversation, onModelChange,
     checkForUpdate, triggerUpdate,
+    // Models
+    loadModels, swapChatModel, swapEmbedModel, switchProviderMode,
     // Utils (used by some inline HTML)
     escapeHtml, showToast, relativeTime, simpleMarkdown, toggleToolDetail,
     agentProfile, memoryType, safeSalience, renderMarkdown, formatBytes,

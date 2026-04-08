@@ -56,6 +56,26 @@ type BackendCompletionResponse struct {
 	MinProb          float32 // minimum probability of any chosen token (0-1)
 }
 
+// AvailableModel describes a GGUF model available for loading.
+type AvailableModel struct {
+	Filename string `json:"filename"`
+	Path     string `json:"path"`
+	SizeMB   int64  `json:"size_mb"`
+	Role     string `json:"role,omitempty"`     // "chat" or "embedding"
+	Version  string `json:"version,omitempty"`  // model version
+	Quantize string `json:"quantize,omitempty"` // quantization type
+}
+
+// ModelStatus reports the currently loaded model state.
+type ModelStatus struct {
+	ChatModel  string `json:"chat_model"`
+	EmbedModel string `json:"embed_model"`
+	Loaded     bool   `json:"loaded"`
+	ModelsDir  string `json:"models_dir"`
+	Mode       string `json:"mode,omitempty"`      // "embedded" or "api"
+	APIModel   string `json:"api_model,omitempty"` // cloud model name when in API mode
+}
+
 // EmbeddedProvider implements the Provider interface using in-process inference
 // via a Backend (llama.cpp CGo bindings). This allows mnemonic to run its own
 // GGUF models without an external API server.
@@ -67,10 +87,11 @@ type EmbeddedProvider struct {
 	maxTokens      int
 	temperature    float32
 
-	mu           sync.RWMutex
-	chatBackend  Backend
-	embedBackend Backend
-	sem          chan struct{}
+	mu             sync.RWMutex
+	chatBackend    Backend
+	embedBackend   Backend
+	sem            chan struct{}
+	backendFactory func() Backend
 }
 
 // EmbeddedProviderConfig holds the configuration for creating an EmbeddedProvider.
@@ -117,9 +138,12 @@ func NewEmbeddedProvider(cfg EmbeddedProviderConfig) *EmbeddedProvider {
 
 // LoadModels loads the configured GGUF model files using the given backend factory.
 // backendFactory creates a new Backend instance for each model.
+// The factory is retained for later hot-swap operations.
 func (p *EmbeddedProvider) LoadModels(backendFactory func() Backend) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+
+	p.backendFactory = backendFactory
 
 	// Load chat model
 	chatPath := filepath.Join(p.modelsDir, p.chatModelFile)
@@ -167,18 +191,26 @@ func (p *EmbeddedProvider) release() {
 	<-p.sem
 }
 
-// formatPrompt converts a slice of Messages into a single prompt string.
-// Uses the Felix-LM fine-tuning format: <|system|>\n...\n<|user|>\n...\n<|assistant|>\n
+// formatPrompt converts a slice of Messages into a prompt string.
+// Uses ChatML format (Qwen 3.5, Gemma-it, etc.):
+//
+//	<|im_start|>system\n...<|im_end|>\n<|im_start|>user\n...<|im_end|>\n<|im_start|>assistant\n
+//
+// Appends /no_think to the system message to disable Qwen's thinking mode,
+// which interferes with GBNF grammar-constrained generation.
 func formatPrompt(messages []Message) string {
 	var b strings.Builder
 	for _, msg := range messages {
-		b.WriteString("<|")
+		b.WriteString("<|im_start|>")
 		b.WriteString(msg.Role)
-		b.WriteString("|>\n")
-		b.WriteString(msg.Content)
 		b.WriteByte('\n')
+		b.WriteString(msg.Content)
+		if msg.Role == "system" {
+			b.WriteString(" /no_think")
+		}
+		b.WriteString("<|im_end|>\n")
 	}
-	b.WriteString("<|assistant|>\n")
+	b.WriteString("<|im_start|>assistant\n")
 	return b.String()
 }
 
@@ -233,12 +265,25 @@ func (p *EmbeddedProvider) Complete(ctx context.Context, req CompletionRequest) 
 			"prompt_chars", len(prompt))
 	}
 
+	// Ensure <|im_end|> is a stop sequence so the model stops at turn boundary.
+	stop := req.Stop
+	hasIMEnd := false
+	for _, s := range stop {
+		if s == "<|im_end|>" {
+			hasIMEnd = true
+			break
+		}
+	}
+	if !hasIMEnd {
+		stop = append(stop, "<|im_end|>")
+	}
+
 	backendReq := BackendCompletionRequest{
 		Prompt:      prompt,
 		MaxTokens:   maxTokens,
 		Temperature: temp,
 		TopP:        req.TopP,
-		Stop:        req.Stop,
+		Stop:        stop,
 		Grammar:     grammar,
 	}
 
@@ -247,8 +292,11 @@ func (p *EmbeddedProvider) Complete(ctx context.Context, req CompletionRequest) 
 		return CompletionResponse{}, fmt.Errorf("embedded completion: %w", err)
 	}
 
+	// Strip Qwen-style <think>...</think> wrapper if present.
+	content := stripThinkingTokens(backendResp.Text)
+
 	return CompletionResponse{
-		Content:          backendResp.Text,
+		Content:          content,
 		StopReason:       "stop",
 		TokensUsed:       backendResp.PromptTokens + backendResp.CompletionTokens,
 		PromptTokens:     backendResp.PromptTokens,
@@ -332,6 +380,211 @@ func (p *EmbeddedProvider) ModelInfo(ctx context.Context) (ModelMetadata, error)
 		SupportsEmbedding: p.embedBackend != nil || p.embedModelFile == "",
 		MaxTokens:         p.maxTokens,
 	}, nil
+}
+
+// ListAvailableModels returns models registered in models.json.
+// Only curated, production-ready models appear — not every GGUF file on disk.
+func (p *EmbeddedProvider) ListAvailableModels() ([]AvailableModel, error) {
+	p.mu.RLock()
+	dir := p.modelsDir
+	p.mu.RUnlock()
+
+	manifest, err := LoadManifest(dir)
+	if err != nil {
+		return nil, fmt.Errorf("loading model manifest: %w", err)
+	}
+
+	var models []AvailableModel
+	for _, entry := range manifest.Models {
+		models = append(models, AvailableModel{
+			Filename: entry.Filename,
+			Path:     filepath.Join(dir, entry.Filename),
+			SizeMB:   entry.SizeBytes / (1024 * 1024),
+			Role:     entry.Role,
+			Version:  entry.Version,
+			Quantize: entry.Quantize,
+		})
+	}
+	return models, nil
+}
+
+// ActiveModel returns the currently loaded model status.
+func (p *EmbeddedProvider) ActiveModel() ModelStatus {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return ModelStatus{
+		ChatModel:  p.chatModelFile,
+		EmbedModel: p.embedModelFile,
+		Loaded:     p.chatBackend != nil,
+		ModelsDir:  p.modelsDir,
+	}
+}
+
+// SwapChatModel hot-swaps the chat model to a different GGUF file.
+// The old backend is closed after the new one is loaded successfully.
+func (p *EmbeddedProvider) SwapChatModel(filename string) error {
+	p.mu.RLock()
+	factory := p.backendFactory
+	dir := p.modelsDir
+	opts := p.opts
+	p.mu.RUnlock()
+
+	if factory == nil {
+		return fmt.Errorf("no backend factory configured — cannot swap models")
+	}
+
+	modelPath := filepath.Join(dir, filename)
+	if _, err := os.Stat(modelPath); err != nil {
+		return fmt.Errorf("model not found at %s: %w", modelPath, err)
+	}
+
+	// Load new model before acquiring write lock
+	newBackend := factory()
+	if err := newBackend.LoadModel(modelPath, opts); err != nil {
+		return fmt.Errorf("loading new chat model %s: %w", filename, err)
+	}
+	slog.Info("loaded new chat model for swap", "path", modelPath)
+
+	// Swap under write lock
+	p.mu.Lock()
+	oldBackend := p.chatBackend
+	p.chatBackend = newBackend
+	p.chatModelFile = filename
+	p.mu.Unlock()
+
+	// Close old backend outside the lock
+	if oldBackend != nil {
+		if err := oldBackend.Close(); err != nil {
+			slog.Warn("error closing old chat backend during swap", "error", err)
+		}
+	}
+
+	slog.Info("chat model swapped", "model", filename)
+	return nil
+}
+
+// SwapEmbedModel hot-swaps the embedding model to a different GGUF file.
+// Pass empty string to clear the dedicated embedding model (falls back to chat backend).
+func (p *EmbeddedProvider) SwapEmbedModel(filename string) error {
+	if filename == "" {
+		p.mu.Lock()
+		oldBackend := p.embedBackend
+		p.embedBackend = nil
+		p.embedModelFile = ""
+		p.mu.Unlock()
+		if oldBackend != nil {
+			if err := oldBackend.Close(); err != nil {
+				slog.Warn("error closing old embed backend during swap", "error", err)
+			}
+		}
+		slog.Info("embed model cleared, using chat backend for embeddings")
+		return nil
+	}
+
+	p.mu.RLock()
+	factory := p.backendFactory
+	dir := p.modelsDir
+	opts := p.opts
+	p.mu.RUnlock()
+
+	if factory == nil {
+		return fmt.Errorf("no backend factory configured — cannot swap models")
+	}
+
+	modelPath := filepath.Join(dir, filename)
+	if _, err := os.Stat(modelPath); err != nil {
+		return fmt.Errorf("embed model not found at %s: %w", modelPath, err)
+	}
+
+	newBackend := factory()
+	if err := newBackend.LoadModel(modelPath, opts); err != nil {
+		return fmt.Errorf("loading new embed model %s: %w", filename, err)
+	}
+
+	p.mu.Lock()
+	oldBackend := p.embedBackend
+	p.embedBackend = newBackend
+	p.embedModelFile = filename
+	p.mu.Unlock()
+
+	if oldBackend != nil {
+		if err := oldBackend.Close(); err != nil {
+			slog.Warn("error closing old embed backend during swap", "error", err)
+		}
+	}
+
+	slog.Info("embed model swapped", "model", filename)
+	return nil
+}
+
+// Unload releases all backend resources without destroying the provider config.
+// The provider can be reloaded later with Reload().
+func (p *EmbeddedProvider) Unload() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.chatBackend != nil {
+		if err := p.chatBackend.Close(); err != nil {
+			slog.Warn("error closing chat backend during unload", "error", err)
+		}
+		p.chatBackend = nil
+		slog.Info("unloaded chat model", "model", p.chatModelFile)
+	}
+	if p.embedBackend != nil {
+		if err := p.embedBackend.Close(); err != nil {
+			slog.Warn("error closing embed backend during unload", "error", err)
+		}
+		p.embedBackend = nil
+		slog.Info("unloaded embed model", "model", p.embedModelFile)
+	}
+}
+
+// Reload reloads models using the stored backend factory.
+// Called after Unload() to restore embedded inference.
+func (p *EmbeddedProvider) Reload() error {
+	p.mu.RLock()
+	factory := p.backendFactory
+	p.mu.RUnlock()
+
+	if factory == nil {
+		return fmt.Errorf("no backend factory configured — cannot reload")
+	}
+	return p.LoadModels(factory)
+}
+
+// SetProviderMode on a bare EmbeddedProvider only supports "embedded".
+func (p *EmbeddedProvider) SetProviderMode(mode string) error {
+	if mode == "embedded" {
+		return nil
+	}
+	return fmt.Errorf("API provider not configured — only embedded mode available")
+}
+
+// ProviderMode always returns "embedded" for a bare EmbeddedProvider.
+func (p *EmbeddedProvider) ProviderMode() string {
+	return "embedded"
+}
+
+// stripThinkingTokens removes <think>...</think> blocks from model output.
+// Qwen 3.5 and similar models prepend reasoning tokens before the actual response.
+func stripThinkingTokens(text string) string {
+	const openTag = "<think>"
+	const closeTag = "</think>"
+
+	for {
+		start := strings.Index(text, openTag)
+		if start == -1 {
+			break
+		}
+		end := strings.Index(text[start:], closeTag)
+		if end == -1 {
+			// Unclosed think tag — strip from start to end of text
+			text = strings.TrimSpace(text[:start])
+			break
+		}
+		text = text[:start] + text[start+end+len(closeTag):]
+	}
+	return strings.TrimSpace(text)
 }
 
 // Close releases all backend resources.

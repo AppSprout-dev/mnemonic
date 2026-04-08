@@ -171,9 +171,13 @@ def main():
         # Skip only norms, biases, embeddings, and individual (non-fused) spoke matrices.
         is_individual_spoke = ("spoke" in t.name and "fused" not in t.name
                                and ("w_down" in t.name or "w_up" in t.name))
+        # Inner dim (ne[0] in GGUF) must be >= QK_RQ4 to form valid blocks.
+        # Qwen 3.5 hybrid has ssm_conv1d with ne[0]=4 which can't be quantized.
+        inner_dim_ok = int(t.shape[0]) >= QK_RQ4
         should_quantize = (
             len(t.shape) == 2
             and t.n_elements >= args.min_elements
+            and inner_dim_ok
             and not any(p in t.name for p in skip_patterns)
             and not is_individual_spoke
         )

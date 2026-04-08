@@ -663,6 +663,12 @@ func serveCommand(configPath string) {
 			StartTime:             time.Now(),
 			Log:                   log,
 		}
+		// Wire model manager if using switchable/embedded provider
+		if sp, ok := llmProvider.(*llm.SwitchableProvider); ok {
+			apiDeps.ModelManager = sp
+		} else if ep, ok := llmProvider.(*llm.EmbeddedProvider); ok {
+			apiDeps.ModelManager = ep
+		}
 		// Only set Consolidator if it's non-nil (avoids Go nil-interface trap)
 		if consolidator != nil {
 			apiDeps.Consolidator = consolidator
