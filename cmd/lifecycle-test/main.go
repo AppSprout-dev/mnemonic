@@ -26,6 +26,7 @@ func main() {
 		skipFlag       string
 		checkpointDir  string
 		fromCheckpoint string
+		months         int
 	)
 
 	flag.BoolVar(&verbose, "verbose", false, "verbose output")
@@ -36,7 +37,13 @@ func main() {
 	flag.StringVar(&skipFlag, "skip", "", "comma-separated phases to skip")
 	flag.StringVar(&checkpointDir, "checkpoint", "", "save DB snapshot after each phase to this directory")
 	flag.StringVar(&fromCheckpoint, "from-checkpoint", "", "load DB from checkpoint file instead of creating fresh")
+	flag.IntVar(&months, "months", 3, "number of months to simulate in the growth phase (1-12)")
 	flag.Parse()
+
+	if months < 1 || months > 12 {
+		fmt.Fprintf(os.Stderr, "Error: --months must be between 1 and 12\n")
+		os.Exit(1)
+	}
 
 	logLevel := slog.LevelError
 	if verbose {
@@ -53,8 +60,9 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
 			os.Exit(1)
 		}
-		if cfg.LLM.APIKey == "" {
-			fmt.Fprintln(os.Stderr, "Error: LLM_API_KEY environment variable is required for --llm mode")
+		isLocal := strings.Contains(cfg.LLM.Endpoint, "localhost") || strings.Contains(cfg.LLM.Endpoint, "127.0.0.1")
+		if cfg.LLM.APIKey == "" && !isLocal {
+			fmt.Fprintln(os.Stderr, "Error: LLM_API_KEY environment variable is required for --llm mode (not required for localhost)")
 			os.Exit(1)
 		}
 		provider = llm.NewLMStudioProvider(
@@ -91,14 +99,14 @@ func main() {
 		&PhaseDaily{},
 		&PhaseConsolidation{},
 		&PhaseDreaming{},
-		&PhaseGrowth{},
+		&PhaseGrowth{Months: months},
 		&PhaseLongterm{},
 	}
 
 	// Header.
 	fmt.Println()
 	fmt.Println("  Mnemonic Lifecycle Simulation")
-	fmt.Printf("  Version: %s  |  LLM: %s  |  Phases: %d\n", Version, llmLabel, len(allPhases))
+	fmt.Printf("  Version: %s  |  LLM: %s  |  Phases: %d  |  Months: %d\n", Version, llmLabel, len(allPhases), months)
 	fmt.Println()
 
 	ctx := context.Background()

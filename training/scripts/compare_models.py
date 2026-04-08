@@ -22,16 +22,14 @@ from transformers import AutoTokenizer
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-# --- Novel inputs (same as eval_qwen_encoding.py) ---
-
-ENCODING_SYSTEM_PROMPT = (
-    "You are a memory encoding agent. You receive raw events and output structured JSON "
-    "with these required fields: gist (one-line summary), summary (2-3 sentences), "
-    "content (preserved detail), narrative (context paragraph), concepts (keyword array), "
-    "structured_concepts (object with topics, entities, actions, causality arrays), "
-    "significance (importance level), emotional_tone (mood), outcome (result), "
-    "salience (0.0-1.0 float). Never explain, never apologize. Output only valid JSON."
+from training_constants import (  # noqa: E402
+    ENCODING_SYSTEM_PROMPT_SHORT as ENCODING_SYSTEM_PROMPT,
+    REQUIRED_FIELDS,
+    VALID_EMOTIONAL_TONE,
+    VALID_SIGNIFICANCE,
 )
+
+# --- Novel inputs (same as eval_qwen_encoding.py) ---
 
 NOVEL_INPUTS = [
     "Decision: switched from REST to gRPC for inter-service communication because latency was too high at 200ms p99. The team evaluated both options over a week-long spike. gRPC brought it down to 12ms p99 but required regenerating all client stubs.",
@@ -46,12 +44,7 @@ NOVEL_INPUTS = [
     "Mnemonic daemon健康状態: すべてのエージェントが正常に動作しています。メモリ数は1,234件、エンコーディングキューは空です。",
 ]
 
-REQUIRED_FIELDS = {"gist", "summary", "content", "narrative", "concepts",
-                   "structured_concepts", "significance", "emotional_tone",
-                   "outcome", "salience"}
-
-VALID_SIGNIFICANCE = {"critical", "important", "notable", "routine", "trivial"}
-VALID_TONE = {"positive", "negative", "neutral", "frustrated", "excited", "analytical", "reflective"}
+VALID_TONE = VALID_EMOTIONAL_TONE  # alias used by check_schema
 
 
 def check_schema(data: dict) -> tuple[bool, list[str]]:

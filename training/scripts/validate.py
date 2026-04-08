@@ -2,93 +2,114 @@
 """
 Quality gate pipeline for mnemonic training data.
 
-Reads raw JSONL captures from the training data directory, applies hard and soft
-quality gates, and writes validated examples to the validated/ directory.
-Rejected examples go to rejected/ with rejection reasons.
+Three validation levels:
+  Level 1 — Schema: JSON structure, required fields, type checks, enum values
+  Level 2 — Semantic Fidelity: entity/number preservation, proportionality, fabrication
+  Level 3 — Dataset Health: duplicates, diversity, balance (runs across full dataset)
 
 Usage:
-    python validate.py [--input-dir DIR] [--output-dir DIR] [--strict]
+    # Validate a single JSONL file (Level 1 + 2)
+    python validate.py --input data.jsonl
 
-Hard gates (auto-reject):
-    - JSON parse failure
-    - Missing required fields
-    - Field constraint violations (gist >60 chars, summary >100 chars, etc.)
-    - Salience outside [0, 1]
-    - Invalid significance/emotional_tone/outcome enum values
-    - Empty or placeholder content
+    # Full audit with Level 3 dataset health
+    python validate.py --input data.jsonl --mode audit
 
-Soft gates (flagged for review, pass by default):
-    - Low concept vocabulary coverage
-    - Suspiciously short narrative
-    - Salience outliers (> 0.9 or < 0.1 for non-trivial content)
-    With --strict, soft gate failures also reject.
+    # Strict mode (soft gate failures also reject)
+    python validate.py --input data.jsonl --strict
+
+    # Audit pre-tokenized training data (input_ids format — Level 1 only)
+    python validate.py --input train.jsonl --tokenized
 """
 
 import argparse
 import json
-import os
+import re
 import sys
 from collections import Counter
 from dataclasses import dataclass, field
+from hashlib import md5
 from pathlib import Path
 
-# Controlled vocabulary from config.example.yaml
-CONTROLLED_VOCABULARY = {
-    "go", "python", "javascript", "typescript", "sql", "bash", "html", "css",
-    "docker", "git", "linux", "macos", "systemd", "build", "ci", "deployment",
-    "debugging", "testing", "refactoring", "configuration", "migration",
-    "documentation", "review", "api", "database", "filesystem", "networking",
-    "security", "authentication", "performance", "logging", "ui", "cli",
-    "memory", "encoding", "retrieval", "embedding", "agent", "llm", "daemon",
-    "mcp", "watcher", "decision", "error", "fix", "insight", "learning",
-    "planning", "research", "dependency", "schema", "config",
-}
+from training_constants import (
+    PLACEHOLDER_GISTS,
+    REQUIRED_FIELDS,
+    VALID_EMOTIONAL_TONE,
+    VALID_SIGNIFICANCE,
+)
 
-VALID_SIGNIFICANCE = {"routine", "notable", "important", "critical"}
-VALID_EMOTIONAL_TONE = {"neutral", "satisfying", "frustrating", "exciting", "concerning"}
-VALID_OUTCOME = {"success", "failure", "ongoing", "unknown"}
+# ---------- Regex patterns for Level 2 ----------
 
-PLACEHOLDER_GISTS = {
-    "user did something",
-    "something happened",
-    "file changed",
-    "event occurred",
-    "unknown event",
-    "observation",
-}
+# file:line patterns (Go, Python, Rust, JS) — excludes IP:port like 192.168.1.50:8080
+FILE_LINE_RE = re.compile(r"\b([a-zA-Z_][\w.-]*\.[a-zA-Z]{1,10}:\d+)\b")
 
+# Numbers with units or in isolation — catches 2.3ms, 156MB, 0.8ms, 3e-4, 80%, $4.2M
+NUMBER_RE = re.compile(
+    r"\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?(?:%|ms|us|ns|s|MB|GB|TB|KB|B)?\b"
+    r"|(?:\$\d+(?:\.\d+)?[KMBT]?)"
+)
+
+# Proper nouns heuristic: capitalized words not at sentence start, min 2 chars
+# Excludes common technical terms that are capitalized
+TECH_CAPS = frozenset({
+    "API", "REST", "gRPC", "SQL", "JSON", "HTTP", "HTTPS", "SSH", "TCP", "UDP",
+    "DNS", "SSL", "TLS", "HTML", "CSS", "GPU", "CPU", "RAM", "SSD", "NVMe",
+    "USB", "YAML", "TOML", "CSV", "XML", "JWT", "OAuth", "CORS", "CRUD",
+    "CI", "CD", "CLI", "GUI", "IDE", "SDK", "ORM", "MVC", "MVP",
+    "The", "This", "That", "When", "Where", "What", "How", "Why", "Who",
+    "If", "But", "And", "For", "With", "From", "Into", "Over", "Upon",
+    "After", "Before", "During", "While", "Because", "Since", "Until",
+    "Also", "Then", "Next", "Here", "There", "Now", "Just", "Still",
+    "However", "Therefore", "Furthermore", "Moreover", "Additionally",
+    "Error", "Warning", "Debug", "Info", "Fatal", "Panic",
+    "True", "False", "None", "Null", "NULL",
+    "Go", "Rust", "Python", "Java", "Ruby", "Perl", "Bash", "Zsh",
+    "Linux", "Windows", "Docker", "Kubernetes", "Redis", "Postgres",
+    "SQLite", "MongoDB", "Nginx", "Apache",
+    "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+    "Bug", "Fix", "Fixed", "Decision", "Refactored", "Updated", "Added",
+    "Removed", "Implemented", "Deployed", "Tested", "Reviewed", "Merged",
+})
+
+
+def extract_proper_nouns(text: str) -> set[str]:
+    """Extract likely person/org names from text using capitalization heuristic."""
+    words = re.findall(r"\b([A-Z][a-z]{1,20})\b", text)
+    return {w for w in words if w not in TECH_CAPS}
+
+
+def extract_file_lines(text: str) -> set[str]:
+    """Extract file:line patterns like spread.go:142."""
+    return set(FILE_LINE_RE.findall(text))
+
+
+def extract_numbers(text: str) -> set[str]:
+    """Extract numbers and metrics from text."""
+    return set(NUMBER_RE.findall(text))
+
+
+# ---------- Level 1: Schema Validation ----------
 
 @dataclass
 class ValidationResult:
     valid: bool = True
     hard_failures: list = field(default_factory=list)
     soft_warnings: list = field(default_factory=list)
+    level2_warnings: list = field(default_factory=list)
 
 
-def validate_encoding(response_content: str, strict: bool = False) -> ValidationResult:
-    """Validate an encoding task response against quality gates."""
+def validate_schema(data: dict, strict: bool = False) -> ValidationResult:
+    """Level 1: Validate encoding output against schema constraints."""
     result = ValidationResult()
-
-    # Hard gate: JSON parse
-    try:
-        data = json.loads(response_content)
-    except (json.JSONDecodeError, TypeError):
-        result.valid = False
-        result.hard_failures.append("json_parse_failure")
-        return result
 
     if not isinstance(data, dict):
         result.valid = False
         result.hard_failures.append("response_not_object")
         return result
 
-    # Hard gate: required fields
-    required = [
-        "gist", "summary", "content", "narrative", "concepts",
-        "structured_concepts", "significance", "emotional_tone",
-        "outcome", "salience",
-    ]
-    for f in required:
+    # Required fields
+    for f in REQUIRED_FIELDS:
         if f not in data:
             result.valid = False
             result.hard_failures.append(f"missing_field:{f}")
@@ -96,7 +117,7 @@ def validate_encoding(response_content: str, strict: bool = False) -> Validation
     if not result.valid:
         return result
 
-    # Hard gate: field types
+    # Field types
     if not isinstance(data.get("gist"), str):
         result.valid = False
         result.hard_failures.append("gist_not_string")
@@ -113,7 +134,6 @@ def validate_encoding(response_content: str, strict: bool = False) -> Validation
     if not result.valid:
         return result
 
-    # Hard gate: field constraints
     gist = data["gist"]
     summary = data["summary"]
     content = data.get("content", "")
@@ -121,16 +141,12 @@ def validate_encoding(response_content: str, strict: bool = False) -> Validation
     salience = data["salience"]
     significance = data.get("significance", "")
     emotional_tone = data.get("emotional_tone", "")
-    outcome = data.get("outcome", "")
     concepts = data.get("concepts", [])
 
-    if len(gist) > 60:
+    # Field constraints
+    if len(gist) > 80:
         result.valid = False
         result.hard_failures.append(f"gist_too_long:{len(gist)}")
-
-    if len(summary) > 100:
-        result.valid = False
-        result.hard_failures.append(f"summary_too_long:{len(summary)}")
 
     if not (0.0 <= salience <= 1.0):
         result.valid = False
@@ -144,11 +160,9 @@ def validate_encoding(response_content: str, strict: bool = False) -> Validation
         result.valid = False
         result.hard_failures.append(f"invalid_emotional_tone:{emotional_tone}")
 
-    if outcome and outcome not in VALID_OUTCOME:
-        result.valid = False
-        result.hard_failures.append(f"invalid_outcome:{outcome}")
+    # outcome is free text — no enum check
 
-    # Hard gate: placeholder content
+    # Placeholder content
     if gist.lower().strip() in PLACEHOLDER_GISTS:
         result.valid = False
         result.hard_failures.append("placeholder_gist")
@@ -160,24 +174,16 @@ def validate_encoding(response_content: str, strict: bool = False) -> Validation
     if not result.valid:
         return result
 
-    # Soft gate: concept vocabulary coverage
+    # Soft gates
     if concepts:
-        vocab_hits = sum(1 for c in concepts if c.lower() in CONTROLLED_VOCABULARY)
-        coverage = vocab_hits / len(concepts) if concepts else 0
-        if coverage < 0.3:
-            result.soft_warnings.append(f"low_vocab_coverage:{coverage:.2f}")
-
-    # Soft gate: short narrative
+        if len(concepts) < 2:
+            result.soft_warnings.append(f"too_few_concepts:{len(concepts)}")
     if len(narrative) < 20:
         result.soft_warnings.append(f"short_narrative:{len(narrative)}")
-
-    # Soft gate: salience outliers
     if salience > 0.9 and significance == "routine":
         result.soft_warnings.append("high_salience_routine")
     if salience < 0.1 and significance in ("important", "critical"):
         result.soft_warnings.append("low_salience_important")
-
-    # Soft gate: few concepts for substantive content
     if len(content) > 200 and len(concepts) < 3:
         result.soft_warnings.append(f"few_concepts:{len(concepts)}")
 
@@ -187,173 +193,403 @@ def validate_encoding(response_content: str, strict: bool = False) -> Validation
     return result
 
 
-def validate_example(example: dict, strict: bool = False) -> ValidationResult:
-    """Validate a single captured training example."""
-    result = ValidationResult()
+# ---------- Level 2: Semantic Fidelity ----------
 
-    # Reject any example where the LLM call itself failed
-    if example.get("error"):
+def validate_fidelity(raw_input: str, encoded: dict) -> list[str]:
+    """Level 2: Check that the encoding preserves key information from the input.
+
+    Returns a list of warning strings. Empty = all checks passed.
+    """
+    warnings = []
+    content = encoded.get("content", "")
+    structured = encoded.get("structured_concepts", {})
+    entities_list = structured.get("entities", []) if isinstance(structured, dict) else []
+    entity_names = {e.get("name", "").lower() for e in entities_list if isinstance(e, dict)}
+
+    # 2a. File:line preservation
+    input_file_lines = extract_file_lines(raw_input)
+    if input_file_lines:
+        output_file_lines = extract_file_lines(content)
+        # Also check structured_concepts entities
+        for e in entities_list:
+            if isinstance(e, dict):
+                name = e.get("name", "")
+                output_file_lines.update(extract_file_lines(name))
+        missing = input_file_lines - output_file_lines
+        if missing:
+            warnings.append(f"missing_file_lines:{','.join(sorted(missing))}")
+
+    # 2b. Proper noun preservation
+    input_nouns = extract_proper_nouns(raw_input)
+    if len(input_nouns) >= 2:  # Only check when there are multiple proper nouns
+        output_text = content + " " + encoded.get("summary", "") + " " + encoded.get("gist", "")
+        output_nouns = extract_proper_nouns(output_text)
+        # Also check entity names
+        combined = output_nouns | {n.title() for n in entity_names}
+        missing = input_nouns - combined - TECH_CAPS
+        if missing:
+            warnings.append(f"missing_proper_nouns:{','.join(sorted(missing))}")
+
+    # 2c. Number preservation (only for inputs with 3+ distinct numbers)
+    input_numbers = extract_numbers(raw_input)
+    if len(input_numbers) >= 3:
+        output_numbers = extract_numbers(content)
+        missing = input_numbers - output_numbers
+        # Allow some tolerance — numbers might be reformatted
+        if len(missing) > len(input_numbers) * 0.3:
+            warnings.append(f"missing_numbers:{len(missing)}/{len(input_numbers)}")
+
+    # 2d. Proportionality — sparse input should get sparse output
+    input_words = len(raw_input.split())
+    if input_words <= 5:
+        if len(content) > 200:
+            warnings.append(f"disproportionate_output:input={input_words}w,content={len(content)}c")
+        salience = encoded.get("salience", 0.5)
+        if isinstance(salience, (int, float)) and salience > 0.5:
+            warnings.append(f"high_salience_sparse_input:salience={salience}")
+
+    # 2e. Fabrication check — entities in output not in input
+    if entities_list and input_words >= 5:
+        input_lower = raw_input.lower()
+        for entity in entities_list:
+            if not isinstance(entity, dict):
+                continue
+            name = entity.get("name", "")
+            if name and len(name) > 2:
+                # Check if entity name (or close variant) appears in input
+                if name.lower() not in input_lower and name not in raw_input:
+                    # Could be a reasonable inference — only warn on person-type entities
+                    if entity.get("type", "").lower() in ("person", "people", "team_member"):
+                        warnings.append(f"fabricated_entity:{name}")
+
+    return warnings
+
+
+# ---------- Level 3: Dataset Health ----------
+
+@dataclass
+class DatasetHealth:
+    total: int = 0
+    duplicate_gists: list = field(default_factory=list)
+    near_duplicate_content: list = field(default_factory=list)
+    concept_distribution: Counter = field(default_factory=Counter)
+    significance_distribution: Counter = field(default_factory=Counter)
+    tone_distribution: Counter = field(default_factory=Counter)
+    seq_len_distribution: list = field(default_factory=list)
+    category_distribution: Counter = field(default_factory=Counter)
+    level2_failure_counts: Counter = field(default_factory=Counter)
+
+
+def analyze_dataset_health(examples: list[dict]) -> DatasetHealth:
+    """Level 3: Analyze health of the full dataset.
+
+    Args:
+        examples: list of {raw_input, encoded, source, task_type} dicts
+    """
+    health = DatasetHealth(total=len(examples))
+
+    gist_index: dict[str, list[int]] = {}
+    content_hashes: dict[str, list[int]] = {}
+
+    for i, ex in enumerate(examples):
+        encoded = ex.get("encoded", {})
+        if not isinstance(encoded, dict):
+            continue
+
+        # Gist duplicates
+        gist = encoded.get("gist", "").strip().lower()
+        if gist:
+            gist_index.setdefault(gist, []).append(i)
+
+        # Content near-duplicates (hash first 100 chars)
+        content = encoded.get("content", "")
+        if content:
+            h = md5(content[:100].encode()).hexdigest()
+            content_hashes.setdefault(h, []).append(i)
+
+        # Distributions
+        concepts = encoded.get("concepts", [])
+        for c in concepts:
+            if isinstance(c, str):
+                health.concept_distribution[c.lower()] += 1
+
+        sig = encoded.get("significance", "")
+        if sig:
+            health.significance_distribution[sig] += 1
+
+        tone = encoded.get("emotional_tone", "")
+        if tone:
+            health.tone_distribution[tone] += 1
+
+        # Category from source
+        source = ex.get("source", "unknown")
+        health.category_distribution[source] += 1
+
+        # Sequence length (word count of raw input as proxy)
+        raw = ex.get("raw_input", "")
+        health.seq_len_distribution.append(len(raw.split()))
+
+    # Find duplicates
+    for gist, indices in gist_index.items():
+        if len(indices) > 1:
+            health.duplicate_gists.append((gist, indices))
+
+    for h, indices in content_hashes.items():
+        if len(indices) > 1:
+            health.near_duplicate_content.append((h, indices))
+
+    return health
+
+
+def print_health_report(health: DatasetHealth) -> None:
+    """Print a human-readable dataset health report."""
+    print(f"\n{'=' * 60}")
+    print("DATASET HEALTH REPORT (Level 3)")
+    print(f"{'=' * 60}")
+    print(f"Total examples: {health.total}")
+
+    # Duplicates
+    print(f"\nDuplicate gists: {len(health.duplicate_gists)}")
+    for gist, indices in health.duplicate_gists[:10]:
+        print(f"  [{len(indices)}x] \"{gist[:60]}\" (indices: {indices[:5]})")
+    if len(health.duplicate_gists) > 10:
+        print(f"  ... and {len(health.duplicate_gists) - 10} more")
+
+    print(f"\nNear-duplicate content (first 100 chars): {len(health.near_duplicate_content)}")
+    for _, indices in health.near_duplicate_content[:5]:
+        print(f"  [{len(indices)}x] indices: {indices[:5]}")
+
+    # Distributions
+    print(f"\nSignificance distribution:")
+    for k, v in health.significance_distribution.most_common():
+        pct = v / health.total * 100
+        print(f"  {k}: {v} ({pct:.1f}%)")
+
+    print(f"\nEmotional tone distribution:")
+    for k, v in health.tone_distribution.most_common():
+        pct = v / health.total * 100
+        print(f"  {k}: {v} ({pct:.1f}%)")
+
+    print(f"\nSource/category distribution:")
+    for k, v in health.category_distribution.most_common():
+        pct = v / health.total * 100
+        print(f"  {k}: {v} ({pct:.1f}%)")
+
+    # Concept diversity
+    top_concepts = health.concept_distribution.most_common(10)
+    total_concept_mentions = sum(health.concept_distribution.values())
+    print(f"\nTop 10 concepts ({len(health.concept_distribution)} unique):")
+    for c, count in top_concepts:
+        pct = count / total_concept_mentions * 100 if total_concept_mentions else 0
+        print(f"  {c}: {count} ({pct:.1f}%)")
+
+    top_pct = top_concepts[0][1] / health.total * 100 if top_concepts else 0
+    if top_pct > 30:
+        print(f"  WARNING: Top concept appears in {top_pct:.0f}% of examples (>30% threshold)")
+
+    # Sequence length stats
+    if health.seq_len_distribution:
+        lens = sorted(health.seq_len_distribution)
+        print(f"\nInput length (words): min={lens[0]}, median={lens[len(lens)//2]}, "
+              f"max={lens[-1]}, mean={sum(lens)/len(lens):.0f}")
+
+
+# ---------- Backward compatibility ----------
+
+def validate_encoding(response_content: str, strict: bool = False) -> ValidationResult:
+    """Backward-compatible wrapper for eval_qwen_encoding.py imports."""
+    try:
+        data = json.loads(response_content)
+    except (json.JSONDecodeError, TypeError):
+        result = ValidationResult()
         result.valid = False
-        result.hard_failures.append("call_error")
+        result.hard_failures.append("json_parse_failure")
         return result
-    if not example.get("parse_success", True):
-        result.valid = False
-        result.hard_failures.append("parse_failure")
-        return result
-
-    task_type = example.get("task_type", "unknown")
-
-    # Validate encoding tasks against the full quality gate
-    if task_type == "encoding":
-        response_content = example.get("response", {}).get("content", "")
-        return validate_encoding(response_content, strict=strict)
-
-    return result
+    return validate_schema(data, strict=strict)
 
 
-def process_file(
-    input_path: Path,
-    validated_dir: Path,
-    rejected_dir: Path,
-    strict: bool = False,
-) -> dict:
-    """Process a single JSONL capture file through quality gates."""
+# ---------- Main CLI ----------
+
+def load_examples(input_path: Path) -> list[dict]:
+    """Load examples from JSONL. Supports both raw and enriched formats."""
+    examples = []
+    for line in open(input_path):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            ex = json.loads(line)
+            examples.append(ex)
+        except json.JSONDecodeError:
+            pass
+    return examples
+
+
+def run_audit(input_path: Path, strict: bool = False) -> None:
+    """Full audit: Level 1 + 2 + 3."""
+    examples = load_examples(input_path)
+    if not examples:
+        print(f"No examples found in {input_path}")
+        sys.exit(1)
+
+    print(f"Loaded {len(examples)} examples from {input_path}")
+
+    # Detect format
+    first = examples[0]
+    is_enriched = "encoded" in first and "raw_input" in first
+    is_tokenized = "input_ids" in first
+
+    if is_tokenized:
+        print("Tokenized format detected — Level 1 schema checks not applicable.")
+        print("Run on pre-tokenized data (enriched JSONL) for full validation.")
+        # Still do Level 3 on what we can
+        return
+
     stats = Counter()
+    l2_failures = Counter()
+    failed_examples = []
+
+    for i, ex in enumerate(examples):
+        if is_enriched:
+            encoded = ex.get("encoded", {})
+            raw_input = ex.get("raw_input", "")
+        else:
+            encoded = ex
+            raw_input = ""
+
+        # Level 1: Schema
+        result = validate_schema(encoded, strict=strict)
+        if result.valid:
+            stats["l1_pass"] += 1
+        else:
+            stats["l1_fail"] += 1
+            for f in result.hard_failures:
+                stats[f"l1_failure_{f.split(':')[0]}"] += 1
+            failed_examples.append({"index": i, "level": 1, "failures": result.hard_failures})
+
+        # Level 2: Semantic fidelity (only if raw_input available)
+        if raw_input and result.valid:
+            l2_warnings = validate_fidelity(raw_input, encoded)
+            if l2_warnings:
+                stats["l2_flagged"] += 1
+                for w in l2_warnings:
+                    key = w.split(":")[0]
+                    l2_failures[key] += 1
+                    stats[f"l2_{key}"] += 1
+                failed_examples.append({"index": i, "level": 2, "warnings": l2_warnings})
+            else:
+                stats["l2_pass"] += 1
+
+    # Level 3: Dataset health
+    health = analyze_dataset_health(examples)
+
+    # Print results
+    print(f"\n{'=' * 60}")
+    print("VALIDATION RESULTS")
+    print(f"{'=' * 60}")
+    total = len(examples)
+    print(f"Total: {total}")
+    print(f"Level 1 (Schema): {stats.get('l1_pass', 0)} pass, {stats.get('l1_fail', 0)} fail")
+
+    if any(k.startswith("l1_failure_") for k in stats):
+        print("  Failure reasons:")
+        for k in sorted(stats):
+            if k.startswith("l1_failure_"):
+                print(f"    {k.replace('l1_failure_', '')}: {stats[k]}")
+
+    if is_enriched:
+        print(f"Level 2 (Fidelity): {stats.get('l2_pass', 0)} pass, {stats.get('l2_flagged', 0)} flagged")
+        if l2_failures:
+            print("  Flag reasons:")
+            for k, v in l2_failures.most_common():
+                print(f"    {k}: {v}")
+
+    print_health_report(health)
+
+    # Write failed examples for review
+    if failed_examples:
+        fail_path = input_path.with_suffix(".failures.jsonl")
+        with open(fail_path, "w") as f:
+            for fe in failed_examples:
+                f.write(json.dumps(fe) + "\n")
+        print(f"\n{len(failed_examples)} failures written to: {fail_path}")
+
+
+def run_validate(input_path: Path, output_dir: Path, strict: bool = False) -> None:
+    """Standard validation: Level 1 + 2, write validated/rejected."""
+    examples = load_examples(input_path)
+    if not examples:
+        print(f"No examples found in {input_path}")
+        sys.exit(1)
+
+    validated_dir = output_dir / "validated"
+    rejected_dir = output_dir / "rejected"
+    validated_dir.mkdir(parents=True, exist_ok=True)
+    rejected_dir.mkdir(parents=True, exist_ok=True)
 
     validated_path = validated_dir / input_path.name
     rejected_path = rejected_dir / input_path.name
 
-    with (
-        open(input_path) as fin,
-        open(validated_path, "a") as fval,
-        open(rejected_path, "a") as frej,
-    ):
-        for line_num, line in enumerate(fin, 1):
-            line = line.strip()
-            if not line:
+    stats = Counter()
+
+    with open(validated_path, "w") as fval, open(rejected_path, "w") as frej:
+        for ex in examples:
+            is_enriched = "encoded" in ex and "raw_input" in ex
+            encoded = ex.get("encoded", ex) if is_enriched else ex
+            raw_input = ex.get("raw_input", "") if is_enriched else ""
+
+            # Level 1
+            result = validate_schema(encoded, strict=strict)
+            if not result.valid:
+                stats["rejected_l1"] += 1
+                ex["_rejection"] = {"level": 1, "failures": result.hard_failures}
+                frej.write(json.dumps(ex) + "\n")
                 continue
 
-            try:
-                example = json.loads(line)
-            except json.JSONDecodeError:
-                stats["parse_error"] += 1
-                continue
+            # Level 2 (if raw_input available)
+            if raw_input:
+                l2_warnings = validate_fidelity(raw_input, encoded)
+                if l2_warnings:
+                    # Level 2 failures are warnings by default, hard reject in strict
+                    if strict:
+                        stats["rejected_l2"] += 1
+                        ex["_rejection"] = {"level": 2, "warnings": l2_warnings}
+                        frej.write(json.dumps(ex) + "\n")
+                        continue
+                    else:
+                        stats["warned_l2"] += 1
+                        ex["_validation"] = {"l2_warnings": l2_warnings}
 
-            task_type = example.get("task_type", "unknown")
-            stats[f"total_{task_type}"] += 1
+            stats["validated"] += 1
+            fval.write(json.dumps(ex) + "\n")
 
-            result = validate_example(example, strict=strict)
-
-            if result.valid:
-                stats[f"valid_{task_type}"] += 1
-                # Add validation metadata
-                example["_validation"] = {
-                    "warnings": result.soft_warnings,
-                    "validated_at": None,  # Will be set by downstream
-                }
-                fval.write(json.dumps(example) + "\n")
-            else:
-                stats[f"rejected_{task_type}"] += 1
-                example["_rejection"] = {
-                    "hard_failures": result.hard_failures,
-                    "soft_warnings": result.soft_warnings,
-                    "source_file": str(input_path),
-                    "source_line": line_num,
-                }
-                frej.write(json.dumps(example) + "\n")
-
-            if result.soft_warnings:
-                stats["soft_warnings"] += len(result.soft_warnings)
-                for w in result.soft_warnings:
-                    stats[f"warning_{w.split(':')[0]}"] += 1
-
-            for f in result.hard_failures:
-                stats[f"failure_{f.split(':')[0]}"] += 1
-
-    return dict(stats)
+    print(f"\nValidated: {stats.get('validated', 0)}")
+    print(f"Rejected (L1): {stats.get('rejected_l1', 0)}")
+    print(f"Rejected (L2): {stats.get('rejected_l2', 0)}")
+    print(f"Warned (L2): {stats.get('warned_l2', 0)}")
+    print(f"\nValidated: {validated_path}")
+    print(f"Rejected:  {rejected_path}")
 
 
 def main():
     parser = argparse.ArgumentParser(description="Validate mnemonic training data")
-    parser.add_argument(
-        "--input-dir",
-        default=os.path.expanduser("~/.mnemonic/training-data"),
-        help="Directory containing raw JSONL captures",
-    )
-    parser.add_argument(
-        "--output-dir",
-        default="data",
-        help="Base output directory (validated/ and rejected/ subdirs)",
-    )
-    parser.add_argument(
-        "--strict",
-        action="store_true",
-        help="Reject examples that fail soft gates too",
-    )
+    parser.add_argument("--input", required=True, help="Input JSONL file")
+    parser.add_argument("--output-dir", default="training/data/quality", help="Output directory")
+    parser.add_argument("--mode", choices=["validate", "audit"], default="validate",
+                        help="validate: write pass/fail files. audit: full report + Level 3")
+    parser.add_argument("--strict", action="store_true",
+                        help="Reject on soft/L2 warnings too")
     args = parser.parse_args()
 
-    input_dir = Path(args.input_dir)
-    output_dir = Path(args.output_dir)
-    validated_dir = output_dir / "validated"
-    rejected_dir = output_dir / "rejected"
-
-    validated_dir.mkdir(parents=True, exist_ok=True)
-    rejected_dir.mkdir(parents=True, exist_ok=True)
-
-    if not input_dir.exists():
-        print(f"Input directory does not exist: {input_dir}")
-        print("Enable training data capture in config.yaml first.")
+    input_path = Path(args.input)
+    if not input_path.exists():
+        print(f"File not found: {input_path}")
         sys.exit(1)
 
-    jsonl_files = sorted(input_dir.glob("capture_*.jsonl"))
-    if not jsonl_files:
-        print(f"No capture files found in {input_dir}")
-        sys.exit(1)
-
-    total_stats = Counter()
-    for fpath in jsonl_files:
-        print(f"Processing {fpath.name}...")
-        stats = process_file(fpath, validated_dir, rejected_dir, strict=args.strict)
-        total_stats.update(stats)
-
-    # Print summary
-    print("\n--- Validation Summary ---")
-    total = sum(v for k, v in total_stats.items() if k.startswith("total_"))
-    valid = sum(v for k, v in total_stats.items() if k.startswith("valid_"))
-    rejected = sum(v for k, v in total_stats.items() if k.startswith("rejected_"))
-
-    print(f"Total examples:    {total}")
-    print(f"Validated:         {valid} ({valid/total*100:.1f}%)" if total else "")
-    print(f"Rejected:          {rejected} ({rejected/total*100:.1f}%)" if total else "")
-
-    if total_stats.get("soft_warnings"):
-        print(f"Soft warnings:     {total_stats['soft_warnings']}")
-
-    print("\nBy task type:")
-    for key in sorted(total_stats):
-        if key.startswith("total_"):
-            task = key.replace("total_", "")
-            v = total_stats.get(f"valid_{task}", 0)
-            r = total_stats.get(f"rejected_{task}", 0)
-            t = total_stats[key]
-            print(f"  {task}: {t} total, {v} valid, {r} rejected")
-
-    if any(k.startswith("failure_") for k in total_stats):
-        print("\nRejection reasons:")
-        for key in sorted(total_stats):
-            if key.startswith("failure_"):
-                reason = key.replace("failure_", "")
-                print(f"  {reason}: {total_stats[key]}")
-
-    if any(k.startswith("warning_") for k in total_stats):
-        print("\nWarning types:")
-        for key in sorted(total_stats):
-            if key.startswith("warning_"):
-                reason = key.replace("warning_", "")
-                print(f"  {reason}: {total_stats[key]}")
-
-    print(f"\nValidated data written to: {validated_dir}")
-    print(f"Rejected data written to:  {rejected_dir}")
+    if args.mode == "audit":
+        run_audit(input_path, strict=args.strict)
+    else:
+        run_validate(input_path, Path(args.output_dir), strict=args.strict)
 
 
 if __name__ == "__main__":

@@ -113,7 +113,7 @@ func DefaultConfig() EncodingConfig {
 		MaxSimilarSearchResults:   5,
 		EmbeddingModel:            "default",
 		CompletionModel:           "default",
-		CompletionMaxTokens:       1024,
+		CompletionMaxTokens:       4096,
 		CompletionTemperature:     0.3,
 		MaxConcurrentEncodings:    1,
 		EnableLLMClassification:   false,
@@ -1233,7 +1233,7 @@ Fill in every JSON field based on the actual file content below:
 - content: A compressed description of what the file contains and how it works.
 - narrative: The file's role in the project architecture and why it matters.
 - concepts: 3-5 keywords describing the file's domain. PREFER exact terms from the vocabulary list below; only use new terms if no vocabulary term fits.
-- structured_concepts: Extract topics, entities, actions, and causal relationships from the file.
+- structured_concepts: Extract topics, entities, actions, and causal relationships. Keep each array to 3-5 items max. Use short strings, not sentences.
 - significance: One of routine, notable, important, or critical.
 - emotional_tone: neutral.
 - outcome: success.
@@ -1249,7 +1249,7 @@ Fill in every JSON field based on the actual event content below:
 - content: The key details someone would need to understand this event later.
 - narrative: The story of what happened including context and meaning.
 - concepts: 3-5 keywords about the event. PREFER exact terms from the vocabulary list below; only use new terms if no vocabulary term fits.
-- structured_concepts: Extract topics, entities, actions, and causal relationships from the event.
+- structured_concepts: Extract topics, entities, actions, and causal relationships. Keep each array to 3-5 items max. Use short strings, not sentences.
 - significance: One of routine, notable, important, or critical.
 - emotional_tone: One of neutral, satisfying, frustrating, exciting, or concerning.
 - outcome: One of success, failure, ongoing, or unknown.

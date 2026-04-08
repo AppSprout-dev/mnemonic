@@ -178,35 +178,37 @@ class GemmaWithSpokes(nn.Module):
 
         # Pop our custom kwargs before passing to HF
         offload_ple = kwargs.pop('offload_ple', True)
+        no_quantize = kwargs.pop('no_quantize', False)
 
         print(f"Loading base model: {model_name_or_path}")
 
-        # Gemma 4 E2B text model is 4.65B params = 9.3GB bf16 — too large for
-        # 16GB VRAM with spokes + gradients + activations.
-        #
-        # Load frozen base in NF4 (4-bit) with bf16 compute dtype:
-        # - Weights stored in 4-bit (~2.5GB instead of 9.3GB)
-        # - All computation dequantizes to bf16 on the fly
-        # - Spokes train in fp32, gradients in bf16
-        # - The spokes never see quantized values — only bf16 activations
-        # - Double quantization further reduces memory overhead
-        #
-        # This is standard QLoRA practice for adapter training on consumer GPUs.
-        from transformers import BitsAndBytesConfig
-        bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_compute_dtype=dtype,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_use_double_quant=True,
-        )
-        print("  Loading in NF4 (4-bit weights, bf16 compute, ~2.5GB base)")
-
-        base_model = AutoModelForCausalLM.from_pretrained(
-            model_name_or_path,
-            quantization_config=bnb_config,
-            device_map="auto",
-            **kwargs,
-        )
+        if no_quantize:
+            # Full bf16 — for high-VRAM hardware (MI300X, A100, etc.)
+            print("  Loading in bf16 (full precision, no quantization)")
+            base_model = AutoModelForCausalLM.from_pretrained(
+                model_name_or_path,
+                torch_dtype=dtype,
+                device_map="auto",
+                **kwargs,
+            )
+        else:
+            # NF4 quantization for consumer GPUs (16GB VRAM)
+            # Weights stored in 4-bit (~2.5GB instead of 9.3GB)
+            # All computation dequantizes to bf16 on the fly
+            from transformers import BitsAndBytesConfig
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=dtype,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_use_double_quant=True,
+            )
+            print("  Loading in NF4 (4-bit weights, bf16 compute, ~2.5GB base)")
+            base_model = AutoModelForCausalLM.from_pretrained(
+                model_name_or_path,
+                quantization_config=bnb_config,
+                device_map="auto",
+                **kwargs,
+            )
 
         # Drop vision/audio towers — we only need text for encoding
         if hasattr(base_model, 'model'):

@@ -340,4 +340,3 @@ func (s *SQLiteStore) ArchiveAllPatterns(ctx context.Context) (int, error) {
 	n, _ := result.RowsAffected()
 	return int(n), nil
 }
-

@@ -122,6 +122,53 @@ func TestGetMemoryFeedbackScores(t *testing.T) {
 			t.Errorf("m5 score: want 1.0, got %v", score)
 		}
 	})
+
+	t.Run("recent feedback weighs more than old feedback", func(t *testing.T) {
+		// m6 has old "helpful" feedback and recent "irrelevant" feedback.
+		// With time-weighting, the recent "irrelevant" should dominate.
+		oldFb := store.RetrievalFeedback{
+			QueryID:      "q_old_helpful",
+			QueryText:    "old query",
+			RetrievedIDs: []string{"m6"},
+			Feedback:     "helpful",
+			CreatedAt:    now.Add(-60 * 24 * time.Hour), // 60 days ago
+		}
+		recentFb := store.RetrievalFeedback{
+			QueryID:      "q_recent_irrelevant",
+			QueryText:    "recent query",
+			RetrievedIDs: []string{"m6"},
+			Feedback:     "irrelevant",
+			CreatedAt:    now,
+		}
+		if err := s.WriteRetrievalFeedback(ctx, oldFb); err != nil {
+			t.Fatalf("failed to write old feedback: %v", err)
+		}
+		if err := s.WriteRetrievalFeedback(ctx, recentFb); err != nil {
+			t.Fatalf("failed to write recent feedback: %v", err)
+		}
+
+		scores, err := s.GetMemoryFeedbackScores(ctx, []string{"m6"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Without time-weighting: (+1 + -1) / 2 = 0.0
+		// With time-weighting (30-day half-life):
+		//   old weight = exp(-60/30) ≈ 0.135
+		//   recent weight = exp(0/30) = 1.0
+		//   weighted = (1.0 * 0.135 + -1.0 * 1.0) / (0.135 + 1.0) ≈ -0.762
+		score, ok := scores["m6"]
+		if !ok {
+			t.Fatal("m6 should have a score")
+		}
+		if score >= 0 {
+			t.Errorf("m6 score should be negative (recent irrelevant dominates), got %.3f", score)
+		}
+		// The score should be around -0.76
+		if abs32(score-(-0.762)) > 0.05 {
+			t.Errorf("m6 score: want ~-0.762, got %.3f", score)
+		}
+	})
 }
 
 func abs32(v float32) float32 {

@@ -26,29 +26,11 @@ import sys
 import time
 from pathlib import Path
 
-ENCODING_SYSTEM_PROMPT = (
-    "You are a memory encoding agent for Mnemonic, a semantic memory system. "
-    "You receive raw events (text observations from a developer's work) and output structured JSON.\n\n"
-    "Your output MUST be a single JSON object with exactly these 10 fields:\n"
-    "- gist: One-line summary, under 80 characters\n"
-    "- summary: 2-3 sentence summary of the key information\n"
-    "- content: Preserved detail — the important facts, decisions, and context\n"
-    "- narrative: A paragraph providing broader context and significance\n"
-    "- concepts: Array of 3-8 keyword strings (lowercase, no phrases longer than 3 words)\n"
-    "- structured_concepts: Object with 4 arrays:\n"
-    "    - topics: [{label, path}] — what domains this touches\n"
-    "    - entities: [{name, type, context}] — people, tools, systems mentioned\n"
-    "    - actions: [{verb, object, details}] — what was done\n"
-    "    - causality: [{relation, description}] — cause/effect relationships\n"
-    "- significance: One of \"critical\", \"important\", \"notable\", \"routine\", \"trivial\"\n"
-    "- emotional_tone: One of \"positive\", \"negative\", \"neutral\", \"frustrated\", \"excited\", \"analytical\", \"reflective\"\n"
-    "- outcome: Brief description of the result or status\n"
-    "- salience: Float 0.0-1.0 (how important is this to remember long-term)\n\n"
-    "Output ONLY the JSON object. No markdown fences, no explanation, no preamble."
-)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from training_constants import ENCODING_SYSTEM_PROMPT, REQUIRED_FIELDS  # noqa: E402
 
 API_KEY = os.environ.get("LLM_API_KEY", "")
-MODEL = "gemini-3-flash-preview"
+MODEL = "gemini-3.1-pro-preview"
 
 
 def create_batch_file(input_path: str, batch_path: str) -> int:
@@ -66,7 +48,7 @@ def create_batch_file(input_path: str, batch_path: str) -> int:
                     "system_instruction": {"parts": [{"text": ENCODING_SYSTEM_PROMPT}]},
                     "generation_config": {
                         "temperature": 0.7,
-                        "max_output_tokens": 2048,
+                        "max_output_tokens": 8192,
                     },
                 },
             }
@@ -141,9 +123,7 @@ def download_results(job_name: str, output_path: str, raw_input_path: str):
         raw_inputs[f"req-{i}"] = ex
 
     # Parse results
-    REQUIRED = {"gist", "summary", "content", "narrative", "concepts",
-                "structured_concepts", "significance", "emotional_tone",
-                "outcome", "salience"}
+    REQUIRED = REQUIRED_FIELDS
 
     success = 0
     fail = 0
@@ -197,8 +177,9 @@ def download_results(job_name: str, output_path: str, raw_input_path: str):
         results.append({
             "raw_input": raw.get("raw_input", ""),
             "encoded": encoded,
-            "source": f"swebench_{raw.get('repo', 'unknown')}",
-            "task_type": "encoding",
+            "source": raw.get("source", f"swebench_{raw.get('repo', 'unknown')}"),
+            "task_type": raw.get("task_type", "encoding"),
+            **({"category": raw["category"]} if "category" in raw else {}),
         })
         success += 1
 

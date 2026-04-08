@@ -28,14 +28,7 @@ from transformers import AutoTokenizer
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-ENCODING_SYSTEM_PROMPT = (
-    "You are a memory encoding agent. You receive raw events and output structured JSON "
-    "with these required fields: gist (one-line summary), summary (2-3 sentences), "
-    "content (preserved detail), narrative (context paragraph), concepts (keyword array), "
-    "structured_concepts (object with topics, entities, actions, causality arrays), "
-    "significance (importance level), emotional_tone (mood), outcome (result), "
-    "salience (0.0-1.0 float). Never explain, never apologize. Output only valid JSON."
-)
+from training_constants import ENCODING_SYSTEM_PROMPT_SHORT as ENCODING_SYSTEM_PROMPT  # noqa: E402
 
 # --- Hard inputs designed to trigger hallucinations ---
 
@@ -132,6 +125,10 @@ HARD_INPUTS = [
 
 def parse_json(text: str) -> dict | None:
     text = text.strip()
+    # Strip Gemma turn markers that may survive skip_special_tokens
+    for marker in ["<start_of_turn>", "<end_of_turn>"]:
+        text = text.replace(marker, "")
+    text = text.strip()
     if text.startswith("```"):
         lines = text.split("\n")
         lines = [l for l in lines if not l.strip().startswith("```")]
@@ -141,13 +138,35 @@ def parse_json(text: str) -> dict | None:
     try:
         return json.loads(text)
     except json.JSONDecodeError:
+        # Model may generate multiple JSON objects concatenated — parse only the first
         start = text.find("{")
-        end = text.rfind("}") + 1
-        if start >= 0 and end > start:
-            try:
-                return json.loads(text[start:end])
-            except json.JSONDecodeError:
-                return None
+        if start < 0:
+            return None
+        depth = 0
+        in_string = False
+        escape = False
+        for i in range(start, len(text)):
+            c = text[i]
+            if escape:
+                escape = False
+                continue
+            if c == '\\':
+                escape = True
+                continue
+            if c == '"' and not escape:
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if c == '{':
+                depth += 1
+            elif c == '}':
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(text[start:i + 1])
+                    except json.JSONDecodeError:
+                        return None
     return None
 
 
@@ -196,8 +215,99 @@ def run_model(model_name: str, generate_fn, inputs: list[dict]) -> list[dict]:
     return results
 
 
+def run_model_batched(model_name: str, model, tokenizer, device, inputs: list[dict]) -> list[dict]:
+    """Run a model on all inputs in a single batched generate() call.
+
+    Left-pads all inputs to the same length so they can be processed as one
+    batch. On MI300X (192GB VRAM), this parallelizes prefill and decode across
+    all 7 sequences, giving ~3-5x speedup over sequential generation.
+    """
+    eos_id = tokenizer.eos_token_id
+    pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else eos_id
+
+    # Tokenize all inputs
+    all_input_ids = []
+    for test in inputs:
+        messages = [
+            {"role": "system", "content": ENCODING_SYSTEM_PROMPT},
+            {"role": "user", "content": test["input"]},
+        ]
+        text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        ids = tokenizer.encode(text, return_tensors="pt")[0]  # 1D tensor
+        all_input_ids.append(ids)
+
+    # Left-pad to max length (required for batched generation)
+    max_len = max(ids.shape[0] for ids in all_input_ids)
+    padded_ids = []
+    attention_masks = []
+    prompt_lengths = []
+    for ids in all_input_ids:
+        pad_len = max_len - ids.shape[0]
+        prompt_lengths.append(ids.shape[0])
+        padded = torch.cat([torch.full((pad_len,), pad_id, dtype=ids.dtype), ids])
+        mask = torch.cat([torch.zeros(pad_len, dtype=torch.long), torch.ones(ids.shape[0], dtype=torch.long)])
+        padded_ids.append(padded)
+        attention_masks.append(mask)
+
+    batch_input_ids = torch.stack(padded_ids).to(device)
+    batch_attention_mask = torch.stack(attention_masks).to(device)
+
+    print(f"  Batched generation: {len(inputs)} inputs, max_len={max_len}, "
+          f"range=[{min(prompt_lengths)}-{max(prompt_lengths)}] tokens")
+
+    # Single batched generate call
+    start = time.time()
+    with torch.no_grad():
+        output_ids = model.base_model.generate(
+            batch_input_ids,
+            attention_mask=batch_attention_mask,
+            max_new_tokens=2048,
+            do_sample=False,
+            pad_token_id=pad_id,
+            eos_token_id=eos_id,
+        )
+    total_elapsed = time.time() - start
+    per_input = total_elapsed / len(inputs)
+    print(f"  Batch completed in {total_elapsed:.1f}s ({per_input:.1f}s/input)")
+
+    # Decode each sequence, stripping the prompt portion
+    results = []
+    for i, test in enumerate(inputs):
+        # Output includes the prompt — slice it off using the padded length
+        prompt_end = max_len  # all sequences padded to same length
+        generated_ids = output_ids[i][prompt_end:]
+        response = tokenizer.decode(generated_ids, skip_special_tokens=True)
+
+        # Strip Gemma turn markers that survive skip_special_tokens=True
+        for marker in ["<start_of_turn>", "<end_of_turn>", "model\n", "model"]:
+            response = response.replace(marker, "")
+        response = response.strip()
+        if "<think>" in response:
+            response = response.split("</think>")[-1].strip()
+
+        parsed = parse_json(response)
+        missing, warnings = check_hallucination(parsed, test)
+
+        results.append({
+            "name": test["name"],
+            "raw_response": response,
+            "parsed": parsed,
+            "json_valid": parsed is not None,
+            "missing_terms": missing,
+            "warnings": warnings,
+            "time_s": per_input,  # amortized per-input time
+        })
+
+    return results
+
+
 def make_local_generator(model, tokenizer, device):
     """Create a generation function for a local model."""
+    # Resolve EOS token ID for early stopping — critical for MI300X perf.
+    # Without this, Gemma generates valid JSON then keeps filling 4096 tokens.
+    eos_id = tokenizer.eos_token_id
+    pad_id = tokenizer.pad_token_id or eos_id
+
     def generate(user_input):
         messages = [
             {"role": "system", "content": ENCODING_SYSTEM_PROMPT},
@@ -205,13 +315,22 @@ def make_local_generator(model, tokenizer, device):
         ]
         text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         input_ids = tokenizer.encode(text, return_tensors="pt").to(device)
+        attention_mask = torch.ones_like(input_ids)
 
         with torch.no_grad():
             output_ids = model.base_model.generate(
-                input_ids, max_new_tokens=1024, do_sample=False,
-                pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
+                input_ids,
+                attention_mask=attention_mask,
+                max_new_tokens=2048,
+                do_sample=False,
+                pad_token_id=pad_id,
+                eos_token_id=eos_id,
             )
         response = tokenizer.decode(output_ids[0][input_ids.shape[1]:], skip_special_tokens=True)
+        # Strip Gemma turn markers that survive skip_special_tokens=True
+        for marker in ["<start_of_turn>", "<end_of_turn>", "model\n", "model"]:
+            response = response.replace(marker, "")
+        response = response.strip()
         if "<think>" in response:
             response = response.split("</think>")[-1].strip()
         return response
@@ -331,6 +450,24 @@ def print_results(all_results: dict):
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Hallucination stress test")
+    parser.add_argument("--checkpoint", type=str, default=None,
+                        help="Path to Qwen spoke checkpoint (default: auto-detect exp17/exp18)")
+    parser.add_argument("--gemma-checkpoint", type=str, default=None,
+                        help="Path to Gemma spoke checkpoint (overrides auto-detect)")
+    parser.add_argument("--skip-qwen", action="store_true",
+                        help="Skip Qwen model (e.g., on droplet with only Gemma)")
+    parser.add_argument("--skip-gemma", action="store_true",
+                        help="Skip Gemma model (e.g., on droplet with only Qwen)")
+    parser.add_argument("--skip-gemini", action="store_true",
+                        help="Skip Gemini API comparison")
+    parser.add_argument("--no-quantize", action="store_true",
+                        help="Load Gemma in full bf16 (for high-VRAM hardware)")
+    parser.add_argument("--batch", action="store_true",
+                        help="Batch all inputs into one generate() call (MI300X/high-VRAM)")
+    cli_args = parser.parse_args()
+
     print("=" * 100)
     print("HALLUCINATION STRESS TEST")
     print(f"Tests: {len(HARD_INPUTS)} hard inputs designed to trigger hallucinations")
@@ -340,62 +477,91 @@ def main():
     all_results = {}
 
     # --- Qwen 3.5 2B + Spokes ---
-    print("\n--- Loading Qwen 3.5 2B + Spokes ---")
-    from qwen_spoke_adapter import QwenWithSpokes, SpokeConfig
-    spoke_path = "checkpoints/exp17_v2_data/best_spokes.pt"
-    if not Path(spoke_path).exists():
-        spoke_path = "checkpoints/exp18_v5_12k/best_spokes.pt"
-    data = torch.load(spoke_path, weights_only=True, map_location="cpu")
-    qwen_model = QwenWithSpokes.from_pretrained(
-        "Qwen/Qwen3.5-2B", spoke_config=SpokeConfig(**data["spoke_config"]), dtype=torch.bfloat16,
-    )
-    qwen_model.load_spokes(spoke_path)
-    qwen_model.to(device)
-    qwen_model.eval()
-    qwen_tok = AutoTokenizer.from_pretrained("Qwen/Qwen3.5-2B")
+    if not cli_args.skip_qwen:
+        print("\n--- Loading Qwen 3.5 2B + Spokes ---")
+        from qwen_spoke_adapter import QwenWithSpokes, SpokeConfig
+        if cli_args.checkpoint:
+            spoke_path = cli_args.checkpoint
+        else:
+            spoke_path = "checkpoints/exp17_v2_data/best_spokes.pt"
+            if not Path(spoke_path).exists():
+                spoke_path = "checkpoints/exp18_v5_12k/best_spokes.pt"
+        if Path(spoke_path).exists():
+            data = torch.load(spoke_path, weights_only=True, map_location="cpu")
+            qwen_model = QwenWithSpokes.from_pretrained(
+                "Qwen/Qwen3.5-2B", spoke_config=SpokeConfig(**data["spoke_config"]), dtype=torch.bfloat16,
+            )
+            qwen_model.load_spokes(spoke_path)
+            qwen_model.to(device)
+            qwen_model.eval()
+            qwen_tok = AutoTokenizer.from_pretrained("Qwen/Qwen3.5-2B")
 
-    print("--- Running Qwen ---")
-    all_results["Qwen+Spokes"] = run_model(
-        "Qwen+Spokes", make_local_generator(qwen_model, qwen_tok, device), HARD_INPUTS
-    )
-    del qwen_model
-    torch.cuda.empty_cache()
+            print("--- Running Qwen ---")
+            if cli_args.batch:
+                all_results["Qwen+Spokes"] = run_model_batched(
+                    "Qwen+Spokes", qwen_model, qwen_tok, device, HARD_INPUTS
+                )
+            else:
+                all_results["Qwen+Spokes"] = run_model(
+                    "Qwen+Spokes", make_local_generator(qwen_model, qwen_tok, device), HARD_INPUTS
+                )
+            del qwen_model
+            torch.cuda.empty_cache()
+        else:
+            print(f"  Qwen checkpoint not found at {spoke_path}, skipping")
+    else:
+        print("\n--- Skipping Qwen (--skip-qwen) ---")
 
     # --- Gemma 4 E2B + Spokes ---
-    print("\n--- Loading Gemma 4 E2B + Spokes ---")
-    from gemma_spoke_adapter import GemmaWithSpokes
-    spoke_path = "checkpoints/gemma4_e2b_v5/best_spokes.pt"
-    if Path(spoke_path).exists():
-        data = torch.load(spoke_path, weights_only=True, map_location="cpu")
-        gemma_model = GemmaWithSpokes.from_pretrained(
-            "google/gemma-4-E2B-it", spoke_config=SpokeConfig(**data["spoke_config"]),
-            offload_ple=False,
-        )
-        gemma_model.load_spokes(spoke_path)
-        if hasattr(gemma_model.base_model, 'hf_device_map'):
-            gemma_model.spokes.to(device)
+    if not cli_args.skip_gemma:
+        print("\n--- Loading Gemma 4 E2B + Spokes ---")
+        from gemma_spoke_adapter import GemmaWithSpokes
+        from qwen_spoke_adapter import SpokeConfig as _SC
+        if cli_args.gemma_checkpoint:
+            gemma_spoke_path = cli_args.gemma_checkpoint
         else:
-            gemma_model.to(device)
-        gemma_model.eval()
-        gemma_tok = AutoTokenizer.from_pretrained("google/gemma-4-E2B-it")
+            gemma_spoke_path = "checkpoints/gemma4_e2b_v5/best_spokes.pt"
+        if Path(gemma_spoke_path).exists():
+            data = torch.load(gemma_spoke_path, weights_only=True, map_location="cpu")
+            gemma_model = GemmaWithSpokes.from_pretrained(
+                "google/gemma-4-E2B",
+                spoke_config=_SC(**data["spoke_config"]),
+                offload_ple=not cli_args.no_quantize,
+                no_quantize=cli_args.no_quantize,
+                attn_implementation="sdpa",
+            )
+            gemma_model.load_spokes(gemma_spoke_path)
+            if hasattr(gemma_model.base_model, 'hf_device_map'):
+                gemma_model.spokes.to(device)
+            else:
+                gemma_model.to(device)
+            gemma_model.eval()
+            gemma_tok = AutoTokenizer.from_pretrained("google/gemma-4-E2B-it")
 
-        print("--- Running Gemma ---")
-        all_results["Gemma4+Spokes"] = run_model(
-            "Gemma4+Spokes", make_local_generator(gemma_model, gemma_tok, device), HARD_INPUTS
-        )
-        del gemma_model
-        torch.cuda.empty_cache()
+            print("--- Running Gemma ---")
+            if cli_args.batch:
+                all_results["Gemma4+Spokes"] = run_model_batched(
+                    "Gemma4+Spokes", gemma_model, gemma_tok, device, HARD_INPUTS
+                )
+            else:
+                all_results["Gemma4+Spokes"] = run_model(
+                    "Gemma4+Spokes", make_local_generator(gemma_model, gemma_tok, device), HARD_INPUTS
+                )
+            del gemma_model
+            torch.cuda.empty_cache()
+        else:
+            print(f"  Gemma checkpoint not found at {gemma_spoke_path}, skipping")
     else:
-        print("  Gemma checkpoint not found, skipping")
+        print("\n--- Skipping Gemma (--skip-gemma) ---")
 
     # --- Gemini 3 Flash ---
-    if os.environ.get("LLM_API_KEY"):
+    if not cli_args.skip_gemini and os.environ.get("LLM_API_KEY"):
         print("\n--- Running Gemini 3 Flash ---")
         all_results["Gemini3Flash"] = run_model(
             "Gemini3Flash", make_gemini_generator(), HARD_INPUTS
         )
     else:
-        print("\n--- LLM_API_KEY not set, skipping Gemini ---")
+        print("\n--- Skipping Gemini ---")
 
     # --- Results ---
     print_results(all_results)

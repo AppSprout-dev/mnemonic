@@ -55,6 +55,17 @@ type LLMConfig struct {
 	TimeoutSec           int               `yaml:"timeout_sec"`
 	MaxConcurrent        int               `yaml:"max_concurrent"` // max simultaneous LLM requests (0 = default 2)
 	Embedded             EmbeddedLLMConfig `yaml:"embedded"`       // config for in-process llama.cpp provider
+	Spoke                SpokeConfig       `yaml:"spoke"`          // optional spoke model routing
+}
+
+// SpokeConfig holds settings for routing specific agent tasks to a local spoke model.
+type SpokeConfig struct {
+	Enabled       bool     `yaml:"enabled"`        // enable spoke routing (default: false)
+	Endpoint      string   `yaml:"endpoint"`       // spoke server URL, e.g. "http://localhost:8899/v1"
+	Model         string   `yaml:"model"`          // model name for the spoke server
+	TimeoutSec    int      `yaml:"timeout_sec"`    // request timeout (default: 120)
+	MaxConcurrent int      `yaml:"max_concurrent"` // max simultaneous requests (default: 1)
+	Tasks         []string `yaml:"tasks"`          // agent tasks to route to spoke, e.g. ["encoding"]
 }
 
 // EmbeddedLLMConfig holds settings for the in-process llama.cpp provider.
@@ -514,7 +525,7 @@ func Default() *Config {
 			Endpoint:       "http://localhost:1234/v1",
 			ChatModel:      "neural-chat",
 			EmbeddingModel: "text-embedding-embeddinggemma-300m-qat",
-			MaxTokens:      512,
+			MaxTokens:      4096,
 			Temperature:    0.3,
 			TimeoutSec:     120,
 			MaxConcurrent:  2,
@@ -523,6 +534,11 @@ func Default() *Config {
 				ContextSize: 2048,
 				GPULayers:   -1,
 				BatchSize:   512,
+			},
+			Spoke: SpokeConfig{
+				Enabled:       false,
+				TimeoutSec:    120,
+				MaxConcurrent: 1,
 			},
 		},
 		Store: StoreConfig{
@@ -648,7 +664,7 @@ func Default() *Config {
 			ContextSemanticCount:     3,
 			MaxConcurrentEncodings:   1,
 			EnableLLMClassification:  false,
-			CompletionMaxTokens:      1024,
+			CompletionMaxTokens:      4096,
 			SimilarityThreshold:      0.3,
 			PollingIntervalSec:       5,
 			MaxRetries:               3,
@@ -702,7 +718,7 @@ func Default() *Config {
 			DecayFactor:         0.7,
 			MaxResults:          7,
 			MaxToolCalls:        5,
-			SynthesisMaxTokens:  1024,
+			SynthesisMaxTokens:  4096,
 			MergeAlpha:          0.6,
 			DualHitBonus:        0.15,
 
@@ -1020,6 +1036,17 @@ func (c *Config) Validate() error {
 		}
 	default:
 		return fmt.Errorf("llm.provider must be \"api\" or \"embedded\", got %q", c.LLM.Provider)
+	}
+	if c.LLM.Spoke.Enabled {
+		if c.LLM.Spoke.Endpoint == "" {
+			return errors.New("llm.spoke.endpoint is required when spoke is enabled")
+		}
+		if c.LLM.Spoke.Model == "" {
+			return errors.New("llm.spoke.model is required when spoke is enabled")
+		}
+		if len(c.LLM.Spoke.Tasks) == 0 {
+			return errors.New("llm.spoke.tasks must list at least one task when spoke is enabled")
+		}
 	}
 	if c.Store.DBPath == "" {
 		return errors.New("store.db_path is required")

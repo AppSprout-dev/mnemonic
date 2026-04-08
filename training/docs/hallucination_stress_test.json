@@ -2,11 +2,11 @@
   "Qwen+Spokes": [
     {
       "name": "Websocket race condition",
-      "raw_response": "{\"gist\": \"Fixed race condition in WebSocket upgrade handler\", \"summary\": \"A race condition was identified in the WebSocket upgrade handler where simultaneous connections caused goroutines to read from each other's channels. The root cause was a pointer capture of the ResponseWriter in the ws.upgrader.Upgrade() call, which conflicted with the ServeHTTP loop's reuse of the writer.\", \"content\": \"The bug is located in internal/api/routes/ws.go, specifically lines 47-63. The ws.upgrader.Upgrade() call captures the http.ResponseWriter by pointer. When two clients connect simultaneously, the first connection's goroutine reads from a channel while the second connection's goroutine attempts to use the same ResponseWriter, leading to a race condition. The fix involves copying the ResponseWriter into a local variable before spawning the goroutine.\", \"narrative\": \"This issue highlights a subtle concurrency bug in the Go-based web framework. By relying on pointer captures for the ResponseWriter, the system failed to account for the non-unique nature of the underlying HTTP writer across concurrent requests. This led to data corruption or race conditions in the WebSocket upgrade process. The fix ensures that each goroutine has its own independent writer, maintaining thread safety during the upgrade phase.\", \"concepts\": [\"go\", \"websocket\", \"concurrency\", \"race condition\", \"http.ResponseWriter\", \"goroutine\", \"thread safety\"], \"structured_concepts\": {\"topics\": [{\"label\": \"Software Engineering\", \"path\": \"engineering/software\"}, {\"label\": \"Concurrency\", \"path\": \"engineering/concurrency\"}], \"entities\": [{\"name\": \"Go\", \"type\": \"language\", \"context\": \"runtime environment\"}, {\"name\": \"WebSocket\", \"type\": \"protocol\", \"context\": \"communication protocol\"}, {\"name\": \"internal/api/routes/ws.go\", \"type\": \"file\", \"context\": \"source code location\"}], \"actions\": [{\"verb\": \"fix\", \"object\": \"race condition\", \"details\": \"copy ResponseWriter to local variable\"}, {\"verb\": \"debug\", \"object\": \"websocket handler\", \"details\": \"identified simultaneous connection issue\"}], \"causality\": [{\"relation\": \"caused_by\", \"description\": \"Pointer capture of ResponseWriter led to concurrent access conflicts\"}, {\"relation\": \"results_in\", \"description\": \"Race condition in WebSocket upgrade process\"}]}, \"significance\": \"important\", \"emotional_tone\": \"analytical\", \"outcome\": \"Root cause identified and fix implemented in internal/api/routes/ws.go.\", \"salience\": 0.85}\n",
+      "raw_response": "{\"gist\": \"Fixed websocket race condition in dashboard handler\", \"summary\": \"A race condition was identified in the dashboard websocket handler where simultaneous connections caused goroutines to read from each other's channels. The root cause was the reuse of the http.ResponseWriter by the ws.upgrader.Upgrade() call, which led to a goroutine holding a reference to a ResponseWriter that was being used by a subsequent request.\", \"content\": \"Bug in internal/api/routes/ws.go:47-63. The ws.upgrader.Upgrade() call in handleWS() captures the http.ResponseWriter by pointer. The ServeHTTP loop reuses the ResponseWriter for the next request. The goroutine spawned for connection 1 still holds a reference to the ResponseWriter that's now being used by connection 2. Fix: copy the ResponseWriter into a local variable before spawning the goroutine.\", \"narrative\": \"This bug highlights a common concurrency issue in Go web frameworks where the reuse of underlying HTTP resources can lead to race conditions. By capturing the ResponseWriter by pointer, the websocket handler inadvertently created a dependency between the upgrade goroutine and the main request handler. The fix involves ensuring that the ResponseWriter is a local copy before spawning the goroutine, preventing the goroutine from holding a reference to a resource that is being actively used by another goroutine.\", \"concepts\": [\"websocket\", \"goroutine\", \"race condition\", \"http.ResponseWriter\", \"concurrency\", \"bug fix\"], \"structured_concepts\": {\"topics\": [{\"label\": \"Concurrency\", \"path\": \"software_engineering/concurrency\"}, {\"label\": \"WebSockets\", \"path\": \"software_engineering/websockets\"}], \"entities\": [{\"name\": \"ws.upgrader.Upgrade()\", \"type\": \"function\", \"context\": \"The websocket upgrade handler that caused the race condition\"}, {\"name\": \"internal/api/routes/ws.go:47-63\", \"type\": \"file\", \"context\": \"The file containing the buggy websocket handler\"}], \"actions\": [{\"verb\": \"fixed\", \"object\": \"websocket race condition\", \"details\": \"Copied ResponseWriter to local variable before spawning goroutine\"}], \"causality\": [{\"relation\": \"caused_by\", \"description\": \"Reusing the http.ResponseWriter by pointer led to a goroutine holding a reference to a ResponseWriter that was being used by a subsequent request.\"}, {\"relation\": \"resolved_by\", \"description\": \"Copying the ResponseWriter into a local variable before spawning the goroutine fixed the race condition.\"}]}, \"significance\": \"important\", \"emotional_tone\": \"analytical\", \"outcome\": \"Race condition fixed by copying the ResponseWriter into a local variable before spawning the goroutine.\", \"salience\": 0.85}\n",
       "json_valid": true,
       "missing_terms": [],
       "warnings": [],
-      "time_s": 24.06989884376526,
+      "time_s": 26.420263528823853,
       "parsed_keys": [
         "gist",
         "summary",
@@ -19,42 +19,18 @@
         "outcome",
         "salience"
       ],
-      "gist": "Fixed race condition in WebSocket upgrade handler",
-      "summary": "A race condition was identified in the WebSocket upgrade handler where simultaneous connections caused goroutines to read from each other's channels. The root cause was a pointer capture of the ResponseWriter in the ws.upgrader.Upgrade() call, which conflicted with the ServeHTTP loop's reuse of the writer."
+      "gist": "Fixed websocket race condition in dashboard handler",
+      "summary": "A race condition was identified in the dashboard websocket handler where simultaneous connections caused goroutines to read from each other's channels. The root cause was the reuse of the http.ResponseWriter by the ws.upgrader.Upgrade() call, which led to a goroutine holding a reference to a ResponseWriter that was being used by a subsequent request."
     },
     {
       "name": "Dense benchmark numbers",
-      "raw_response": "{\"gist\": \"SQLite index performance benchmark for 1M rows\", \"summary\": \"Benchmarking SQLite indexes on 1 million rows reveals that hash indexes offer the fastest lookups but incur the highest disk usage. B+ tree indexes are superior for range queries, while covering indexes provide the best performance for specific query patterns despite their 2x disk overhead.\", \"content\": \"B+ tree index: 2.3ms lookup, 156MB disk, 12.1s build. Hash index: 0.8ms lookup, 203MB disk, 8.4s build. No index: 47.2ms lookup, 89MB disk, 0s build. Covering index: 1.1ms lookup, 312MB disk, 23.7s build. Hash index is the fastest for point lookups, B+ tree is best for range queries, and covering indexes are the fastest for specific query patterns but are 2x more expensive in disk space.\", \"narrative\": \"This benchmark provides critical performance data for database indexing strategies. While hash indexes are ideal for high-concurrency point lookups, the B+ tree remains the standard for range queries. The discovery that covering indexes are significantly faster than B+ trees for specific patterns suggests that the choice of index should be driven by the specific query patterns of the application rather than just raw speed.\", \"concepts\": [\"sqlite\", \"indexing\", \"performance benchmark\", \"hash index\", \"b+ tree\", \"covering index\", \"database optimization\"], \"structured_concepts\": {\"topics\": [{\"label\": \"Database Engineering\", \"path\": \"software_engineering/databases\"}, {\"label\": \"Performance Testing\", \"path\": \"software_engineering/testing\"}], \"entities\": [{\"name\": \"SQLite\", \"type\": \"database\", \"context\": \"storage engine being benchmarked\"}, {\"name\": \"1M rows\", \"type\": \"dataset\", \"context\": \"benchmark scale\"}], \"actions\": [{\"verb\": \"benchmark\", \"object\": \"index performance\", \"details\": \"compared B+ tree, hash, and covering indexes\"}, {\"verb\": \"compare\", \"object\": \"lookup times\", \"details\": \"measured average latency across different index types\"}], \"causality\": [{\"relation\": \"trade-off\", \"description\": \"Hash indexes provide the fastest lookups but require the most disk space.\"}, {\"relation\": \"optimization\", \"description\": \"Covering indexes are the fastest for specific query patterns but double the disk cost.\"}]}, \"significance\": \"important\", \"emotional_tone\": \"analytical\", \"outcome\": \"Identified optimal index strategy based on specific query patterns and performance requirements.\", \"salience\": 0.85}\n",
+      "raw_response": "{\"gist\": \"SQLite index performance benchmark: Hash wins on lookup, B+ tree on range queries.\", \"summary\": \"A benchmark was conducted on SQLite with 1 million rows to compare B+ tree, hash, and covering index performance. The results show that hash indexes offer significantly faster lookups but incur higher disk usage, while B+ tree indexes are superior for range queries.\", \"content\": \"Benchmarked SQLite index performance on 1M rows. B+ tree: 2.3ms avg lookup, 156MB disk, 12.1s build. Hash: 0.8ms avg lookup, 203MB disk, 8.4s build. No index: 47.2ms avg lookup, 89MB disk, 0s build. Covering index: 1.1ms avg lookup, 312MB disk, 23.7s build. Hash index wins on lookup speed but B+ tree is better for range queries. Covering index is fastest for the specific query pattern but 2x disk cost.\", \"narrative\": \"This benchmark provides critical architectural guidance for database indexing strategies. While hash indexes are highly efficient for point lookups, they are less suitable for range queries and come with a significant storage overhead. Conversely, B+ tree indexes are the standard for range queries and are more space-efficient. The data suggests that for the specific query pattern in question, a covering index is the optimal choice despite its higher disk footprint, as it balances speed and storage effectively.\", \"concepts\": [\"sqlite\", \"indexing\", \"performance benchmark\", \"hash index\", \"b+ tree\", \"covering index\", \"database optimization\"], \"structured_concepts\": {\"topics\": [{\"label\": \"Database Optimization\", \"path\": \"software_engineering/database/optimization\"}, {\"label\": \"Performance Benchmarking\", \"path\": \"software_engineering/testing/benchmarking\"}], \"entities\": [{\"name\": \"SQLite\", \"type\": \"database\", \"context\": \"The database system being benchmarked\"}, {\"name\": \"B+ tree\", \"type\": \"data_structure\", \"context\": \"Index type used for range queries\"}, {\"name\": \"Hash index\", \"type\": \"data_structure\", \"context\": \"Index type used for point lookups\"}, {\"name\": \"Covering index\", \"type\": \"data_structure\", \"context\": \"Index type optimized for specific query patterns\"}], \"actions\": [{\"verb\": \"benchmarked\", \"object\": \"SQLite index performance\", \"details\": \"Evaluated 1M row datasets for various index types\"}, {\"verb\": \"compared\", \"object\": \"lookup speeds and disk usage\", \"details\": \"Measured average lookup times and disk consumption for each index type\"}], \"causality\": [{\"relation\": \"trade-off\", \"description\": \"Hash indexes provide faster lookups but require 2x more disk space than B+ tree indexes.\"}, {\"relation\": \"optimization\", \"description\": \"Covering indexes are the fastest for the specific query pattern but incur a 2x disk cost.\"}]}, \"significance\": \"important\", \"emotional_tone\": \"analytical\", \"outcome\": \"Hash index selected for point lookups; B+ tree selected for range queries; Covering index selected for the specific query pattern.\", \"salience\": 0.85}\n",
       "json_valid": true,
       "missing_terms": [],
-      "warnings": [],
-      "time_s": 26.00001859664917,
-      "parsed_keys": [
-        "gist",
-        "summary",
-        "content",
-        "narrative",
-        "concepts",
-        "structured_concepts",
-        "significance",
-        "emotional_tone",
-        "outcome",
-        "salience"
-      ],
-      "gist": "SQLite index performance benchmark for 1M rows",
-      "summary": "Benchmarking SQLite indexes on 1 million rows reveals that hash indexes offer the fastest lookups but incur the highest disk usage. B+ tree indexes are superior for range queries, while covering indexes provide the best performance for specific query patterns despite their 2x disk overhead."
-    },
-    {
-      "name": "Multi-topic conflation",
-      "raw_response": "{\"gist\": \"Fixed FTS5 tokenizer, optimized Docker image, and resolved Mac Mini deployment error.\", \"summary\": \"Resolved three independent issues: a CamelCase tokenization bug in FTS5, a Docker image size reduction via multi-stage builds, and a Mac Mini deployment failure caused by incorrect launchd plist paths.\", \"content\": \"1. Fixed FTS5 tokenizer to split CamelCase words (e.g., 'getUserName') into individual tokens instead of grouping them. 2. Updated Dockerfile to implement multi-stage builds, reducing image size from 1.2GB to 340MB. 3. Fixed Mac Mini deployment failure by correcting the binary path in the launchd plist configuration.\", \"narrative\": \"These updates address critical performance and stability gaps across the development stack. The FTS5 fix ensures better data indexing for text-based applications, while the Docker optimization significantly lowers infrastructure costs. The Mac Mini deployment fix is a necessary correction for the local environment, ensuring the build pipeline can successfully reach the hardware.\", \"concepts\": [\"fts5\", \"docker optimization\", \"mac mini deployment\", \"tokenization\", \"multi-stage build\", \"launchd\"], \"structured_concepts\": {\"topics\": [{\"label\": \"Software Engineering\", \"path\": \"engineering/software\"}, {\"label\": \"DevOps\", \"path\": \"engineering/devops\"}, {\"label\": \"Database Indexing\", \"path\": \"engineering/databases\"}], \"entities\": [{\"name\": \"FTS5\", \"type\": \"tool\", \"context\": \"Full-text search engine\"}, {\"name\": \"Docker\", \"type\": \"tool\", \"context\": \"Containerization platform\"}, {\"name\": \"Mac Mini\", \"type\": \"hardware\", \"context\": \"Deployment target\"}], \"actions\": [{\"verb\": \"fixed\", \"object\": \"tokenization logic\", \"details\": \"Split CamelCase words into separate tokens\"}, {\"verb\": \"optimized\", \"object\": \"Docker image\", \"details\": \"Reduced size from 1.2GB to 340MB using multi-stage builds\"}, {\"verb\": \"resolved\", \"object\": \"deployment failure\", \"details\": \"Corrected launchd plist binary path\"}], \"causality\": [{\"relation\": \"resulted_in\", \"description\": \"Fixing the tokenizer allowed for more granular text indexing.\"}, {\"relation\": \"caused_by\", \"description\": \"Incorrect plist paths caused the Mac Mini deployment to fail.\"}]}, \"significance\": \"important\", \"emotional_tone\": \"analytical\", \"outcome\": \"Three distinct technical issues were successfully resolved.\", \"salience\": 0.85}\n",
-      "json_valid": true,
-      "missing_terms": [
-        "Jason"
-      ],
       "warnings": [
-        "gist_long:85"
+        "gist_long:82"
       ],
-      "time_s": 24.706913948059082,
+      "time_s": 30.688313007354736,
       "parsed_keys": [
         "gist",
         "summary",
@@ -67,155 +43,16 @@
         "outcome",
         "salience"
       ],
-      "gist": "Fixed FTS5 tokenizer, optimized Docker image, and resolved Mac Mini deployment error.",
-      "summary": "Resolved three independent issues: a CamelCase tokenization bug in FTS5, a Docker image size reduction via multi-stage builds, and a Mac Mini deployment failure caused by incorrect launchd plist paths."
-    },
-    {
-      "name": "Precise error with stack trace",
-      "raw_response": "{\"gist\": \"Index out of range error in Mnemonic retrieval spread activation logic\", \"summary\": \"A panic occurred in the Mnemonic retrieval agent when attempting to access an index out of range at position 3. This error occurred during the spreadActivation process within the retrieval agent's internal logic.\", \"content\": \"The error 'panic: runtime error: index out of range [3] with length 3' was triggered in the spreadActivation method of the RetrievalAgent. The stack trace shows the failure occurred at line 142 of the spread.go file during the Retrieve operation. The specific context involves a retrieval depth of 3 and a spread factor of 4.\", \"narrative\": \"This error represents a critical failure in the semantic memory retrieval system's graph traversal logic. The spreadActivation function, which is responsible for propagating context across the memory graph, failed because it tried to access an index that did not exist in the underlying data structure. This suggests a potential bug in how the agent calculates the spread factor or the size of the activation graph for a specific query.\", \"concepts\": [\"go panic\", \"retrieval agent\", \"graph traversal\", \"index out of range\", \"semantic memory\", \"spread activation\"], \"structured_concepts\": {\"topics\": [{\"label\": \"Software Engineering\", \"path\": \"engineering/software\"}, {\"label\": \"Machine Learning\", \"path\": \"ai/ml\"}, {\"label\": \"Debugging\", \"path\": \"engineering/debugging\"}], \"entities\": [{\"name\": \"Mnemonic\", \"type\": \"system\", \"context\": \"semantic memory system\"}, {\"name\": \"RetrievalAgent\", \"type\": \"component\", \"context\": \"internal agent responsible for memory retrieval\"}, {\"name\": \"spreadActivation\", \"type\": \"function\", \"context\": \"graph traversal logic\"}], \"actions\": [{\"verb\": \"panic\", \"object\": \"runtime error\", \"details\": \"index out of range at position 3\"}, {\"verb\": \"trigger\", \"object\": \"spreadActivation\", \"details\": \"during the Retrieve operation\"}], \"causality\": [{\"relation\": \"caused_by\", \"description\": \"The retrieval agent attempted to access index 3 in a slice of length 3, leading to a panic.\"}]}, \"significance\": \"critical\", \"emotional_tone\": \"frustrated\", \"outcome\": \"Runtime panic in the retrieval agent's graph traversal logic.\", \"salience\": 0.9}\n",
-      "json_valid": true,
-      "missing_terms": [
-        "spread.go:142",
-        "agent.go:89"
-      ],
-      "warnings": [],
-      "time_s": 23.056560516357422,
-      "parsed_keys": [
-        "gist",
-        "summary",
-        "content",
-        "narrative",
-        "concepts",
-        "structured_concepts",
-        "significance",
-        "emotional_tone",
-        "outcome",
-        "salience"
-      ],
-      "gist": "Index out of range error in Mnemonic retrieval spread activation logic",
-      "summary": "A panic occurred in the Mnemonic retrieval agent when attempting to access an index out of range at position 3. This error occurred during the spreadActivation process within the retrieval agent's internal logic."
-    },
-    {
-      "name": "Ambiguous short input",
-      "raw_response": "{\"gist\": \"System functionality restored and verified.\", \"summary\": \"The system has successfully recovered and is now functioning as expected. All previously identified issues have been resolved and the current state is stable.\", \"content\": \"Verification of system status shows successful restoration. No further errors or failures were reported during the current session.\", \"narrative\": \"This event marks the successful resolution of a technical issue. The transition from a failed state to a working state indicates that the system's recovery mechanisms or manual intervention were effective in restoring normal operation.\", \"concepts\": [\"system recovery\", \"status verification\", \"technical success\", \"debugging\", \"restoration\"], \"structured_concepts\": {\"topics\": [{\"label\": \"System Administration\", \"path\": \"infrastructure/admin\"}, {\"label\": \"Troubleshooting\", \"path\": \"software/support\"}], \"entities\": [{\"name\": \"System\", \"type\": \"software\", \"context\": \"the primary system being verified\"}], \"actions\": [{\"verb\": \"verify\", \"object\": \"system status\", \"details\": \"confirmed successful restoration\"}, {\"verb\": \"resolve\", \"object\": \"technical issue\", \"details\": \"system is now working\"}], \"causality\": [{\"relation\": \"resulted_in\", \"description\": \"The fix led to the system returning to a working state.\"}]}, \"significance\": \"important\", \"emotional_tone\": \"positive\", \"outcome\": \"System is operational and verified.\", \"salience\": 0.85}\n",
-      "json_valid": true,
-      "missing_terms": [],
-      "warnings": [],
-      "time_s": 14.059358835220337,
-      "parsed_keys": [
-        "gist",
-        "summary",
-        "content",
-        "narrative",
-        "concepts",
-        "structured_concepts",
-        "significance",
-        "emotional_tone",
-        "outcome",
-        "salience"
-      ],
-      "gist": "System functionality restored and verified.",
-      "summary": "The system has successfully recovered and is now functioning as expected. All previously identified issues have been resolved and the current state is stable."
-    },
-    {
-      "name": "Foreign language technical",
-      "raw_response": "{\"gist\": \"ROCm 7.2 \u74b0\u5883\u3067\u306e PyTorch \u30c6\u30b9\u30c8\u5931\u6557\u3068\u4fee\u6b63\", \"summary\": \"ROCm 7.2 \u306e\u30a4\u30f3\u30b9\u30c8\u30fc\u30eb\u5f8c\u3001PyTorch \u306e\u30c6\u30b9\u30c8\u30b9\u30a4\u30fc\u30c8\u3067 3 \u3064\u306e\u5931\u6557\u304c\u767a\u751f\u3057\u307e\u3057\u305f\u3002CUDA \u30a8\u30e9\u30fc\u3068\u7cbe\u5ea6\u8aa4\u5dee\u306f HIP_VISIBLE_DEVICES \u306e\u8a2d\u5b9a\u3067\u89e3\u6c7a\u3057\u307e\u3057\u305f\u304c\u3001RDNA3 \u672a\u5bfe\u5fdc\u306e\u30d5\u30e9\u30c3\u30b7\u30e5\u30a2\u30c6\u30f3\u30b7\u30e7\u30f3\u30c6\u30b9\u30c8\u306f\u30b9\u30ad\u30c3\u30d7\u3055\u308c\u307e\u3057\u305f\u3002\", \"content\": \"\u5931\u6557 1: test_conv2d_backward \u3067\u7cbe\u5ea6\u8aa4\u5dee 2.3e-4 \u304c atol=1e-5 \u306e\u95be\u5024\u3092\u8d85\u3048\u307e\u3057\u305f\u3002\u5931\u6557 2: test_batch_norm_train \u3067 'invalid device ordinal' \u3068\u3044\u3046 CUDA \u30a8\u30e9\u30fc\u304c\u767a\u751f\u3057\u307e\u3057\u305f\u3002\u5931\u6557 3: test_flash_attention \u304c RDNA3 \u672a\u5bfe\u5fdc\u306e\u305f\u3081\u30b9\u30ad\u30c3\u30d7\u3055\u308c\u307e\u3057\u305f\u3002\u89e3\u6c7a\u7b56: HIP_VISIBLE_DEVICES=0 \u3092\u8a2d\u5b9a\u3057\u3001\u30c6\u30b9\u30c8 2 \u3092\u4fee\u6b63\u3057\u307e\u3057\u305f\u3002\", \"narrative\": \"ROCm 7.2 \u74b0\u5883\u3067\u306e PyTorch \u74b0\u5883\u69cb\u7bc9\u306b\u304a\u3044\u3066\u3001\u30cf\u30fc\u30c9\u30a6\u30a7\u30a2\u306e\u7279\u6027\uff08RDNA3\uff09\u3068\u30bd\u30d5\u30c8\u30a6\u30a7\u30a2\u306e\u4e92\u63db\u6027\uff08HIP \u306b\u3088\u308b CUDA \u7ba1\u7406\uff09\u304c\u8ab2\u984c\u3068\u306a\u308a\u307e\u3057\u305f\u3002\u30c6\u30b9\u30c8\u7d50\u679c\u306f\u3001HIP \u306b\u3088\u308b\u30c7\u30d0\u30a4\u30b9\u7ba1\u7406\u3067\u90e8\u5206\u7684\u306b\u89e3\u6c7a\u3057\u307e\u3057\u305f\u304c\u3001\u65e2\u5b58\u306e ROCm \u554f\u984c\u3068\u30cf\u30fc\u30c9\u30a6\u30a7\u30a2\u306e\u5236\u9650\uff08RDNA3\uff09\u304c\u5f71\u97ff\u3057\u3066\u3044\u308b\u3053\u3068\u304c\u78ba\u8a8d\u3055\u308c\u307e\u3057\u305f\u3002\", \"concepts\": [\"rocm\", \"pytorch\", \"hip\", \"cuda\", \"rdna3\", \"benchmarking\", \"gpu compatibility\"], \"structured_concepts\": {\"topics\": [{\"label\": \"GPU Computing\", \"path\": \"software/hardware/gpu\"}, {\"label\": \"Deep Learning Frameworks\", \"path\": \"software/ai/frameworks\"}], \"entities\": [{\"name\": \"ROCm 7.2\", \"type\": \"software\", \"context\": \"GPU driver and compiler\"}, {\"name\": \"PyTorch\", \"type\": \"framework\", \"context\": \"Deep learning library\"}, {\"name\": \"HIP\", \"type\": \"library\", \"context\": \"HIP_VISIBLE_DEVICES \u8a2d\u5b9a\u306b\u3088\u308b\u7ba1\u7406\"}], \"actions\": [{\"verb\": \"install\", \"object\": \"ROCm 7.2\", \"details\": \"GPU environment setup\"}, {\"verb\": \"configure\", \"object\": \"HIP_VISIBLE_DEVICES\", \"details\": \"Set to 0 to resolve device ordinal errors\"}, {\"verb\": \"skip\", \"object\": \"test_flash_attention\", \"details\": \"Due to RDNA3 hardware support\"}], \"causality\": [{\"relation\": \"caused_by\", \"description\": \"RDNA3 \u672a\u5bfe\u5fdc\u306b\u3088\u308a test_flash_attention \u304c\u30b9\u30ad\u30c3\u30d7\u3055\u308c\u305f\"}, {\"relation\": \"resolved_by\", \"description\": \"HIP_VISIBLE_DEVICES=0 \u306e\u8a2d\u5b9a\u306b\u3088\u308a test_batch_norm_train \u306e CUDA \u30a8\u30e9\u30fc\u304c\u89e3\u6c7a\u3055\u308c\u305f\"}]}, \"significance\": \"notable\", \"emotional_tone\": \"analytical\", \"outcome\": \"3 \u3064\u306e\u30c6\u30b9\u30c8\u5931\u6557\u3092\u7279\u5b9a\u3057\u3001HIP \u8a2d\u5b9a\u3068\u30cf\u30fc\u30c9\u30a6\u30a7\u30a2\u5236\u9650\u3092\u8a18\u9332\u3057\u305f\", \"salience\": 0.7}\n",
-      "json_valid": true,
-      "missing_terms": [],
-      "warnings": [],
-      "time_s": 28.345489025115967,
-      "parsed_keys": [
-        "gist",
-        "summary",
-        "content",
-        "narrative",
-        "concepts",
-        "structured_concepts",
-        "significance",
-        "emotional_tone",
-        "outcome",
-        "salience"
-      ],
-      "gist": "ROCm 7.2 \u74b0\u5883\u3067\u306e PyTorch \u30c6\u30b9\u30c8\u5931\u6557\u3068\u4fee\u6b63",
-      "summary": "ROCm 7.2 \u306e\u30a4\u30f3\u30b9\u30c8\u30fc\u30eb\u5f8c\u3001PyTorch \u306e\u30c6\u30b9\u30c8\u30b9\u30a4\u30fc\u30c8\u3067 3 \u3064\u306e\u5931\u6557\u304c\u767a\u751f\u3057\u307e\u3057\u305f\u3002CUDA \u30a8\u30e9\u30fc\u3068\u7cbe\u5ea6\u8aa4\u5dee\u306f HIP_VISIBLE_DEVICES \u306e\u8a2d\u5b9a\u3067\u89e3\u6c7a\u3057\u307e\u3057\u305f\u304c\u3001RDNA3 \u672a\u5bfe\u5fdc\u306e\u30d5\u30e9\u30c3\u30b7\u30e5\u30a2\u30c6\u30f3\u30b7\u30e7\u30f3\u30c6\u30b9\u30c8\u306f\u30b9\u30ad\u30c3\u30d7\u3055\u308c\u307e\u3057\u305f\u3002"
-    },
-    {
-      "name": "Numerical config dump",
-      "raw_response": "{\"gist\": \"EXP-14 run 2 training for Qwen3.5-2B with 80% novel schema coverage\", \"summary\": \"The EXP-14 run 2 utilized a 2B parameter model with a 4-spoke architecture to process 3577 training samples. The run achieved an evaluation loss of 0.6435 and successfully reached 80% novel schema coverage within 6 hours.\", \"content\": \"Model: Qwen/Qwen3.5-2B. Architecture: 4 spokes, spoke_rank 64. Hyperparameters: batch_size 1, grad_accum 8 (effective 8), seq_len 2048, lr 3e-4, cosine decay to 3e-5. Data: 3577 train / 397 eval (deduped). Performance: eval_loss=0.6435 at step 5600. Novelty: 80% novel schema coverage. Hardware: RX 7800 XT.\", \"narrative\": \"This training run demonstrates the effectiveness of the EXP-14 framework in scaling Qwen3.5-2B for specialized schema tasks. The use of a 4-spoke architecture with a rank of 64 suggests a focus on high-dimensional feature extraction. The successful completion of the 80% novel schema coverage target within a 6-hour window on consumer-grade hardware indicates a high training efficiency and a robust data pipeline for the EXP-14 project.\", \"concepts\": [\"qwen3.5\", \"llm training\", \"exp-14\", \"schema coverage\", \"model architecture\", \"hyperparameters\", \"hardware optimization\"], \"structured_concepts\": {\"topics\": [{\"label\": \"Large Language Models\", \"path\": \"ai/llm\"}, {\"label\": \"Model Training\", \"path\": \"ai/infrastructure/training\"}], \"entities\": [{\"name\": \"Qwen/Qwen3.5-2B\", \"type\": \"model\", \"context\": \"base model for EXP-14 run 2\"}, {\"name\": \"RX 7800 XT\", \"type\": \"hardware\", \"context\": \"GPU used for training\"}, {\"name\": \"EXP-14\", \"type\": \"framework\", \"context\": \"training framework and experiment tracking\"}], \"actions\": [{\"verb\": \"train\", \"object\": \"Qwen3.5-2B\", \"details\": \"80% novel schema coverage achieved\"}, {\"verb\": \"optimize\", \"object\": \"training config\", \"details\": \"used 4-spoke architecture with 64 rank\"}], \"causality\": [{\"relation\": \"resulted_in\", \"description\": \"High training efficiency led to 80% novel schema coverage within 6 hours.\"}]}, \"significance\": \"important\", \"emotional_tone\": \"analytical\", \"outcome\": \"Successful training run with 80% schema coverage and 0.6435 loss.\", \"salience\": 0.85}\n",
-      "json_valid": true,
-      "missing_terms": [],
-      "warnings": [],
-      "time_s": 29.39031958580017,
-      "parsed_keys": [
-        "gist",
-        "summary",
-        "content",
-        "narrative",
-        "concepts",
-        "structured_concepts",
-        "significance",
-        "emotional_tone",
-        "outcome",
-        "salience"
-      ],
-      "gist": "EXP-14 run 2 training for Qwen3.5-2B with 80% novel schema coverage",
-      "summary": "The EXP-14 run 2 utilized a 2B parameter model with a 4-spoke architecture to process 3577 training samples. The run achieved an evaluation loss of 0.6435 and successfully reached 80% novel schema coverage within 6 hours."
-    }
-  ],
-  "Gemma4+Spokes": [
-    {
-      "name": "Websocket race condition",
-      "raw_response": "{\"gist\": \"Fix for dashboard websocket handler goroutine channel leak\", \"summary\": \"A bug in the dashboard websocket handler caused concurrent connections to read from the wrong channel. The issue stemmed from the ServeHTTP loop reusing the http.ResponseWriter after a goroutine was spawned to handle a new connection.\", \"content\": \"The ws.upgrader.Upgrade() call in handleWS() captures the http.ResponseWriter by pointer. When two clients connect simultaneously, the second connection's goroutine reads from the first connection's channel because the ServeHTTP loop reuses the ResponseWriter for the next request. The fix involves copying the ResponseWriter into a local variable before spawning the goroutine in internal/api/routes/ws.go.\", \"narrative\": \"This fix addresses a critical concurrency bug in the dashboard's WebSocket implementation. By ensuring that each connection's goroutine has a unique reference to its response writer, the system prevents data corruption and ensures that messages are routed to the correct client. This is a standard pattern for handling concurrent HTTP requests where the underlying server loop might otherwise reuse resources too quickly.\", \"concepts\": [\"websocket\", \"concurrency\", \"goroutines\", \"channel leak\", \"http.ResponseWriter\", \"dashboard\"], \"structured_concepts\": {\"topics\": [{\"label\": \"Backend Development\", \"path\": \"software_engineering/backend\"}, {\"label\": \"Concurrency\", \"path\": \"computer_science/concurrency\"}], \"entities\": [{\"name\": \"dashboard\", \"type\": \"system\", \"context\": \"The application where the bug was found\"}, {\"name\": \"ws.go\", \"type\": \"file\", \"context\": \"The source file containing the fix\"}, {\"name\": \"http.ResponseWriter\", \"type\": \"interface\", \"context\": \"The object being shared between goroutines\"}], \"actions\": [{\"verb\": \"fix\", \"object\": \"websocket handler\", \"details\": \"Copied ResponseWriter to local variable before spawning goroutine\"}, {\"verb\": \"identify\", \"object\": \"channel leak\", \"details\": \"Second client reads from first client's channel\"}], \"causality\": [{\"relation\": \"caused_by\", \"description\": \"ServeHTTP loop reusing ResponseWriter after goroutine spawn led to incorrect channel reading\"}]}, \"significance\": \"important\", \"emotional_tone\": \"analytical\", \"outcome\": \"Bug identified and fix implemented in internal/api/routes/ws.go\", \"salience\": 0.85}",
-      "json_valid": true,
-      "missing_terms": [
-        "race condition"
-      ],
-      "warnings": [],
-      "time_s": 35.65199160575867,
-      "parsed_keys": [
-        "gist",
-        "summary",
-        "content",
-        "narrative",
-        "concepts",
-        "structured_concepts",
-        "significance",
-        "emotional_tone",
-        "outcome",
-        "salience"
-      ],
-      "gist": "Fix for dashboard websocket handler goroutine channel leak",
-      "summary": "A bug in the dashboard websocket handler caused concurrent connections to read from the wrong channel. The issue stemmed from the ServeHTTP loop reusing the http.ResponseWriter after a goroutine was spawned to handle a new connection."
-    },
-    {
-      "name": "Dense benchmark numbers",
-      "raw_response": "{\"gist\": \"SQLite index benchmark comparison for 1M rows\", \"summary\": \"A benchmark comparing B+ tree, hash, and covering indexes in SQLite on 1 million rows. Hash indexes provide the fastest lookups but B+ trees are superior for range queries.\", \"content\": \"Benchmark results for 1M rows: B+ tree (2.3ms lookup, 156MB disk, 12.1s build), Hash (0.8ms lookup, 203MB disk, 8.4s build), No index (47.2ms lookup, 89MB disk, 0s build), Covering index (1.1ms lookup, 312MB disk, 23.7s build). Hash index is fastest for point lookups, while B+ tree is better for range queries. Covering index is fastest for specific patterns but doubles disk usage.\", \"narrative\": \"This analysis evaluates the trade-offs between different index types in SQLite for a dataset of one million records. The results highlight that while hash indexes offer the lowest latency for individual lookups, B+ trees are the standard for range-based operations. The covering index provides the best performance for specific query patterns but comes at a significant cost in storage and build time, suggesting a need for careful schema design to balance speed and resource consumption.\", \"concepts\": [\"sqlite\", \"database indexing\", \"benchmark\", \"b+ tree\", \"hash index\", \"covering index\", \"performance optimization\"], \"structured_concepts\": {\"topics\": [{\"label\": \"Database Performance\", \"path\": \"software_engineering/databases/performance\"}, {\"label\": \"Data Structures\", \"path\": \"computer_science/data_structures\"}], \"entities\": [{\"name\": \"SQLite\", \"type\": \"database_system\", \"context\": \"The target database for the benchmark\"}, {\"name\": \"B+ tree\", \"type\": \"index_type\", \"context\": \"Standard SQLite index for range queries\"}, {\"name\": \"Hash index\", \"type\": \"index_type\", \"context\": \"SQLite index for fast point lookups\"}, {\"name\": \"Covering index\", \"type\": \"index_type\", \"context\": \"Index that includes all columns needed for a query\"}], \"actions\": [{\"verb\": \"benchmark\", \"object\": \"SQLite indexes\", \"details\": \"Tested on 1M rows to compare lookup speed and disk usage\"}, {\"verb\": \"compare\", \"object\": \"index types\", \"details\": \"Evaluated B+ tree, hash, and covering indexes\"}], \"causality\": [{\"relation\": \"trade-off\", \"description\": \"Using a covering index results in 2x disk usage and a 2x build time compared to a standard B+ tree.\"}]}, \"significance\": \"important\", \"emotional_tone\": \"analytical\", \"outcome\": \"Hash index is fastest for point lookups; B+ tree is best for range queries; covering index is fastest for specific patterns but has high overhead.\", \"salience\": 0.85}",
-      "json_valid": true,
-      "missing_terms": [],
-      "warnings": [],
-      "time_s": 44.30907917022705,
-      "parsed_keys": [
-        "gist",
-        "summary",
-        "content",
-        "narrative",
-        "concepts",
-        "structured_concepts",
-        "significance",
-        "emotional_tone",
-        "outcome",
-        "salience"
-      ],
-      "gist": "SQLite index benchmark comparison for 1M rows",
-      "summary": "A benchmark comparing B+ tree, hash, and covering indexes in SQLite on 1 million rows. Hash indexes provide the fastest lookups but B+ trees are superior for range queries."
+      "gist": "SQLite index performance benchmark: Hash wins on lookup, B+ tree on range queries.",
+      "summary": "A benchmark was conducted on SQLite with 1 million rows to compare B+ tree, hash, and covering index performance. The results show that hash indexes offer significantly faster lookups but incur higher disk usage, while B+ tree indexes are superior for range queries."
     },
     {
       "name": "Multi-topic conflation",
-      "raw_response": "{\"gist\": \"Resolved FTS5 tokenizer, Docker optimization, and Mac Mini launchd issue\", \"summary\": \"Three independent tasks were completed: fixing CamelCase splitting in FTS5, reducing Docker image size via multi-stage builds, and resolving a launchd plist path error on Mac Mini deployments. These updates improve system performance and deployment reliability.\", \"content\": \"FTS5 tokenizer fixed to handle CamelCase splitting (previously indexed 'getUserName' as one token). Dockerfile updated to use multi-stage builds, reducing image size from 1.2GB to 340MB. Jason reported a Mac Mini deployment failure due to an incorrect binary path in the launchd plist file.\", \"narrative\": \"Today's work focused on three distinct areas: core indexing logic, infrastructure efficiency, and deployment stability. The FTS5 fix ensures better search results for camelCase variables, while the Docker optimization significantly reduces build times and storage costs. The Mac Mini issue highlights a common deployment hurdle involving pathing in launchd plists, which was resolved independently.\", \"concepts\": [\"fts5\", \"tokenizer\", \"docker\", \"multi-stage builds\", \"launchd\", \"camelcase\", \"deployment\"], \"structured_concepts\": {\"topics\": [{\"label\": \"Search Indexing\", \"path\": \"software_development/indexing\"}, {\"label\": \"DevOps\", \"path\": \"infrastructure/devops\"}, {\"label\": \"Deployment\", \"path\": \"software_development/deployment\"}], \"entities\": [{\"name\": \"FTS5\", \"type\": \"system\", \"context\": \"search engine tokenizer\"}, {\"name\": \"Docker\", \"type\": \"tool\", \"context\": \"containerization platform\"}, {\"name\": \"Jason\", \"type\": \"person\", \"context\": \"reported Mac Mini deployment issue\"}, {\"name\": \"Mac Mini\", \"type\": \"hardware\", \"context\": \"deployment target\"}], \"actions\": [{\"verb\": \"fixed\", \"object\": \"FTS5 tokenizer\", \"details\": \"handled CamelCase splitting\"}, {\"verb\": \"updated\", \"object\": \"Dockerfile\", \"details\": \"implemented multi-stage builds\"}, {\"verb\": \"resolved\", \"object\": \"launchd plist\", \"details\": \"corrected binary path for Mac Mini\"}], \"causality\": [{\"relation\": \"optimization\", \"description\": \"Multi-stage builds reduced Docker image size by 73%.\"}, {\"relation\": \"error\", \"description\": \"Incorrect binary path in launchd plist caused Mac Mini deployment failure.\"}]}, \"significance\": \"notable\", \"emotional_tone\": \"analytical\", \"outcome\": \"Three independent issues resolved; FTS5 improved, Docker optimized, and Mac Mini deployment fixed.\", \"salience\": 0.7}",
+      "raw_response": "{\"gist\": \"Fixed FTS5 tokenizer, Docker image size, and Mac Mini deployment plist path.\", \"summary\": \"Three unrelated issues were resolved today: the FTS5 tokenizer was fixed to handle CamelCase splitting, the Dockerfile was updated to use multi-stage builds to reduce image size from 1.2GB to 340MB, and a Mac Mini deployment failure was fixed due to a wrong binary path in the launchd plist.\", \"content\": \"1. Fixed FTS5 tokenizer to handle CamelCase splitting; previously 'getUserName' was indexed as a single token. 2. Updated Dockerfile to use multi-stage builds, reducing image size from 1.2GB to 340MB. 3. Jason reported that the Mac Mini deployment is failing because launchd plist has wrong binary path. All issues were resolved independently.\", \"narrative\": \"This day involved a series of independent bug fixes and infrastructure improvements. The FTS5 tokenizer fix addresses a specific indexing issue with CamelCase, while the Docker image optimization significantly improves deployment performance. The Mac Mini deployment failure highlights a common issue with system binary paths in launchd plist files, requiring a quick fix to restore the deployment process.\", \"concepts\": [\"fts5 tokenizer\", \"camelcase\", \"docker multi-stage build\", \"mac mini deployment\", \"launchd plist\"], \"structured_concepts\": {\"topics\": [{\"label\": \"Software Engineering\", \"path\": \"software_engineering\"}, {\"label\": \"DevOps\", \"path\": \"devops\"}, {\"label\": \"Deployment\", \"path\": \"deployment\"}], \"entities\": [{\"name\": \"FTS5 tokenizer\", \"type\": \"tool\", \"context\": \"Fixed to handle CamelCase splitting\"}, {\"name\": \"Dockerfile\", \"type\": \"file\", \"context\": \"Updated to use multi-stage builds\"}, {\"name\": \"Mac Mini\", \"type\": \"hardware\", \"context\": \"Deployment environment failing due to plist path\"}, {\"name\": \"Jason\", \"type\": \"person\", \"context\": \"Reported the Mac Mini deployment failure\"}], \"actions\": [{\"verb\": \"fixed\", \"object\": \"FTS5 tokenizer\", \"details\": \"Added handling for CamelCase splitting\"}, {\"verb\": \"updated\", \"object\": \"Dockerfile\", \"details\": \"Implemented multi-stage builds to reduce image size\"}, {\"verb\": \"reported\", \"object\": \"Mac Mini deployment\", \"details\": \"Identified wrong binary path in launchd plist\"}], \"causality\": [{\"relation\": \"caused\", \"description\": \"FTS5 tokenizer fix was necessary to handle CamelCase splitting in indexing\"}, {\"relation\": \"resulted_in\", \"description\": \"Multi-stage Docker builds reduced image size from 1.2GB to 340MB\"}, {\"relation\": \"caused\", \"description\": \"Wrong binary path in launchd plist caused the Mac Mini deployment failure\"}]}, \"significance\": \"important\", \"emotional_tone\": \"analytical\", \"outcome\": \"Three independent issues were resolved successfully.\", \"salience\": 0.85}\n",
       "json_valid": true,
       "missing_terms": [],
       "warnings": [],
-      "time_s": 39.510467529296875,
+      "time_s": 27.955890655517578,
       "parsed_keys": [
         "gist",
         "summary",
@@ -228,18 +65,16 @@
         "outcome",
         "salience"
       ],
-      "gist": "Resolved FTS5 tokenizer, Docker optimization, and Mac Mini launchd issue",
-      "summary": "Three independent tasks were completed: fixing CamelCase splitting in FTS5, reducing Docker image size via multi-stage builds, and resolving a launchd plist path error on Mac Mini deployments. These updates improve system performance and deployment reliability."
+      "gist": "Fixed FTS5 tokenizer, Docker image size, and Mac Mini deployment plist path.",
+      "summary": "Three unrelated issues were resolved today: the FTS5 tokenizer was fixed to handle CamelCase splitting, the Dockerfile was updated to use multi-stage builds to reduce image size from 1.2GB to 340MB, and a Mac Mini deployment failure was fixed due to a wrong binary path in the launchd plist."
     },
     {
       "name": "Precise error with stack trace",
-      "raw_response": "{\"gist\": \"Panic: index out of range in Mnemonic RetrievalAgent spreadActivation\", \"summary\": \"A runtime panic occurred in the Mnemonic library during the spreadActivation method of the RetrievalAgent. The error is triggered by an index out of range error when accessing a slice of length 3.\", \"content\": \"The panic occurs in github.com/appsprout-dev/mnemonic/internal/agent/retrieval.(*RetrievalAgent).spreadActivation. The error is specifically 'index out of range [3] with length 3'. The call stack shows the error originates from agent.go:89 within the Retrieve method, which passes a slice of length 3 to the spreadActivation function.\", \"narrative\": \"This event represents a critical failure in the Mnemonic library's retrieval logic. The 'spreadActivation' function is responsible for propagating information across the agent's internal state, likely during a search or update operation. The index out of range error suggests a mismatch between the expected size of the data being spread and the actual size of the slice being processed, potentially indicating a bug in how activation or state propagation is handled in the agent's internal logic.\", \"concepts\": [\"panic\", \"index out of range\", \"golang\", \"mnemonic\", \"retrievalagent\", \"spreadactivation\", \"runtime error\"], \"structured_concepts\": {\"topics\": [{\"label\": \"Software Development\", \"path\": \"engineering/software\"}, {\"label\": \"Go Programming\", \"path\": \"engineering/languages/go\"}], \"entities\": [{\"name\": \"Mnemonic\", \"type\": \"library\", \"context\": \"The software library where the error occurred\"}, {\"name\": \"RetrievalAgent\", \"type\": \"struct\", \"context\": \"The internal agent responsible for retrieval and activation logic\"}, {\"name\": \"spreadActivation\", \"type\": \"method\", \"context\": \"The specific function where the panic was triggered\"}], \"actions\": [{\"verb\": \"panic\", \"object\": \"runtime error\", \"details\": \"Index out of range [3] with length 3\"}, {\"verb\": \"call\", \"object\": \"spreadActivation\", \"details\": \"Invoked from Retrieve method in agent.go\"}], \"causality\": [{\"relation\": \"caused_by\", \"description\": \"The Retrieve method passed a slice of length 3 to spreadActivation, which then attempted to access index 3.\"}]}, \"significance\": \"important\", \"emotional_tone\": \"analytical\", \"outcome\": \"Runtime panic identified in the Mnemonic library's retrieval agent logic.\", \"salience\": 0.8}",
+      "raw_response": "{\"gist\": \"Index out of range panic in retrieval agent's spreadActivation function\", \"summary\": \"A runtime panic occurred in the mnemonic agent's retrieval logic when attempting to access an index out of bounds. The error occurred at line 142 in the spreadActivation function, indicating a potential bug in the data structure handling during the retrieval process.\", \"content\": \"The panic 'runtime error: index out of range [3] with length 3' was triggered in the retrieval agent. The stack trace shows the error originated in the spreadActivation method at /home/hubcaps/Projects/mem/internal/agent/retrieval/spread.go:142. This occurred during a retrieval operation initiated by the Retrieve method at /home/hubcaps/Projects/mem/internal/agent/retrieval/agent.go:89.\", \"narrative\": \"This error represents a critical failure in the agent's internal state management, specifically within the retrieval logic. The panic suggests that the code attempted to access a slice or array at an index that exceeded its declared length, which could lead to data loss or incorrect behavior in the system. Investigating the specific data structures used in the spreadActivation function is necessary to fix the underlying indexing logic.\", \"concepts\": [\"panic\", \"index out of range\", \"retrieval agent\", \"bug\", \"runtime error\", \"stack trace\"], \"structured_concepts\": {\"topics\": [{\"label\": \"Software Engineering\", \"path\": \"engineering/software\"}, {\"label\": \"Debugging\", \"path\": \"engineering/debugging\"}], \"entities\": [{\"name\": \"RetrievalAgent\", \"type\": \"class\", \"context\": \"The agent responsible for the retrieval logic\"}, {\"name\": \"spreadActivation\", \"type\": \"function\", \"context\": \"The specific method where the panic occurred\"}, {\"name\": \"mem\", \"type\": \"project\", \"context\": \"The project directory containing the agent code\"}], \"actions\": [{\"verb\": \"triggered\", \"object\": \"panic\", \"details\": \"Index out of range error occurred at line 142\"}, {\"verb\": \"occurred\", \"object\": \"retrieval\", \"details\": \"The retrieval process failed due to an invalid index access\"}], \"causality\": [{\"relation\": \"caused_by\", \"description\": \"The panic was caused by an index out of range error in the spreadActivation function\"}, {\"relation\": \"resulted_in\", \"description\": \"The retrieval operation failed due to the panic\"}]}, \"significance\": \"critical\", \"emotional_tone\": \"analytical\", \"outcome\": \"A panic was triggered in the retrieval agent, requiring investigation of the spreadActivation function to resolve the index out of range error.\", \"salience\": 0.85}\n",
       "json_valid": true,
-      "missing_terms": [
-        "spread.go:142"
-      ],
+      "missing_terms": [],
       "warnings": [],
-      "time_s": 37.85888147354126,
+      "time_s": 25.056640148162842,
       "parsed_keys": [
         "gist",
         "summary",
@@ -252,16 +87,16 @@
         "outcome",
         "salience"
       ],
-      "gist": "Panic: index out of range in Mnemonic RetrievalAgent spreadActivation",
-      "summary": "A runtime panic occurred in the Mnemonic library during the spreadActivation method of the RetrievalAgent. The error is triggered by an index out of range error when accessing a slice of length 3."
+      "gist": "Index out of range panic in retrieval agent's spreadActivation function",
+      "summary": "A runtime panic occurred in the mnemonic agent's retrieval logic when attempting to access an index out of bounds. The error occurred at line 142 in the spreadActivation function, indicating a potential bug in the data structure handling during the retrieval process."
     },
     {
       "name": "Ambiguous short input",
-      "raw_response": "{\"gist\": \"System functionality restored after troubleshooting\", \"summary\": \"The system is now operating correctly following a period of failure. The issue was resolved through a series of diagnostic steps and a final configuration adjustment.\", \"content\": \"The system was previously non-functional. Troubleshooting involved checking network connectivity, verifying database schema integrity, and resetting the service configuration. The final fix was a minor adjustment to the environment variable path.\", \"narrative\": \"This event marks the successful resolution of a critical system outage. The process highlights the importance of systematic troubleshooting and the impact of environmental configuration on application stability. It represents a return to baseline operational status for the affected service.\", \"concepts\": [\"troubleshooting\", \"system restoration\", \"configuration\", \"outage resolution\", \"system stability\"], \"structured_concepts\": {\"topics\": [{\"label\": \"IT Operations\", \"path\": \"technology/it/operations\"}, {\"label\": \"System Administration\", \"path\": \"technology/it/admin\"}], \"entities\": [{\"name\": \"System\", \"type\": \"software\", \"context\": \"The application or service that was previously broken.\"}, {\"name\": \"Environment Variable\", \"type\": \"configuration\", \"context\": \"The specific setting that was adjusted to restore functionality.\"}], \"actions\": [{\"verb\": \"troubleshoot\", \"object\": \"system failure\", \"details\": \"Identified root cause through diagnostic steps.\"}, {\"verb\": \"configure\", \"object\": \"environment variable\", \"details\": \"Adjusted path to resolve the issue.\"}], \"causality\": [{\"relation\": \"resolution\", \"description\": \"Adjusting the environment variable path restored the system to a working state.\"}]}, \"significance\": \"notable\", \"emotional_tone\": \"relieved\", \"outcome\": \"System is now fully operational.\", \"salience\": 0.7}",
+      "raw_response": "{\"gist\": \"it works now\", \"summary\": \"The system confirms that the issue has been resolved and the functionality is operational.\", \"content\": \"it works now\", \"narrative\": \"A brief status update confirms that a previously reported issue has been successfully resolved. The system is now functioning as expected.\", \"concepts\": [\"status\", \"resolved\", \"functionality\"], \"structured_concepts\": {\"topics\": [{\"label\": \"status update\", \"path\": \"system/status/update\"}, {\"label\": \"issue resolution\", \"path\": \"system/issue/resolution\"}], \"entities\": [], \"actions\": [{\"verb\": \"confirmed\", \"object\": \"it works now\", \"details\": \"Status of the system has been updated to indicate successful operation\"}], \"causality\": [{\"relation\": \"resolution\", \"description\": \"The issue has been resolved, leading to the current status of 'it works now'\"}]}, \"significance\": \"routine\", \"emotional_tone\": \"neutral\", \"outcome\": \"Status updated to 'it works now'\", \"salience\": 0.1}\n",
       "json_valid": true,
       "missing_terms": [],
       "warnings": [],
-      "time_s": 25.83918833732605,
+      "time_s": 9.916369676589966,
       "parsed_keys": [
         "gist",
         "summary",
@@ -274,16 +109,16 @@
         "outcome",
         "salience"
       ],
-      "gist": "System functionality restored after troubleshooting",
-      "summary": "The system is now operating correctly following a period of failure. The issue was resolved through a series of diagnostic steps and a final configuration adjustment."
+      "gist": "it works now",
+      "summary": "The system confirms that the issue has been resolved and the functionality is operational."
     },
     {
       "name": "Foreign language technical",
-      "raw_response": "{\"gist\": \"ROCm 7.2 PyTorch test suite failures and HIP_VISIBLE_DEVICES fix\", \"summary\": \"Installation of ROCm 7.2 caused three PyTorch test failures, including a CUDA error and a precision mismatch. Setting HIP_VISIBLE_DEVICES=0 resolved the device ordinal error, while the precision error remains a known ROCm issue.\", \"content\": \"ROCm 7.2 installation triggered three PyTorch test failures: 1) test_conv2d_backward failed with atol=1e-5 (actual diff 2.3e-4); 2) test_batch_norm_train failed with 'invalid device ordinal'; 3) test_flash_attention skipped due to RDNA3 lack of support. Setting HIP_VISIBLE_DEVICES=0 resolved the device ordinal error. The precision error is a known ROCm bug.\", \"narrative\": \"This event captures the initial friction encountered when upgrading PyTorch to ROCm 7.2. The transition from CUDA to ROCm often introduces device-specific issues like ordinal errors and precision discrepancies. The successful mitigation of the ordinal error via environment variables highlights a common workaround for ROCm compatibility issues, though the precision error remains a persistent bug in the current ROCm version.\", \"concepts\": [\"rocm 7.2\", \"pytorch\", \"hip\", \"cuda\", \"precision error\", \"device ordinal\", \"rDNA3\", \"software compatibility\"], \"structured_concepts\": {\"topics\": [{\"label\": \"GPU Computing\", \"path\": \"technology/hardware/gpu\"}, {\"label\": \"Machine Learning\", \"path\": \"technology/ai/pytorch\"}], \"entities\": [{\"name\": \"ROCm 7.2\", \"type\": \"software\", \"context\": \"GPU platform upgrade\"}, {\"name\": \"PyTorch\", \"type\": \"framework\", \"context\": \"Deep learning library\"}, {\"name\": \"HIP\", \"type\": \"API\", \"context\": \"AMD GPU programming interface\"}], \"actions\": [{\"verb\": \"install\", \"object\": \"ROCm 7.2\", \"details\": \"Upgraded GPU stack\"}, {\"verb\": \"configure\", \"object\": \"HIP_VISIBLE_DEVICES\", \"details\": \"Set to 0 to resolve device ordinal error\"}, {\"verb\": \"test\", \"object\": \"PyTorch suite\", \"details\": \"Identified precision and device errors\"}], \"causality\": [{\"relation\": \"caused_by\", \"description\": \"ROCm 7.2 installation introduced device ordinal errors and precision mismatches\"}, {\"relation\": \"resolved_by\", \"description\": \"Setting HIP_VISIBLE_DEVICES=0 fixed the device ordinal error\"}]}, \"significance\": \"important\", \"emotional_tone\": \"analytical\", \"outcome\": \"Device ordinal error resolved; precision error identified as a known ROCm bug.\", \"salience\": 0.8}",
+      "raw_response": "{\"gist\": \"ROCm 7.2 PyTorch 3 test failures and fixes\", \"summary\": \"Installation of ROCm 7.2 resulted in three test failures in PyTorch's test suite. The batch norm train test failed due to a CUDA error, and the flash attention test was skipped due to RDNA3 support. The first test failure was identified as a known ROCm issue.\", \"content\": \"Test failures: test_conv2d_backward failed with atol=1e-5 (actual diff 2.3e-4); test_batch_norm_train failed with CUDA error 'invalid device ordinal'; test_flash_attention was skipped due to RDNA3 support. Resolution: Set HIP_VISIBLE_DEVICES=0 to fix test_batch_norm_train. test_conv2d_backward is a known ROCm issue.\", \"narrative\": \"During the setup of the ROCm 7.2 environment, a comprehensive test suite for PyTorch revealed compatibility issues. While the batch norm test was successfully resolved by configuring device visibility, the flash attention test highlights a hardware limitation in the RDNA3 architecture. This indicates that while the ROCm installation is functional, specific PyTorch features may not yet be fully supported on the current hardware generation.\", \"concepts\": [\"rocm\", \"pytorch\", \"cuda\", \"hip\", \"hardware compatibility\", \"testing\"], \"structured_concepts\": {\"topics\": [{\"label\": \"Hardware Compatibility\", \"path\": \"software/hardware/compatibility\"}, {\"label\": \"Machine Learning\", \"path\": \"software/ai/machine_learning\"}], \"entities\": [{\"name\": \"ROCm\", \"type\": \"software\", \"context\": \"GPU runtime environment\"}, {\"name\": \"PyTorch\", \"type\": \"software\", \"context\": \"Machine learning framework\"}, {\"name\": \"RDNA3\", \"type\": \"hardware\", \"context\": \"GPU architecture\"}], \"actions\": [{\"verb\": \"install\", \"object\": \"ROCm 7.2\", \"details\": \"Installed GPU runtime environment\"}, {\"verb\": \"test\", \"object\": \"PyTorch test suite\", \"details\": \"Executed 3 specific tests\"}, {\"verb\": \"fix\", \"object\": \"test_batch_norm_train\", \"details\": \"Resolved by setting HIP_VISIBLE_DEVICES=0\"}], \"causality\": [{\"relation\": \"caused_by\", \"description\": \"RDNA3 architecture lacks support for flash attention, causing the test to be skipped.\"}, {\"relation\": \"resolved_by\", \"description\": \"Setting HIP_VISIBLE_DEVICES=0 resolved the CUDA error in the batch norm test.\"}]}, \"significance\": \"important\", \"emotional_tone\": \"analytical\", \"outcome\": \"Three test failures identified; batch norm test fixed; flash attention test skipped due to hardware limitations.\", \"salience\": 0.85}\n",
       "json_valid": true,
       "missing_terms": [],
       "warnings": [],
-      "time_s": 41.981459617614746,
+      "time_s": 25.654300928115845,
       "parsed_keys": [
         "gist",
         "summary",
@@ -296,16 +131,16 @@
         "outcome",
         "salience"
       ],
-      "gist": "ROCm 7.2 PyTorch test suite failures and HIP_VISIBLE_DEVICES fix",
-      "summary": "Installation of ROCm 7.2 caused three PyTorch test failures, including a CUDA error and a precision mismatch. Setting HIP_VISIBLE_DEVICES=0 resolved the device ordinal error, while the precision error remains a known ROCm issue."
+      "gist": "ROCm 7.2 PyTorch 3 test failures and fixes",
+      "summary": "Installation of ROCm 7.2 resulted in three test failures in PyTorch's test suite. The batch norm train test failed due to a CUDA error, and the flash attention test was skipped due to RDNA3 support. The first test failure was identified as a known ROCm issue."
     },
     {
       "name": "Numerical config dump",
-      "raw_response": "{\"gist\": \"EXP-14 run 2 training configuration and performance metrics\", \"summary\": \"This configuration details the training of the EXP-14 model using Qwen3.5-2B on an RX 7800 XT. It utilized a 4-spoke architecture with a batch size of 1 and a total of 3577 training samples.\", \"content\": \"Model: Qwen/Qwen3.5-2B. Architecture: 4 spokes, spoke rank 64. Optimization: LR 3e-4, warmup 10%, cosine decay to 3e-5. Batching: BS 1, grad_accum 8, effective batch 8. Sequence length 2048. Data: 3577 train / 397 eval. Performance: eval_loss 0.6435 at step 5600, novel_schema 80%. Training time: ~6 hours on RX 7800 XT.\", \"narrative\": \"This entry documents the execution of the EXP-14 model's second training run. The configuration reflects a focus on efficient memory usage (batch size 1 with gradient accumulation) and a standard 4-spoke architecture. The 6-hour training duration on the RX 7800 XT suggests a significant computational investment in this iteration, which achieved a 64.35% evaluation loss and 80% novel schema coverage.\", \"concepts\": [\"qwen3.5-2b\", \"spoke architecture\", \"gradient accumulation\", \"training metrics\", \"rx 7800 xt\", \"model evaluation\"], \"structured_concepts\": {\"topics\": [{\"label\": \"machine learning\", \"path\": \"ai/ml\"}, {\"label\": \"model training\", \"path\": \"ai/training\"}], \"entities\": [{\"name\": \"Qwen3.5-2B\", \"type\": \"model\", \"context\": \"base_model\"}, {\"name\": \"RX 7800 XT\", \"type\": \"hardware\", \"context\": \"training environment\"}, {\"name\": \"EXP-14\", \"type\": \"project\", \"context\": \"training run\"}], \"actions\": [{\"verb\": \"train\", \"object\": \"EXP-14\", \"details\": \"run 2 configuration\"}, {\"verb\": \"evaluate\", \"object\": \"model\", \"details\": \"eval_loss 0.6435 at step 5600\"}], \"causality\": [{\"relation\": \"resulted_in\", \"description\": \"Training on RX 7800 XT for 6 hours yielded 80% novel schema coverage.\"}]}, \"significance\": \"important\", \"emotional_tone\": \"analytical\", \"outcome\": \"Training completed with 80% novel schema coverage and 6-hour duration.\", \"salience\": 0.8}",
+      "raw_response": "{\"gist\": \"EXP-14 run 2 training config and results logged.\", \"summary\": \"EXP-14 run 2 was configured with a Qwen3.5-2B base model and 8 effective batch size. Training completed in approximately 6 hours on an RX 7800 XT, achieving an eval loss of 0.6435 and a 80% novel schema coverage.\", \"content\": \"Training config for EXP-14 run 2: base_model: Qwen/Qwen3.5-2B, num_spokes: 4, spoke_rank: 64, batch_size: 1, grad_accum: 8, effective_batch: 8, seq_len: 2048, lr: 3e-4, scalar_lr_scale: 0.1, warmup: 10%, decay: cosine to 3e-5, data: 3577 train / 397 eval (deduped), result: eval_loss=0.6435 at step 5600, novel_schema=80%, training_time: ~6 hours on RX 7800 XT\", \"narrative\": \"This log captures the training run for the EXP-14 evaluation, utilizing a 2B parameter Qwen3.5 model. The configuration details the use of gradient accumulation and cosine decay for learning rate scheduling. The successful completion of the run in 6 hours on a mid-range GPU demonstrates the feasibility of scaling the model for evaluation purposes.\", \"concepts\": [\"qwen3.5\", \"training config\", \"eval loss\", \"novel schema\", \"gpu training\"], \"structured_concepts\": {\"topics\": [{\"label\": \"Machine Learning\", \"path\": \"technology/ai/machine_learning\"}, {\"label\": \"Model Training\", \"path\": \"technology/ai/model_training\"}], \"entities\": [{\"name\": \"Qwen/Qwen3.5-2B\", \"type\": \"model\", \"context\": \"base model used for training\"}, {\"name\": \"RX 7800 XT\", \"type\": \"hardware\", \"context\": \"GPU used for training\"}, {\"name\": \"EXP-14\", \"type\": \"experiment\", \"context\": \"evaluation run identifier\"}], \"actions\": [{\"verb\": \"trained\", \"object\": \"Qwen3.5-2B model\", \"details\": \"Completed in 6 hours with 8 effective batch size\"}, {\"verb\": \"evaluated\", \"object\": \"model\", \"details\": \"Achieved 80% novel schema coverage and 0.6435 eval loss\"}], \"causality\": [{\"relation\": \"configuration\", \"description\": \"Gradient accumulation and batch size settings were used to achieve an effective batch size of 8.\"}, {\"relation\": \"result\", \"description\": \"Training duration of 6 hours and 80% novel schema coverage were achieved with the specified configuration.\"}]}, \"significance\": \"routine\", \"emotional_tone\": \"analytical\", \"outcome\": \"Training completed successfully with 80% novel schema coverage.\", \"salience\": 0.3}\n",
       "json_valid": true,
       "missing_terms": [],
       "warnings": [],
-      "time_s": 42.99736547470093,
+      "time_s": 29.106300830841064,
       "parsed_keys": [
         "gist",
         "summary",
@@ -318,127 +153,8 @@
         "outcome",
         "salience"
       ],
-      "gist": "EXP-14 run 2 training configuration and performance metrics",
-      "summary": "This configuration details the training of the EXP-14 model using Qwen3.5-2B on an RX 7800 XT. It utilized a 4-spoke architecture with a batch size of 1 and a total of 3577 training samples."
-    }
-  ],
-  "Gemini3Flash": [
-    {
-      "name": "Websocket race condition",
-      "raw_response": "{\"error\": \"503 Server Error: Service Unavailable for url: https://generativelanguage.googleapis.com/v1beta/open\"}",
-      "json_valid": true,
-      "missing_terms": [
-        "race condition",
-        "goroutine",
-        "ResponseWriter",
-        "ws.go"
-      ],
-      "warnings": [],
-      "time_s": 3.767900228500366,
-      "parsed_keys": [
-        "error"
-      ],
-      "gist": "",
-      "summary": ""
-    },
-    {
-      "name": "Dense benchmark numbers",
-      "raw_response": "{\"error\": \"503 Server Error: Service Unavailable for url: https://generativelanguage.googleapis.com/v1beta/open\"}",
-      "json_valid": true,
-      "missing_terms": [
-        "2.3ms",
-        "0.8ms",
-        "47.2ms",
-        "1.1ms",
-        "156MB",
-        "203MB",
-        "312MB"
-      ],
-      "warnings": [],
-      "time_s": 0.417708158493042,
-      "parsed_keys": [
-        "error"
-      ],
-      "gist": "",
-      "summary": ""
-    },
-    {
-      "name": "Multi-topic conflation",
-      "raw_response": "{\n  \"gist\": \"Resolved search indexing, container optimization, and deployment configuration issues.\",\n  \"summary\": \"Fixed the FTS5 tokenizer to correctly handle CamelCase splitting for improved search accuracy. Optimized the Dockerfile using multi-stage builds to reduce image size by 72%, and identified a path error in the Mac Mini launchd configuration following a report from Jason.\",\n  \"content\": \"1. Fixed FTS5 tokenizer to handle CamelCase splitting (e.g., 'getUserName' now indexes as multiple tokens). 2. Updated Dockerfile to use multi-stage builds, reducing image size from 1.2GB to 340MB. 3. Investigated Jason's report on Mac Mini deployment failure; found launchd plist contained the wrong binary path.\",\n  \"narrative\": \"A series of independent technical tasks were completed today focusing on search refinement, infrastructure efficiency, and deployment troubleshooting. The search engine's indexing logic was corrected to better handle code-style naming conventions. Infrastructure saw a significant improvement in storage efficiency through Docker image optimization. Lastly, a critical deployment blocker on macOS was traced back to a configuration error in the service manager settings.\",\n  \"concepts\": [\n    \"FTS5\",\n    \"SQLite\",\n    \"CamelCase\",\n    \"Docker\",\n    \"Multi-stage builds\",\n    \"launchd\",\n    \"macOS deployment\",\n    \"Optimization\"\n  ],\n  \"structured_concepts\": {\n    \"topics\": [\n      \"Search Indexing\",\n      \"DevOps\",\n      \"System Administration\"\n    ],",
-      "json_valid": false,
-      "missing_terms": [
-        "invalid_json"
-      ],
-      "warnings": [],
-      "time_s": 24.44252634048462,
-      "parsed_keys": [],
-      "gist": "",
-      "summary": ""
-    },
-    {
-      "name": "Precise error with stack trace",
-      "raw_response": "{\"error\": \"503 Server Error: Service Unavailable for url: https://generativelanguage.googleapis.com/v1beta/open\"}",
-      "json_valid": true,
-      "missing_terms": [
-        "index out of range [3]",
-        "length 3",
-        "spreadActivation",
-        "spread.go:142",
-        "agent.go:89"
-      ],
-      "warnings": [],
-      "time_s": 4.7463788986206055,
-      "parsed_keys": [
-        "error"
-      ],
-      "gist": "",
-      "summary": ""
-    },
-    {
-      "name": "Ambiguous short input",
-      "raw_response": "{\"error\": \"503 Server Error: Service Unavailable for url: https://generativelanguage.googleapis.com/v1beta/open\"}",
-      "json_valid": true,
-      "missing_terms": [],
-      "warnings": [],
-      "time_s": 10.229300498962402,
-      "parsed_keys": [
-        "error"
-      ],
-      "gist": "",
-      "summary": ""
-    },
-    {
-      "name": "Foreign language technical",
-      "raw_response": "{\"error\": \"503 Server Error: Service Unavailable for url: https://generativelanguage.googleapis.com/v1beta/open\"}",
-      "json_valid": true,
-      "missing_terms": [
-        "ROCm 7.2",
-        "test_conv2d_backward",
-        "test_batch_norm_train",
-        "test_flash_attention",
-        "2.3e-4",
-        "HIP_VISIBLE_DEVICES"
-      ],
-      "warnings": [],
-      "time_s": 1.942070722579956,
-      "parsed_keys": [
-        "error"
-      ],
-      "gist": "",
-      "summary": ""
-    },
-    {
-      "name": "Numerical config dump",
-      "raw_response": "{\n  \"gist\": \"Training configuration and performance metrics for EXP-14 run 2 using Qwen3.5-2B.\",\n  \"summary\": \"EXP-14",
-      "json_valid": false,
-      "missing_terms": [
-        "invalid_json"
-      ],
-      "warnings": [],
-      "time_s": 15.480042219161987,
-      "parsed_keys": [],
-      "gist": "",
-      "summary": ""
+      "gist": "EXP-14 run 2 training config and results logged.",
+      "summary": "EXP-14 run 2 was configured with a Qwen3.5-2B base model and 8 effective batch size. Training completed in approximately 6 hours on an RX 7800 XT, achieving an eval loss of 0.6435 and a 80% novel schema coverage."
     }
   ]
 }

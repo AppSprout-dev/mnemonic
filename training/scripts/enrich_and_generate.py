@@ -32,26 +32,9 @@ MODEL = "gemini-3-flash-preview"
 MAX_CONCURRENT = 20  # parallel requests
 RETRY_LIMIT = 5
 
-ENCODING_SYSTEM_PROMPT = """You are a memory encoding agent for Mnemonic, a semantic memory system.
-You receive raw events (text observations from a developer's work) and output structured JSON.
-
-Your output MUST be a single JSON object with exactly these 10 fields:
-- gist: One-line summary, under 80 characters
-- summary: 2-3 sentence summary of the key information
-- content: Preserved detail — the important facts, decisions, and context
-- narrative: A paragraph providing broader context and significance
-- concepts: Array of 3-8 keyword strings (lowercase, no phrases longer than 3 words)
-- structured_concepts: Object with 4 arrays:
-    - topics: [{label, path}] — what domains this touches
-    - entities: [{name, type, context}] — people, tools, systems mentioned
-    - actions: [{verb, object, details}] — what was done
-    - causality: [{relation, description}] — cause/effect relationships
-- significance: One of "critical", "important", "notable", "routine", "trivial"
-- emotional_tone: One of "positive", "negative", "neutral", "frustrated", "excited", "analytical", "reflective"
-- outcome: Brief description of the result or status
-- salience: Float 0.0-1.0 (how important is this to remember long-term)
-
-Output ONLY the JSON object. No markdown fences, no explanation, no preamble."""
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from training_constants import ENCODING_SYSTEM_PROMPT, REQUIRED_FIELDS  # noqa: E402
 
 SYNTHETIC_DOMAINS = [
     "debugging a race condition in a concurrent system",
@@ -105,9 +88,7 @@ SYNTHETIC_DOMAINS = [
     "exploring a new tool or framework",
 ]
 
-REQUIRED_FIELDS = {"gist", "summary", "content", "narrative", "concepts",
-                   "structured_concepts", "significance", "emotional_tone",
-                   "outcome", "salience"}
+# REQUIRED_FIELDS imported from training_constants
 
 
 def parse_json_response(text: str) -> dict | None:

@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Serve Qwen 3.5 2B + Spokes as an OpenAI-compatible API.
 
-Exposes POST /v1/chat/completions so the mnemonic daemon can use the
-spoke model as a drop-in replacement for any OpenAI-compatible LLM provider.
+Exposes POST /v1/chat/completions and POST /v1/embeddings so the mnemonic
+daemon can use the spoke model as a drop-in replacement for any
+OpenAI-compatible LLM provider. Fully air-gapped — no cloud dependencies.
 
 Usage:
     source ~/Projects/felixlm/.venv/bin/activate
     python serve_spokes.py --port 8899 --spokes ../../checkpoints/exp18_v5_12k/best_spokes.pt
 
-Requires: transformers, torch (ROCm or CUDA)
+Requires: transformers, torch (ROCm or CUDA), sentence-transformers
 """
 
 import argparse
@@ -33,17 +34,23 @@ from qwen_spoke_adapter import QwenWithSpokes, SpokeConfig  # noqa: E402
 MODEL = None
 TOKENIZER = None
 DEVICE = None
+EMBED_MODEL = None
 GENERATE_LOCK = Lock()  # serialize GPU access
+EMBED_LOCK = Lock()  # serialize embedding access
 
 
-def load_model(base_model: str, spoke_path: str, device: str) -> None:
-    """Load the base model + spoke weights into global state."""
-    global MODEL, TOKENIZER, DEVICE
+def load_model(base_model: str, spoke_path: str, device: str,
+               embedding_model: str | None = None,
+               compile_model: bool = True) -> None:
+    """Load the base model + spoke weights and optional embedding model."""
+    global MODEL, TOKENIZER, DEVICE, EMBED_MODEL
 
     if device == "auto":
         DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     else:
         DEVICE = torch.device(device)
+
+    torch.set_float32_matmul_precision("high")
 
     print(f"Loading tokenizer: {base_model}")
     TOKENIZER = AutoTokenizer.from_pretrained(base_model)
@@ -53,12 +60,48 @@ def load_model(base_model: str, spoke_path: str, device: str) -> None:
     spoke_config = SpokeConfig(**data["spoke_config"])
 
     MODEL = QwenWithSpokes.from_pretrained(
-        base_model, spoke_config=spoke_config, dtype=torch.bfloat16
+        base_model, spoke_config=spoke_config, dtype=torch.bfloat16,
+        attn_implementation="sdpa",
     )
     MODEL.load_spokes(spoke_path)
     MODEL.to(DEVICE)
     MODEL.eval()
     print(f"Model ready on {DEVICE}")
+
+    # torch.compile for fused kernels and reduced dispatch overhead.
+    # Spoke layers are inlined via SpokeWrappedLayer (no hooks = no graph breaks).
+    #
+    # NOTE: Qwen 3.5 is a hybrid architecture (standard attention + causal_conv1d
+    # linear attention). The causal_conv1d kernels mutate inputs in-place and
+    # segfault under max-autotune/cudagraphs on ROCm. Use "default" mode which
+    # avoids cudagraph capture while still fusing operations via Inductor.
+    if compile_model and DEVICE.type == "cuda":
+        import os
+        os.environ.setdefault("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
+        print("Compiling model with torch.compile (this takes 30-120s on first call)...")
+        MODEL.base_model.forward = torch.compile(
+            MODEL.base_model.forward, mode="default"
+        )
+        # Warmup: trigger compilation with a short generation
+        _warmup_generate()
+        print("Compilation complete.")
+
+    # Load embedding model (sentence-transformers, runs on CPU to save VRAM)
+    if embedding_model:
+        from sentence_transformers import SentenceTransformer
+        print(f"Loading embedding model: {embedding_model}")
+        EMBED_MODEL = SentenceTransformer(embedding_model, device="cpu")
+        print(f"Embedding model ready ({EMBED_MODEL.get_sentence_embedding_dimension()}d)")
+
+
+def _warmup_generate():
+    """Run a short generation to trigger torch.compile tracing."""
+    dummy_ids = TOKENIZER.encode("Hello", return_tensors="pt").to(DEVICE)
+    with torch.no_grad():
+        MODEL.base_model.generate(
+            dummy_ids, max_new_tokens=2,
+            do_sample=False, pad_token_id=TOKENIZER.eos_token_id,
+        )
 
 
 def generate(messages: list[dict], max_tokens: int = 1024) -> dict:
@@ -95,12 +138,23 @@ def generate(messages: list[dict], max_tokens: int = 1024) -> dict:
     }
 
 
+def embed(texts: list[str]) -> list[list[float]]:
+    """Generate embeddings for a list of texts."""
+    if EMBED_MODEL is None:
+        raise RuntimeError("Embedding model not loaded (start with --embedding-model)")
+    with EMBED_LOCK:
+        embeddings = EMBED_MODEL.encode(texts, normalize_embeddings=True)
+    return embeddings.tolist()
+
+
 class ChatCompletionHandler(BaseHTTPRequestHandler):
-    """Handles OpenAI-compatible /v1/chat/completions requests."""
+    """Handles OpenAI-compatible /v1/chat/completions and /v1/embeddings."""
 
     def do_POST(self):
         if self.path == "/v1/chat/completions":
             self._handle_chat()
+        elif self.path == "/v1/embeddings":
+            self._handle_embeddings()
         else:
             self._respond(404, {"error": f"Not found: {self.path}"})
 
@@ -163,20 +217,54 @@ class ChatCompletionHandler(BaseHTTPRequestHandler):
         )
         self._respond(200, resp)
 
-    def _handle_models(self):
-        self._respond(
-            200,
-            {
-                "object": "list",
-                "data": [
-                    {
-                        "id": "qwen-spokes",
-                        "object": "model",
-                        "owned_by": "local",
-                    }
-                ],
+    def _handle_embeddings(self):
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length))
+        except (json.JSONDecodeError, ValueError) as e:
+            self._respond(400, {"error": f"Invalid JSON: {e}"})
+            return
+
+        inp = body.get("input", [])
+        if isinstance(inp, str):
+            inp = [inp]
+        if not inp:
+            self._respond(400, {"error": "input is required"})
+            return
+
+        start = time.time()
+        try:
+            vectors = embed(inp)
+        except RuntimeError as e:
+            self._respond(500, {"error": str(e)})
+            return
+
+        elapsed = time.time() - start
+        data = [
+            {"object": "embedding", "index": i, "embedding": vec}
+            for i, vec in enumerate(vectors)
+        ]
+        resp = {
+            "object": "list",
+            "data": data,
+            "model": body.get("model", "all-MiniLM-L6-v2"),
+            "usage": {
+                "prompt_tokens": sum(len(t.split()) for t in inp),
+                "total_tokens": sum(len(t.split()) for t in inp),
             },
-        )
+        }
+        print(f"  [embed {elapsed:.3f}s] {len(inp)} text(s)")
+        self._respond(200, resp)
+
+    def _handle_models(self):
+        models = [
+            {"id": "qwen-spokes", "object": "model", "owned_by": "local"},
+        ]
+        if EMBED_MODEL is not None:
+            models.append(
+                {"id": "all-MiniLM-L6-v2", "object": "model", "owned_by": "local"}
+            )
+        self._respond(200, {"object": "list", "data": models})
 
     def _respond(self, status: int, body: dict):
         data = json.dumps(body).encode()
@@ -209,12 +297,27 @@ def main():
     parser.add_argument(
         "--device", default="auto", help="Device (auto, cpu, cuda)"
     )
+    parser.add_argument(
+        "--embedding-model",
+        default="sentence-transformers/all-MiniLM-L6-v2",
+        help="Embedding model (sentence-transformers name or path, 'none' to disable)",
+    )
+    parser.add_argument(
+        "--no-compile",
+        action="store_true",
+        help="Disable torch.compile (useful for debugging or unsupported hardware)",
+    )
     args = parser.parse_args()
 
-    load_model(args.base_model, args.spokes, args.device)
+    embed_model = None if args.embedding_model == "none" else args.embedding_model
+    load_model(args.base_model, args.spokes, args.device, embed_model,
+               compile_model=not args.no_compile)
 
     server = HTTPServer(("0.0.0.0", args.port), ChatCompletionHandler)
-    print(f"\nServing on http://0.0.0.0:{args.port}/v1/chat/completions")
+    print(f"\nServing on http://0.0.0.0:{args.port}")
+    print(f"  POST /v1/chat/completions")
+    if EMBED_MODEL is not None:
+        print(f"  POST /v1/embeddings")
     print("Ctrl+C to stop\n")
 
     try:

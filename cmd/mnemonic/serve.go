@@ -246,8 +246,53 @@ func serveCommand(configPath string) {
 	if cfg.LLM.Provider == "embedded" && cfg.LLM.Embedded.ChatModelFile != "" {
 		modelLabel = cfg.LLM.Embedded.ChatModelFile
 	}
+
+	// Set up spoke provider if configured. When enabled, specific agent tasks
+	// (e.g. "encoding") use the local spoke model for completions while the
+	// main provider handles embeddings.
+	var spokeProvider llm.Provider
+	spokeTasks := make(map[string]bool)
+	if cfg.LLM.Spoke.Enabled {
+		timeout := time.Duration(cfg.LLM.Spoke.TimeoutSec) * time.Second
+		if timeout <= 0 {
+			timeout = 120 * time.Second
+		}
+		maxConc := cfg.LLM.Spoke.MaxConcurrent
+		if maxConc <= 0 {
+			maxConc = 1
+		}
+		spokeProvider = llm.NewLMStudioProvider(
+			cfg.LLM.Spoke.Endpoint,
+			cfg.LLM.Spoke.Model,
+			"", // spoke server doesn't need a separate embedding model name
+			"", // no API key for local spoke
+			timeout,
+			maxConc,
+		)
+		spokeCtx, spokeCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := spokeProvider.Health(spokeCtx); err != nil {
+			log.Error("spoke provider unavailable", "endpoint", cfg.LLM.Spoke.Endpoint, "error", err)
+			fmt.Fprintf(os.Stderr, "\n%s✘ ERROR: Spoke provider is not reachable at %s%s\n", colorRed, cfg.LLM.Spoke.Endpoint, colorReset)
+			fmt.Fprintf(os.Stderr, "  Start the spoke server: python serve_spokes.py --spokes <checkpoint>\n\n")
+			spokeCancel()
+			return
+		}
+		spokeCancel()
+		for _, task := range cfg.LLM.Spoke.Tasks {
+			spokeTasks[task] = true
+		}
+		log.Info("spoke provider ready", "endpoint", cfg.LLM.Spoke.Endpoint, "model", cfg.LLM.Spoke.Model, "tasks", cfg.LLM.Spoke.Tasks)
+	}
+
 	wrap := func(caller string) llm.Provider {
-		var p llm.Provider = llm.NewInstrumentedProvider(llmProvider, memStore, caller, modelLabel)
+		var base llm.Provider
+		if spokeProvider != nil && spokeTasks[caller] {
+			// Route completions to spoke, embeddings to main provider
+			base = llm.NewCompositeProvider(spokeProvider, llmProvider)
+		} else {
+			base = llmProvider
+		}
+		var p llm.Provider = llm.NewInstrumentedProvider(base, memStore, caller, modelLabel)
 		if cfg.Training.CaptureEnabled && cfg.Training.CaptureDir != "" {
 			p = llm.NewTrainingCaptureProvider(p, caller, cfg.Training.CaptureDir)
 		}

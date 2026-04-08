@@ -245,8 +245,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.MaxSimilarSearchResults != 5 {
 		t.Errorf("expected max similar 5, got %d", cfg.MaxSimilarSearchResults)
 	}
-	if cfg.CompletionMaxTokens != 1024 {
-		t.Errorf("expected max tokens 1024, got %d", cfg.CompletionMaxTokens)
+	if cfg.CompletionMaxTokens != 4096 {
+		t.Errorf("expected max tokens 4096, got %d", cfg.CompletionMaxTokens)
 	}
 	if cfg.CompletionTemperature != 0.3 {
 		t.Errorf("expected temperature 0.3, got %v", cfg.CompletionTemperature)

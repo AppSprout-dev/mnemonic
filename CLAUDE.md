@@ -31,7 +31,7 @@ cmd/benchmark/         End-to-end benchmark
 cmd/benchmark-quality/ Memory quality IR benchmark
 cmd/lifecycle-test/    Full lifecycle simulation (install → 3 months)
 internal/
-  agent/               8 cognitive agents + orchestrator + reactor + forum
+  agent/               8 cognitive agents + orchestrator + reactor + forum + utilities
     perception/        Watch filesystem/terminal/clipboard, heuristic filter
     encoding/          LLM compression, concept extraction, association linking
     episoding/         Temporal episode clustering
@@ -43,11 +43,13 @@ internal/
     orchestrator/      Autonomous scheduler, health monitoring
     reactor/           Event-driven rule engine
     forum/             Agent personality system for forum communication
+    agentutil/         Shared agent utilities
   api/                 REST API server + routes
   web/                 Embedded dashboard (forum-style, modular ES modules + CSS)
   mcp/                 MCP server (24 tools for Claude Code)
   store/               Store interface + SQLite implementation
   llm/                 LLM provider interface + implementations (LM Studio, Gemini/cloud API)
+    composite.go       CompositeProvider: routes completions → spoke, embeddings → main provider
     llamacpp/          Optional embedded llama.cpp backend (CGo, build-tagged)
   ingest/              Project ingestion engine
   watcher/             Filesystem (FSEvents/fsnotify), terminal, clipboard
@@ -62,14 +64,20 @@ internal/
 sdk/                   Python agent SDK (self-evolving assistant)
   agent/evolution/     Agent evolution data (created at runtime, gitignored)
   agent/evolution/examples/  Example evolution data for reference
+models/                GGUF model files (gitignored)
+  qwen3.5-2b/         HuggingFace Qwen 3.5 2B weights
+  qwen35-2b-f16.gguf  Base Qwen 3.5 2B in GGUF format
+  qwen35-2b-spokes-f16.gguf  Qwen 3.5 2B + trained encoding spokes
 training/              Mnemonic-LM training infrastructure
-  scripts/             Training, sweep, bisection, data download scripts
+  scripts/             Training, evaluation, data generation, GGUF export
   configs/             Data mix config (pretrain_mix.yaml)
   docs/                Experiment registry, analysis docs
-  data/                Tokenized pretraining shards (gitignored)
+  data/                Training datasets (gitignored)
   sweep_results.tsv    HP sweep results log
   probe_results.tsv    Short probe results from LR bisection
-third_party/           llama.cpp submodule (for embedded LLM builds)
+third_party/           llama.cpp submodule (custom fork with Felix-LM spoke support)
+checkpoints/           Training checkpoints by experiment (gitignored)
+tests/                 End-to-end tests
 migrations/            SQLite schema migrations
 scripts/               Utility scripts
 ```
@@ -81,6 +89,7 @@ scripts/               Utility scripts
 - **Error handling:** Wrap errors with context: `fmt.Errorf("encoding memory %s: %w", id, err)`
 - **Platform-specific code:** Use Go build tags (`//go:build darwin`, `//go:build !darwin`). See `internal/watcher/filesystem/` for examples.
 - **Config:** All tunables live in `config.yaml`. Add new fields to `internal/config/config.go` struct.
+- **Spoke routing:** When a spoke provider is configured (`LLM.Spoke` in config), specific agent tasks route to the spoke model via `CompositeProvider` (completions → spoke, embeddings → main provider). Configure task routing in `config.yaml`'s `LLM.Spoke.Tasks` list. Health-checked at startup in `cmd/mnemonic/serve.go`.
 
 ## Adding Things
 
@@ -93,44 +102,29 @@ scripts/               Utility scripts
 
 | Platform | Status |
 |----------|--------|
-| macOS ARM | Full support (primary dev platform) |
-| Linux x86_64 | Supported — `serve`, `install`, `start`, `stop`, `uninstall` all work via systemd |
+| macOS ARM | Full support |
+| Linux x86_64 | Full support (primary dev platform) — systemd service, RX 7800 XT + ROCm for training/inference |
 | Windows x86_64 | Supported — `serve`, `install`, `start`, `stop`, `uninstall` work via Windows Services |
 
 ## Training (Felix-LM / Mnemonic-LM)
 
-Felix-LM is a hub-and-spoke architecture for language models. The "central post" is a frozen pretrained base model (currently Gemma 4 E2B, previously Qwen 3.5 2B). "Spokes" are lightweight low-rank adapters (~27M params, <1% overhead) injected at each decoder layer via forward hooks. The spokes are the only trainable parameters — the base model is frozen.
+Felix-LM is a hub-and-spoke architecture for language models. The "central post" is a frozen pretrained base model. "Spokes" are lightweight low-rank adapters (~25M params, <1% overhead) injected at each decoder layer. The spokes are the only trainable parameters — the base model is frozen.
 
 The architecture supports hot-swappable task-specific spoke sets: encoding spokes, synthesis spokes, retrieval spokes, all sharing the same frozen post. This is the Felix-LM vision: one backbone, many specialized tools.
 
-**Current state:** Encoding spokes achieve 100% novel schema compliance on Qwen 3.5 2B. Gemma 4 E2B training is in progress. See `training/docs/experiment_registry.md` for the full experiment history (EXP-1 through EXP-19).
+**Current state:** Qwen 3.5 2B is the production encoding model (100% schema, 7/7 stress test). Deployed via custom llama.cpp fork at 95 tok/s on RX 7800 XT. Gemma 4 E2B explored but slower locally. See `training/docs/experiment_registry.md` for EXP-1 through EXP-21.
 
-Training scripts live in `training/scripts/` and require the **Felix-LM venv**:
+### Inference
 
-```bash
-source ~/Projects/felixlm/.venv/bin/activate
-```
+Custom llama.cpp fork (`third_party/llama.cpp/`) with Felix-LM spoke support in `src/models/qwen35.cpp`. Spoke GGUF at `models/qwen35-2b-spokes-f16.gguf`. Build with `-DGGML_HIP=ON`. Export via `training/scripts/export_qwen35_spokes.py`.
 
-Key scripts:
+### Training
 
-- `train_qwen_spokes.py` — Main training script (supports `--model-type qwen|gemma`)
-- `qwen_spoke_adapter.py` — Qwen 3.5 2B spoke adapter + shared SpokeLayer class
-- `gemma_spoke_adapter.py` — Gemma 4 E2B spoke adapter
-- `eval_qwen_encoding.py` — Novel input evaluation (needs Gemma 4 support)
-- `batch_encode.py` — Gemini Batch API pipeline for scalable training data generation
-- `enrich_and_generate.py` — Async Gemini data enrichment + synthetic generation
-- `extract_prenuke_data.py` — Extract training data from pre-nuke DB backup
-- `merge_training_data.py` — Merge, dedup, and split training datasets
+Scripts in `training/scripts/`, require `source ~/Projects/felixlm/.venv/bin/activate`. Core: `train_qwen_spokes.py`, `qwen_spoke_adapter.py`, `export_qwen35_spokes.py`. Data gen: `batch_encode.py`, `validate.py`. Eval: `eval_qwen_encoding.py`, `stress_test_hallucination.py`, `compare_models.py`. Research: `turboquant.py` (KV cache compression).
 
-Key data:
+Current dataset: `training/data/finetune_qwen_v6/` (4,255 train / 472 eval). Design paper: `~/Projects/felixlm/docs/felix_lm_design.tex`.
 
-- `training/data/finetune_gemma4_v5/` — Current Gemma 4 training data (9,945 train / 1,105 eval, encoding-only)
-- `training/data/finetune_qwen_v5_encoding_only/` — Qwen training data (11,436 train / 1,270 eval)
-- `training/data/finetune_qwen_v2/` — Original clean dataset (4,566 train / 507 eval)
-
-The Felix-LM design paper is at `~/Projects/felixlm/docs/felix_lm_design.tex`. The spoke implementation originated in `~/Projects/felixlm/felix_lm/v3/spokes.py` and `~/Projects/nanochat/nanochat/gpt.py`.
-
-All experiments must be pre-registered in `training/docs/experiment_registry.md` before running. See `.claude/rules/scientific-method.md` and `.claude/rules/experiment-logging.md`.
+All experiments must be pre-registered in `training/docs/experiment_registry.md`. See `.claude/rules/scientific-method.md` and `.claude/rules/experiment-logging.md`.
 
 ## Known Issues
 

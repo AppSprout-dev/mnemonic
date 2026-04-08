@@ -103,7 +103,6 @@ func DefaultConfig() ConsolidationConfig {
 	}
 }
 
-
 // ConsolidationAgent performs periodic memory consolidation — the "sleeping brain."
 // Each cycle: decay salience → transition states → prune associations → merge clusters → delete expired.
 type ConsolidationAgent struct {
@@ -403,6 +402,13 @@ func (ca *ConsolidationAgent) decaySalience(ctx context.Context) (decayed, proce
 	for _, mem := range allMemories {
 		processed++
 
+		// Skip handoff memories — their value is temporal, not usage-validated.
+		// They are already exempt from lossy merging (mergeClusters) and should
+		// maintain their initial salience so newest-first ordering works reliably.
+		if mem.Type == "handoff" {
+			continue
+		}
+
 		// Calculate recency factor: recently accessed memories decay slower
 		hoursSinceAccess := time.Since(mem.LastAccessed).Hours()
 		if mem.LastAccessed.IsZero() {
@@ -531,6 +537,16 @@ func (ca *ConsolidationAgent) mergeClusters(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+
+	// Exclude handoff memories — they contain unique per-session details
+	// that must not be merged into a lossy gist.
+	filtered := memories[:0]
+	for _, m := range memories {
+		if m.Type != "handoff" {
+			filtered = append(filtered, m)
+		}
+	}
+	memories = filtered
 
 	if len(memories) < ca.config.MinClusterSize {
 		return 0, nil // Not enough memories to form clusters
@@ -721,7 +737,7 @@ Respond with ONLY a JSON object:
 	now := time.Now()
 	return store.Memory{
 		ID:           uuid.New().String(),
-		RawID:        cluster[0].RawID, // reference first source
+		RawID:        "", // gist has no raw source (cluster sources tracked via gist_of)
 		Timestamp:    now,
 		Content:      gistContent,
 		Summary:      gistSummary,

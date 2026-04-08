@@ -82,6 +82,7 @@ type mockStore struct {
 	// Configurable function fields for methods used by the retrieval agent.
 	searchByFullTextFunc        func(ctx context.Context, query string, limit int) ([]store.Memory, error)
 	searchByEmbeddingFunc       func(ctx context.Context, embedding []float32, limit int) ([]store.RetrievalResult, error)
+	searchByTypeFunc            func(ctx context.Context, types []string, limit int) ([]store.Memory, error)
 	getAssociationsFunc         func(ctx context.Context, memoryID string) ([]store.Association, error)
 	getMemoryFunc               func(ctx context.Context, id string) (store.Memory, error)
 	incrementAccessFunc         func(ctx context.Context, id string) error
@@ -137,6 +138,12 @@ func (m *mockStore) GetMemoryFeedbackScores(ctx context.Context, memoryIDs []str
 		return m.getMemoryFeedbackScoresFunc(ctx, memoryIDs)
 	}
 	return nil, nil
+}
+func (m *mockStore) SearchByType(ctx context.Context, types []string, limit int) ([]store.Memory, error) {
+	if m.searchByTypeFunc != nil {
+		return m.searchByTypeFunc(ctx, types, limit)
+	}
+	return m.MockStore.SearchByType(ctx, types, limit)
 }
 
 // ---------------------------------------------------------------------------
@@ -1054,7 +1061,7 @@ func TestRankResults_FeedbackInfluence(t *testing.T) {
 		memB.ID: {activation: 0.8},
 	}
 
-	results := agent.rankResults(context.Background(), activated, true)
+	results := agent.rankResults(context.Background(), activated, true, false)
 	if len(results) != 2 {
 		t.Fatalf("expected 2 results, got %d", len(results))
 	}
@@ -1095,7 +1102,7 @@ func TestRankResults_FeedbackErrorGraceful(t *testing.T) {
 		"m1": {activation: 0.7},
 	}
 
-	results := agent.rankResults(context.Background(), activated, false)
+	results := agent.rankResults(context.Background(), activated, false, false)
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result despite feedback error, got %d", len(results))
 	}
@@ -1139,7 +1146,7 @@ func TestRankResults_SourceWeighting(t *testing.T) {
 		fsMem.ID:  {activation: 0.8},
 	}
 
-	results := agent.rankResults(context.Background(), activated, false)
+	results := agent.rankResults(context.Background(), activated, false, false)
 	if len(results) != 2 {
 		t.Fatalf("expected 2 results, got %d", len(results))
 	}
@@ -1179,7 +1186,7 @@ func TestRankResults_UnknownSourceGetsWeight1(t *testing.T) {
 		"m1": {activation: 0.8},
 	}
 
-	results := agent.rankResults(context.Background(), activated, false)
+	results := agent.rankResults(context.Background(), activated, false, false)
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
@@ -1230,7 +1237,7 @@ func TestRankResults_SourceAndFeedbackCombined(t *testing.T) {
 		mcpMem.ID: {activation: 0.8},
 	}
 
-	results := agent.rankResults(context.Background(), activated, false)
+	results := agent.rankResults(context.Background(), activated, false, false)
 	if len(results) != 2 {
 		t.Fatalf("expected 2 results, got %d", len(results))
 	}
@@ -1241,5 +1248,180 @@ func TestRankResults_SourceAndFeedbackCombined(t *testing.T) {
 	// mcp score: 0.8 * ~1.2 * 1.0 - 0.3 = ~0.66
 	if results[0].Memory.ID != "fs-helpful" {
 		t.Errorf("expected feedback to override source bias; got %s first", results[0].Memory.ID)
+	}
+}
+
+// TestRankResults_RecencyUsesCreatedAt verifies that the recency bonus is based on
+// CreatedAt, not LastAccessed. An old memory with a recently-reset LastAccessed and
+// high access count must NOT outrank a brand-new memory.
+func TestRankResults_RecencyUsesCreatedAt(t *testing.T) {
+	now := time.Now()
+
+	oldMem := store.Memory{
+		ID:           "old-handoff",
+		Type:         "handoff",
+		Summary:      "old session handoff",
+		Source:       "mcp",
+		Salience:     0.95,
+		CreatedAt:    now.Add(-72 * time.Hour),  // 3 days ago
+		LastAccessed: now.Add(-1 * time.Minute), // accessed 1 minute ago
+		AccessCount:  15,
+	}
+	newMem := store.Memory{
+		ID:           "new-handoff",
+		Type:         "handoff",
+		Summary:      "new session handoff",
+		Source:       "mcp",
+		Salience:     0.95,
+		CreatedAt:    now.Add(-5 * time.Minute), // 5 minutes ago
+		LastAccessed: time.Time{},               // never accessed
+		AccessCount:  0,
+	}
+
+	memMap := map[string]store.Memory{
+		"old-handoff": oldMem,
+		"new-handoff": newMem,
+	}
+
+	s := &mockStore{
+		getMemoryFunc: func(_ context.Context, id string) (store.Memory, error) {
+			if m, ok := memMap[id]; ok {
+				return m, nil
+			}
+			return store.Memory{}, fmt.Errorf("not found: %s", id)
+		},
+	}
+
+	cfg := DefaultConfig()
+	agent := NewRetrievalAgent(s, &mockLLMProvider{}, cfg, testLogger(), nil)
+
+	// Both start with identical activation (simulating type-filter entry points)
+	activated := map[string]activationState{
+		"old-handoff": {activation: 0.785},
+		"new-handoff": {activation: 0.785},
+	}
+
+	results := agent.rankResults(context.Background(), activated, true, false)
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+
+	// The new handoff must rank first because recency is based on CreatedAt.
+	// Under the old code (LastAccessed), the old handoff would win because its
+	// LastAccessed was just reset and it has a high activity bonus.
+	if results[0].Memory.ID != "new-handoff" {
+		t.Errorf("expected new-handoff first (recency by CreatedAt), got %s\n  new score: %.4f (%s)\n  old score: %.4f (%s)",
+			results[0].Memory.ID,
+			results[1].Score, results[1].Explanation,
+			results[0].Score, results[0].Explanation)
+	}
+}
+
+// TestRankResults_TiebreakByCreatedAt verifies that when scores are within epsilon,
+// memories are ordered by CreatedAt descending (newest first).
+func TestRankResults_TiebreakByCreatedAt(t *testing.T) {
+	now := time.Now()
+
+	// Three memories created minutes apart, same day, same type, zero access count.
+	// Recency bonus will be nearly identical for all three.
+	mems := []store.Memory{
+		{ID: "h1", Type: "handoff", Source: "mcp", Salience: 0.95, CreatedAt: now.Add(-30 * time.Minute)},
+		{ID: "h2", Type: "handoff", Source: "mcp", Salience: 0.95, CreatedAt: now.Add(-15 * time.Minute)},
+		{ID: "h3", Type: "handoff", Source: "mcp", Salience: 0.95, CreatedAt: now.Add(-5 * time.Minute)},
+	}
+	memMap := make(map[string]store.Memory)
+	for _, m := range mems {
+		memMap[m.ID] = m
+	}
+
+	s := &mockStore{
+		getMemoryFunc: func(_ context.Context, id string) (store.Memory, error) {
+			if m, ok := memMap[id]; ok {
+				return m, nil
+			}
+			return store.Memory{}, fmt.Errorf("not found: %s", id)
+		},
+	}
+
+	cfg := DefaultConfig()
+	agent := NewRetrievalAgent(s, &mockLLMProvider{}, cfg, testLogger(), nil)
+
+	activated := map[string]activationState{
+		"h1": {activation: 0.785},
+		"h2": {activation: 0.785},
+		"h3": {activation: 0.785},
+	}
+
+	results := agent.rankResults(context.Background(), activated, false, true)
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+
+	// Scores should be within epsilon, so tiebreaker by CreatedAt: h3 > h2 > h1
+	expected := []string{"h3", "h2", "h1"}
+	for i, id := range expected {
+		if results[i].Memory.ID != id {
+			t.Errorf("position %d: expected %s, got %s (score=%.6f)", i, id, results[i].Memory.ID, results[i].Score)
+		}
+	}
+}
+
+// TestTypeFilteredRecall_NewestHandoffSurfaces is an end-to-end test verifying that
+// when querying with a type filter, the newest handoff surfaces first even when
+// older handoffs have higher access counts and recent LastAccessed times.
+func TestTypeFilteredRecall_NewestHandoffSurfaces(t *testing.T) {
+	now := time.Now()
+
+	handoffs := []store.Memory{
+		{ID: "h-old-3", Type: "handoff", Source: "mcp", Salience: 0.95, CreatedAt: now.Add(-72 * time.Hour), LastAccessed: now.Add(-1 * time.Minute), AccessCount: 10},
+		{ID: "h-old-2", Type: "handoff", Source: "mcp", Salience: 0.95, CreatedAt: now.Add(-48 * time.Hour), LastAccessed: now.Add(-2 * time.Minute), AccessCount: 8},
+		{ID: "h-old-1", Type: "handoff", Source: "mcp", Salience: 0.95, CreatedAt: now.Add(-24 * time.Hour), LastAccessed: now.Add(-3 * time.Minute), AccessCount: 5},
+		{ID: "h-recent", Type: "handoff", Source: "mcp", Salience: 0.95, CreatedAt: now.Add(-2 * time.Hour), AccessCount: 1},
+		{ID: "h-newest", Type: "handoff", Source: "mcp", Salience: 0.95, CreatedAt: now.Add(-5 * time.Minute), AccessCount: 0},
+	}
+
+	memMap := make(map[string]store.Memory)
+	for _, m := range handoffs {
+		memMap[m.ID] = m
+	}
+
+	s := &mockStore{
+		searchByTypeFunc: func(_ context.Context, _ []string, _ int) ([]store.Memory, error) {
+			return handoffs, nil
+		},
+		getMemoryFunc: func(_ context.Context, id string) (store.Memory, error) {
+			if m, ok := memMap[id]; ok {
+				return m, nil
+			}
+			return store.Memory{}, fmt.Errorf("not found: %s", id)
+		},
+		// Return empty embeddings to prevent embedding search from adding entry points
+		searchByEmbeddingFunc: func(_ context.Context, _ []float32, _ int) ([]store.RetrievalResult, error) {
+			return nil, nil
+		},
+	}
+
+	cfg := DefaultConfig()
+	agent := NewRetrievalAgent(s, &mockLLMProvider{}, cfg, testLogger(), nil)
+
+	resp, err := agent.Query(context.Background(), QueryRequest{
+		Query:      "session handoff",
+		Type:       "handoff",
+		MaxResults: 5,
+	})
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	if len(resp.Memories) == 0 {
+		t.Fatal("expected at least 1 result")
+	}
+
+	// The newest handoff must be first, regardless of older ones' access advantages
+	if resp.Memories[0].Memory.ID != "h-newest" {
+		var ids []string
+		for _, m := range resp.Memories {
+			ids = append(ids, m.Memory.ID)
+		}
+		t.Errorf("expected h-newest first, got order: %v", ids)
 	}
 }

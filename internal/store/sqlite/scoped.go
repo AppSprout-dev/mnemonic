@@ -69,6 +69,28 @@ func (s *SQLiteStore) ListMemoriesBySession(ctx context.Context, sessionID strin
 	return scanMemoryRows(rows)
 }
 
+// SearchByType returns memories matching any of the given types, ordered by salience.
+// Includes merged memories since type-filtered queries are explicit user intent.
+func (s *SQLiteStore) SearchByType(ctx context.Context, types []string, limit int) ([]store.Memory, error) {
+	if len(types) == 0 {
+		return nil, nil
+	}
+	placeholders := make([]string, len(types))
+	args := make([]interface{}, len(types))
+	for i, t := range types {
+		placeholders[i] = "?"
+		args[i] = t
+	}
+	query := `SELECT ` + memoryColumns + ` FROM memories WHERE type IN (` + strings.Join(placeholders, ",") + `) AND state != 'archived' ORDER BY salience DESC, created_at DESC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("searching memories by type: %w", err)
+	}
+	return scanMemoryRows(rows)
+}
+
 // ListSessions returns recent sessions with metadata.
 func (s *SQLiteStore) ListSessions(ctx context.Context, since time.Time, limit int) ([]store.SessionSummary, error) {
 	query := `
