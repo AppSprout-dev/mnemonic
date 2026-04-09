@@ -165,8 +165,22 @@ def compute_epr(input_text: str, output_json: dict) -> tuple[float, list[str]]:
 
 
 def compute_fr(input_text: str, output_json: dict) -> tuple[float, list[str]]:
-    """Fabrication Rate: % of output entities NOT found in input."""
-    output_text = json.dumps(output_json, ensure_ascii=False)
+    """Fabrication Rate: % of output entities NOT found in input.
+
+    Only measures content-bearing fields (gist, summary, content, narrative, outcome).
+    Excludes concepts, structured_concepts, significance, emotional_tone, salience —
+    these are classification/extraction fields where semantic expansion beyond
+    the literal input text is expected and correct behavior.
+    """
+    # Build text from content-bearing fields only
+    content_fields = ["gist", "summary", "content", "narrative", "outcome"]
+    content_parts = []
+    for field in content_fields:
+        val = output_json.get(field)
+        if isinstance(val, str):
+            content_parts.append(val)
+    output_text = " ".join(content_parts)
+
     output_entities = extract_entities(output_text)
     if not output_entities:
         return 0.0, []
