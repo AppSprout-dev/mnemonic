@@ -41,6 +41,47 @@ from qwen_spoke_adapter import QwenWithSpokes, SpokeConfig, SpokeLayer, build_ro
 from gemma_spoke_adapter import GemmaWithSpokes  # noqa: E402
 
 
+# --- Chunked cross-entropy for large-vocab models ---
+
+def chunked_cross_entropy(logits, labels, ignore_index=-100, chunk_size=256):
+    """Memory-efficient cross-entropy that processes positions in chunks.
+
+    Avoids materializing the full float32 logit tensor (248K vocab * seq_len * 4 bytes)
+    which OOMs on 16GB VRAM at seq_len > 2048. Instead, processes chunk_size positions
+    at a time, keeping peak VRAM bounded.
+
+    Returns (total_loss, total_tokens) where total_loss is a differentiable sum.
+    Caller divides for mean loss.
+    """
+    # Shift for causal LM: predict next token
+    shift_logits = logits[..., :-1, :]
+    shift_labels = labels[..., 1:].contiguous().view(-1)
+
+    n_pos = shift_logits.size(1)
+    batch = shift_logits.size(0)
+    total_loss = None
+    total_tokens = 0
+
+    for i in range(0, n_pos, chunk_size):
+        end = min(i + chunk_size, n_pos)
+        chunk_logits = shift_logits[:, i:end, :].contiguous().view(-1, shift_logits.size(-1))
+        chunk_labels = shift_labels[i * batch : end * batch]
+
+        n = (chunk_labels != ignore_index).sum().item()
+        if n == 0:
+            continue
+
+        chunk_loss = F.cross_entropy(
+            chunk_logits, chunk_labels, ignore_index=ignore_index, reduction="sum"
+        )
+        total_loss = chunk_loss if total_loss is None else total_loss + chunk_loss
+        total_tokens += n
+
+    if total_loss is None:
+        total_loss = torch.tensor(0.0, device=logits.device)
+    return total_loss, total_tokens
+
+
 # --- Dataset ---
 
 class FineTuneDataset(Dataset):
@@ -133,23 +174,14 @@ def evaluate(model, eval_loader, device) -> float:
         labels = labels.to(device)
         attention_mask = attention_mask.to(device)
 
-        outputs = model(input_ids=input_ids, labels=labels, attention_mask=attention_mask)
-        # HF models return mean loss by default, but we want sum for proper averaging
-        # Recompute to get per-token loss
-        logits = outputs.logits
-        shift_logits = logits[..., :-1, :].contiguous()
-        shift_labels = labels[..., 1:].contiguous()
+        # Don't pass labels — avoids HF internal loss materialization (~2GB for 248K vocab)
+        outputs = model(input_ids=input_ids, attention_mask=attention_mask)
+        loss_sum, n_tokens = chunked_cross_entropy(outputs.logits, labels)
 
-        loss = F.cross_entropy(
-            shift_logits.view(-1, shift_logits.size(-1)),
-            shift_labels.view(-1),
-            ignore_index=-100,
-            reduction="sum",
-        )
-
-        n_tokens = (shift_labels != -100).sum().item()
-        total_loss += loss.item()
+        total_loss += loss_sum.item()
         total_tokens += n_tokens
+
+        del outputs
 
     model.train()
     return total_loss / max(total_tokens, 1)
@@ -404,25 +436,18 @@ def train(args):
 
             try:
                 with torch.amp.autocast("cuda", dtype=torch.bfloat16, enabled=args.autocast):
-                    outputs = model(input_ids=input_ids, labels=labels, attention_mask=attention_mask)
+                    # Don't pass labels — compute loss via chunked_cross_entropy to avoid
+                    # materializing full float32 logits (248K vocab * seq_len OOMs at >2048)
+                    outputs = model(input_ids=input_ids, attention_mask=attention_mask)
 
-                    # F.cross_entropy handles bf16→fp32 upcast internally;
-                    # .float() here creates a 1.89 GiB fp32 copy that OOMs at seq_len 2048
-                    logits = outputs.logits
-                    shift_logits = logits[..., :-1, :].contiguous()
-                    shift_labels = labels[..., 1:].contiguous()
+                    loss_sum, n_tokens = chunked_cross_entropy(outputs.logits, labels)
 
                     # Skip if all labels are masked (truncated examples with no completion)
-                    if (shift_labels == -100).all():
+                    if n_tokens == 0:
                         global_step += 1
                         continue
 
-                    loss = F.cross_entropy(
-                        shift_logits.view(-1, shift_logits.size(-1)),
-                        shift_labels.view(-1),
-                        ignore_index=-100,
-                    )
-                    loss = loss / args.grad_accum
+                    loss = (loss_sum / n_tokens) / args.grad_accum
 
                 loss.backward()
             except torch.cuda.OutOfMemoryError:
