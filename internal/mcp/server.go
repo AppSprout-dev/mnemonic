@@ -2596,14 +2596,33 @@ func (srv *MCPServer) handleListExclusions(ctx context.Context, args map[string]
 
 // handleAmend updates a memory's content in place, preserving associations and history.
 func (srv *MCPServer) handleAmend(ctx context.Context, args map[string]interface{}) (interface{}, error) {
-	memoryID, ok := args["memory_id"].(string)
-	if !ok || memoryID == "" {
-		return nil, fmt.Errorf("memory_id parameter is required")
+	rawID, _ := args["raw_id"].(string)
+	memoryID, _ := args["memory_id"].(string)
+
+	if rawID == "" && memoryID == "" {
+		return nil, fmt.Errorf("at least one of raw_id or memory_id is required")
 	}
 
 	correctedContent, ok := args["corrected_content"].(string)
 	if !ok || correctedContent == "" {
 		return nil, fmt.Errorf("corrected_content parameter is required")
+	}
+
+	// Resolve to encoded memory ID — try memory_id first, fall back to raw_id
+	var resolvedID string
+	if memoryID != "" {
+		if _, err := srv.store.GetMemory(ctx, memoryID); err == nil {
+			resolvedID = memoryID
+		}
+	}
+	if resolvedID == "" && rawID != "" {
+		m, err := srv.store.GetMemoryByRawID(ctx, rawID)
+		if err == nil {
+			resolvedID = m.ID
+		}
+	}
+	if resolvedID == "" {
+		return nil, fmt.Errorf("memory not found — check that the ID is correct (use check_memory to look up by raw_id)")
 	}
 
 	// Generate a simple summary (first 120 chars of content)
@@ -2613,22 +2632,22 @@ func (srv *MCPServer) handleAmend(ctx context.Context, args map[string]interface
 	}
 
 	// Use empty concepts and embedding — encoding agent can re-process if needed
-	if err := srv.store.AmendMemory(ctx, memoryID, correctedContent, summary, nil, nil); err != nil {
-		srv.log.Error("failed to amend memory", "memory_id", memoryID, "error", err)
+	if err := srv.store.AmendMemory(ctx, resolvedID, correctedContent, summary, nil, nil); err != nil {
+		srv.log.Error("failed to amend memory", "memory_id", resolvedID, "error", err)
 		return nil, fmt.Errorf("failed to amend memory: %w", err)
 	}
 
 	// Publish event
 	if srv.bus != nil {
 		_ = srv.bus.Publish(ctx, events.MemoryAmended{
-			MemoryID:   memoryID,
+			MemoryID:   resolvedID,
 			NewSummary: summary,
 			Ts:         time.Now(),
 		})
 	}
 
-	srv.log.Info("memory amended", "memory_id", memoryID)
-	return toolResult(fmt.Sprintf("Amended memory %s. Content updated, associations and history preserved. Salience bumped +0.05.", memoryID)), nil
+	srv.log.Info("memory amended", "memory_id", resolvedID)
+	return toolResult(fmt.Sprintf("Amended memory %s. Content updated, associations and history preserved. Salience bumped +0.05.", resolvedID)), nil
 }
 
 // handleCheckMemory inspects a memory's encoding status, concepts, and associations.

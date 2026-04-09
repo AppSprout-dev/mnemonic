@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export Qwen 3.5 2B + trained spoke weights to a single GGUF file.
+"""Export Qwen 3.5 + trained spoke weights to a single GGUF file.
 
 Two-phase approach: (1) convert the base HF model to GGUF using llama.cpp's
 standard converter, then (2) patch the GGUF to add spoke tensors and metadata
@@ -11,6 +11,11 @@ Usage:
         --model models/qwen3.5-2b \
         --spokes checkpoints/exp20_v6_local/best_spokes.pt \
         --output models/qwen35-2b-spokes-f16.gguf
+
+    python training/scripts/export_qwen35_spokes.py \
+        --model models/qwen3.5-4b \
+        --spokes checkpoints/exp27_v7_4b/best_spokes.pt \
+        --output models/qwen35-4b-spokes-f16.gguf
 
 Requires: pip install gguf numpy torch (in the felixlm venv)
 """
@@ -107,7 +112,9 @@ def main():
     print(f"  Output:  {output_path}")
 
     # --- Phase 1: Convert base model to GGUF ---
-    base_gguf = output_path.parent / "qwen35-2b-f16.gguf"
+    # Derive base GGUF name from model directory (e.g., "qwen3.5-2b" -> "qwen35-2b-f16.gguf")
+    model_stem = model_path.name.replace(".", "")  # "qwen3.5-4b" -> "qwen35-4b"
+    base_gguf = output_path.parent / f"{model_stem}-f16.gguf"
     if not base_gguf.exists():
         print(f"\nPhase 1: Converting base model to GGUF...")
         converter = LLAMACPP_DIR / "convert_hf_to_gguf.py"

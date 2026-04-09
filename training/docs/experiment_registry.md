@@ -1000,3 +1000,20 @@ Rotation parameter overhead per layer (rank=64):
 - **Tracking:** GitHub issue #381 (Phase 4)
 - **Result:** (pending — awaiting v7 gold-standard outputs from Gemini Batch API)
 - **Verdict:** (pending)
+
+### EXP-27: Qwen 3.5 4B — Model Scale Upgrade with V7 Data
+
+- **Date:** 2026-04-09
+- **Status:** REGISTERED
+- **Hypothesis:** Qwen 3.5 4B (2560 hidden, 32 layers, 16/4 Q/KV heads) as the frozen base will match or exceed Qwen 3.5 2B spoke quality on encoding while providing a stronger foundation for multi-task spokes (synthesis, retrieval). The wider hidden dim and deeper architecture should improve faithfulness and generalization on diverse inputs without spoke architecture changes.
+- **Variable:** Base model size (Qwen 3.5 2B → Qwen 3.5 4B). All other config matched to EXP-26.
+- **Control:** EXP-26 (Qwen 3.5 2B, v7 data, same hardware). Direct comparison: same data, same spoke config (4 spokes, rank 64), same hyperparameters.
+- **Prediction:** Faithfulness metrics match or exceed EXP-26 (EPR >90%, FR <5%, SC 100%). Eval loss ≤ EXP-26. Stress test 7/7. If 4B doesn't improve over 2B on encoding, the value is in multi-task spoke routing (synthesis/retrieval) where richer base representations matter.
+- **Config:** Qwen 3.5 4B (frozen, bf16, ~8 GB) + 4 spokes rank 64 on all 32 layers (~33M trainable params, ~0.8% overhead), batch 1, grad_accum 8, seq_len 2375, LR 3e-4, scalar_lr_scale 0.1, Muon + AdamW, gradient_checkpointing, patience 5, eval_interval 200. Chunked cross-entropy (256 positions). Architecture note: 32 layers in 3:1 DeltaNet/attention ratio (24 DeltaNet + 8 full attention). Spokes applied to all 32 layers.
+- **Data:** V7 dataset (same as EXP-26). Production prompt format via build_production_prompt(). Retokenized with Qwen 3.5 4B tokenizer (same tokenizer family, 248K vocab).
+- **Hardware:** Local RX 7800 XT, 16GB VRAM, ROCm 7.2.1. Daemon stopped for training. VRAM budget: ~8 GB base (bf16) + ~132 MB spokes (fp32) + ~264 MB optimizer + activations (gradient checkpointing). Expected to fit within 16 GB.
+- **Metrics:** Primary: 7-metric faithfulness eval (EPR, FR, TED, CCS, MIH, NP, SC). Secondary: eval loss/PPL, stress_test_hallucination.py (7/7 target), novel schema compliance. Tertiary: inference throughput (tok/s) at RQ4 via llama.cpp.
+- **Inference plan:** Export via export_qwen35_spokes.py (now parameterized for any Qwen 3.5 size), quantize to RQ4 via rotorq_quantize_gguf.py, benchmark throughput on RX 7800 XT. Expected: ~2.25 GB weights (RQ4), ~60-70 tok/s.
+- **Open question:** Should spokes be placed on all 32 layers, or only the 8 full-attention layers? DeltaNet layers use linear attention with recurrent state — spoke adaptation may not be needed there. Could test attention-only spoke placement as a follow-up (EXP-28).
+- **Result:** (pending — blocked on EXP-26 completion)
+- **Verdict:** (pending)

@@ -102,7 +102,6 @@ def build_production_prompt(
     source: str = "mcp",
     mem_type: str = "general",
     episode_ctx: str = "",
-    related_ctx: str = "",
     coaching_instructions: str = "",
     concept_vocabulary: list[str] | None = None,
 ) -> str:
@@ -162,8 +161,6 @@ def build_production_prompt(
 
     if episode_ctx:
         parts.append(episode_ctx)
-    if related_ctx:
-        parts.append(related_ctx)
     if coaching_instructions:
         parts.append(coaching_instructions)
         parts.append("\n\n")

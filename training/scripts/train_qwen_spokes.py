@@ -226,7 +226,7 @@ def train(args):
     ModelClass = GemmaWithSpokes if model_type == "gemma" else QwenWithSpokes
     extra_kwargs = {}
     if model_type == "qwen":
-        extra_kwargs["attn_implementation"] = "eager"  # Flash attention may not work with hooks
+        extra_kwargs["attn_implementation"] = "sdpa"  # Memory-efficient attention (SpokeWrappedLayer is SDPA-compatible)
     if model_type == "gemma" and not args.gradient_checkpointing:
         # No gradient checkpointing implies high-VRAM hardware — skip NF4 and PLE offload
         extra_kwargs["no_quantize"] = True

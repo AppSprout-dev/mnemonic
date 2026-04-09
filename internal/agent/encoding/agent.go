@@ -1147,10 +1147,9 @@ func (ea *EncodingAgent) compressAndExtractConcepts(ctx context.Context, raw sto
 
 	// Gather contextual information for richer encoding
 	episodeCtx := ea.getEpisodeContext(ctx, raw)
-	relatedCtx := ea.getRelatedContext(ctx, raw)
 
 	// Build the LLM prompt
-	prompt := buildCompressionPrompt(truncatedContent, raw.Source, raw.Type, episodeCtx, relatedCtx, ea.coachingInstructions, ea.config.ConceptVocabulary)
+	prompt := buildCompressionPrompt(truncatedContent, raw.Source, raw.Type, episodeCtx, ea.coachingInstructions, ea.config.ConceptVocabulary)
 
 	req := llm.CompletionRequest{
 		Messages: []llm.Message{
@@ -1221,7 +1220,7 @@ func (ea *EncodingAgent) compressAndExtractConcepts(ctx context.Context, raw sto
 // NOTE: The prompt deliberately avoids showing a JSON template because the local LLM model
 // echoes template placeholder text verbatim into the output fields. Structured output
 // (response_format with json_schema) enforces the JSON structure instead.
-func buildCompressionPrompt(content, source, memType, episodeCtx, relatedCtx, coachingInstructions string, conceptVocabulary []string) string {
+func buildCompressionPrompt(content, source, memType, episodeCtx, coachingInstructions string, conceptVocabulary []string) string {
 	var b strings.Builder
 
 	if source == "ingest" {
@@ -1268,10 +1267,6 @@ Fill in every JSON field based on the actual event content below:
 	if episodeCtx != "" {
 		b.WriteString(episodeCtx)
 	}
-	if relatedCtx != "" {
-		b.WriteString(relatedCtx)
-	}
-
 	if coachingInstructions != "" {
 		b.WriteString(coachingInstructions)
 		b.WriteString("\n\n")
@@ -1779,35 +1774,6 @@ func (ea *EncodingAgent) getEpisodeContext(ctx context.Context, raw store.RawMem
 	return result
 }
 
-// getRelatedContext gathers semantically similar existing memories for context.
-func (ea *EncodingAgent) getRelatedContext(ctx context.Context, raw store.RawMemory) string {
-	// Use concept-based search with keywords from the raw content
-	words := extractKeywords(raw.Content)
-	if len(words) == 0 {
-		return ""
-	}
-
-	if len(words) > 5 {
-		words = words[:5]
-	}
-
-	related, err := ea.store.SearchByConcepts(ctx, words, 3)
-	if err != nil || len(related) == 0 {
-		return ""
-	}
-
-	result := "RELATED EXISTING MEMORIES:\n"
-	for _, mem := range related {
-		result += fmt.Sprintf("  - [%s] %s (concepts: %s)\n",
-			mem.Timestamp.Format("2006-01-02 15:04"),
-			mem.Summary,
-			joinConcepts(mem.Concepts),
-		)
-	}
-	result += "\n"
-	return result
-}
-
 // getEpisodeIDForRaw finds which episode a raw memory belongs to.
 // Checks both open and recently closed episodes since encoding is async
 // and the episode may close before encoding completes.
@@ -1834,47 +1800,6 @@ func getEpisodeIDForRaw(ea *EncodingAgent, ctx context.Context, raw store.RawMem
 		}
 	}
 	return ""
-}
-
-// extractKeywords pulls significant words from content for concept search.
-func extractKeywords(content string) []string {
-	// Simple keyword extraction: split, filter short/common words
-	words := strings.Fields(strings.ToLower(content))
-	seen := make(map[string]bool)
-	var keywords []string
-
-	stopWords := map[string]bool{
-		"the": true, "a": true, "an": true, "is": true, "was": true,
-		"are": true, "were": true, "be": true, "been": true, "being": true,
-		"have": true, "has": true, "had": true, "do": true, "does": true,
-		"did": true, "will": true, "would": true, "could": true, "should": true,
-		"may": true, "might": true, "shall": true, "can": true, "to": true,
-		"of": true, "in": true, "for": true, "on": true, "with": true,
-		"at": true, "by": true, "from": true, "as": true, "into": true,
-		"through": true, "during": true, "before": true, "after": true,
-		"it": true, "its": true, "this": true, "that": true, "these": true,
-		"and": true, "but": true, "or": true, "nor": true, "not": true,
-	}
-
-	for _, w := range words {
-		if len(w) < 3 || stopWords[w] || seen[w] {
-			continue
-		}
-		seen[w] = true
-		keywords = append(keywords, w)
-		if len(keywords) >= 10 {
-			break
-		}
-	}
-	return keywords
-}
-
-// joinConcepts joins concepts with commas.
-func joinConcepts(concepts []string) string {
-	if len(concepts) == 0 {
-		return "none"
-	}
-	return strings.Join(concepts, ", ")
 }
 
 // truncateString truncates a string to maxLen characters.
