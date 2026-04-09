@@ -685,6 +685,33 @@ func serveCommand(configPath string) {
 			return cfg.MemoryDefaults.SalienceForType(memType)
 		}
 
+		// Create MCP session manager for HTTP transport
+		mcpResolver := config.NewProjectResolver(cfg.Projects)
+		mcpSessions := mcp.NewSessionManager(mcp.SessionManagerConfig{
+			Store:           memStore,
+			Retriever:       retriever,
+			Bus:             bus,
+			Log:             log,
+			Version:         Version,
+			CoachingFile:    cfg.Coaching.CoachingFile,
+			ExcludePatterns: cfg.Perception.Filesystem.ExcludePatterns,
+			MaxContentBytes: cfg.Perception.Filesystem.MaxContentBytes,
+			Resolver:        mcpResolver,
+			DaemonURL:       fmt.Sprintf("http://%s:%d", cfg.API.Host, cfg.API.Port),
+			MemDefaults: mcp.MemoryDefaults{
+				SalienceGeneral:       cfg.MemoryDefaults.InitialSalienceGeneral,
+				SalienceDecision:      cfg.MemoryDefaults.InitialSalienceDecision,
+				SalienceError:         cfg.MemoryDefaults.InitialSalienceError,
+				SalienceInsight:       cfg.MemoryDefaults.InitialSalienceInsight,
+				SalienceLearning:      cfg.MemoryDefaults.InitialSalienceLearning,
+				SalienceHandoff:       cfg.MemoryDefaults.InitialSalienceHandoff,
+				FeedbackStrengthDelta: cfg.MemoryDefaults.FeedbackStrengthDelta,
+				FeedbackSalienceBoost: cfg.MemoryDefaults.FeedbackSalienceBoost,
+			},
+		})
+		apiDeps.MCPSessions = mcpSessions
+		defer mcpSessions.Stop(rootCtx)
+
 		apiServer := api.NewServer(api.ServerConfig{
 			Host:              cfg.API.Host,
 			Port:              cfg.API.Port,

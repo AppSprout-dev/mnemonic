@@ -24,14 +24,16 @@ import (
 
 // JSON-RPC 2.0 types
 
-type jsonRPCRequest struct {
+// JSONRPCRequest is a JSON-RPC 2.0 request.
+type JSONRPCRequest struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      interface{}     `json:"id,omitempty"`
 	Method  string          `json:"method"`
 	Params  json.RawMessage `json:"params,omitempty"`
 }
 
-type jsonRPCResponse struct {
+// JSONRPCResponse is a JSON-RPC 2.0 response.
+type JSONRPCResponse struct {
 	JSONRPC string      `json:"jsonrpc"`
 	ID      interface{} `json:"id,omitempty"`
 	Result  interface{} `json:"result,omitempty"`
@@ -195,7 +197,7 @@ func (srv *MCPServer) Run(ctx context.Context) error {
 
 		line := scanner.Bytes()
 
-		var req jsonRPCRequest
+		var req JSONRPCRequest
 		if err := json.Unmarshal(line, &req); err != nil {
 			srv.log.Debug("parse error", "error", err)
 			if err := enc.Encode(errorResponse(nil, -32700, "Parse error")); err != nil {
@@ -222,8 +224,20 @@ func (srv *MCPServer) Run(ctx context.Context) error {
 	return scanner.Err()
 }
 
+// HandleSingleRequest processes a single JSON-RPC request and returns the response.
+// This is the transport-agnostic entry point used by both stdio (Run) and HTTP transports.
+func (srv *MCPServer) HandleSingleRequest(ctx context.Context, req *JSONRPCRequest) *JSONRPCResponse {
+	return srv.handleRequest(ctx, req)
+}
+
+// SessionID returns the server's session ID.
+func (srv *MCPServer) SessionID() string { return srv.sessionID }
+
+// OnSessionEnd performs cleanup when a session ends. Exported for the session manager.
+func (srv *MCPServer) OnSessionEnd(ctx context.Context) { srv.onSessionEnd(ctx) }
+
 // handleRequest dispatches the request to the appropriate handler based on method.
-func (srv *MCPServer) handleRequest(ctx context.Context, req *jsonRPCRequest) *jsonRPCResponse {
+func (srv *MCPServer) handleRequest(ctx context.Context, req *JSONRPCRequest) *JSONRPCResponse {
 	switch req.Method {
 	case "initialize":
 		return srv.handleInitialize(req)
@@ -239,7 +253,7 @@ func (srv *MCPServer) handleRequest(ctx context.Context, req *jsonRPCRequest) *j
 }
 
 // handleInitialize returns the MCP initialization response.
-func (srv *MCPServer) handleInitialize(req *jsonRPCRequest) *jsonRPCResponse {
+func (srv *MCPServer) handleInitialize(req *JSONRPCRequest) *JSONRPCResponse {
 	result := map[string]interface{}{
 		"protocolVersion": "2024-11-05",
 		"capabilities": map[string]interface{}{
@@ -261,7 +275,7 @@ type ToolDefinition struct {
 }
 
 // handleToolsList returns the list of available tools.
-func (srv *MCPServer) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
+func (srv *MCPServer) handleToolsList(req *JSONRPCRequest) *JSONRPCResponse {
 	result := map[string]interface{}{
 		"tools": allToolDefs(),
 	}
@@ -276,7 +290,7 @@ type toolCallParams struct {
 }
 
 // handleToolCall dispatches tool calls to their respective handlers.
-func (srv *MCPServer) handleToolCall(ctx context.Context, req *jsonRPCRequest) *jsonRPCResponse {
+func (srv *MCPServer) handleToolCall(ctx context.Context, req *JSONRPCRequest) *JSONRPCResponse {
 	var params toolCallParams
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return errorResponse(req.ID, -32602, "Invalid params")
@@ -2328,8 +2342,8 @@ func (srv *MCPServer) handleIngestProject(ctx context.Context, args map[string]i
 // Helper functions
 
 // errorResponse creates a JSON-RPC error response.
-func errorResponse(id interface{}, code int, message string) *jsonRPCResponse {
-	return &jsonRPCResponse{
+func errorResponse(id interface{}, code int, message string) *JSONRPCResponse {
+	return &JSONRPCResponse{
 		JSONRPC: "2.0",
 		ID:      id,
 		Error: &rpcError{
@@ -2340,8 +2354,8 @@ func errorResponse(id interface{}, code int, message string) *jsonRPCResponse {
 }
 
 // successResponse creates a JSON-RPC success response.
-func successResponse(id interface{}, result interface{}) *jsonRPCResponse {
-	return &jsonRPCResponse{
+func successResponse(id interface{}, result interface{}) *JSONRPCResponse {
+	return &JSONRPCResponse{
 		JSONRPC: "2.0",
 		ID:      id,
 		Result:  result,
