@@ -591,20 +591,24 @@ func listExclusionsToolDef() ToolDefinition {
 func amendToolDef() ToolDefinition {
 	return ToolDefinition{
 		Name:        "amend",
-		Description: "Update a memory's content while preserving its ID, associations, activation history, and salience. Use when a recalled memory is stale or incorrect. Records an audit trail of the change.",
+		Description: "Update a memory's content while preserving its ID, associations, activation history, and salience. Use when a recalled memory is stale or incorrect. Records an audit trail of the change. Accepts either raw_id (from remember) or memory_id (encoded).",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"memory_id": map[string]interface{}{
 					"type":        "string",
-					"description": "The memory ID to amend",
+					"description": "The encoded memory ID to amend",
+				},
+				"raw_id": map[string]interface{}{
+					"type":        "string",
+					"description": "The raw memory ID returned by remember — will be resolved to the encoded memory",
 				},
 				"corrected_content": map[string]interface{}{
 					"type":        "string",
 					"description": "The updated memory content",
 				},
 			},
-			"required": []string{"memory_id", "corrected_content"},
+			"required": []string{"corrected_content"},
 		},
 	}
 }

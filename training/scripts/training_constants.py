@@ -73,6 +73,105 @@ ENCODING_SYSTEM_PROMPT_SHORT = (
     "salience (0.0-1.0 float). Never explain, never apologize. Output only valid JSON."
 )
 
+# --- Production Encoding Prompt ---
+# Matches the daemon's buildCompressionPrompt() output in
+# internal/agent/encoding/agent.go. Training data MUST use this format
+# so the model sees the same prompt structure it will encounter in production.
+
+# The concept vocabulary from DefaultConceptVocabulary in agent.go
+DEFAULT_CONCEPT_VOCABULARY = [
+    # Languages & runtimes
+    "go", "python", "javascript", "typescript", "sql", "bash", "html", "css",
+    # Infrastructure & tooling
+    "docker", "git", "linux", "macos", "systemd", "build", "ci", "deployment",
+    # Dev activities
+    "debugging", "testing", "refactoring", "configuration", "migration",
+    "documentation", "review",
+    # Code domains
+    "api", "database", "filesystem", "networking", "security", "authentication",
+    "performance", "logging", "ui", "cli",
+    # AI & systems
+    "memory", "llm",
+    # Project context
+    "fix", "research", "dependency", "schema", "config",
+]
+
+
+def build_production_prompt(
+    content: str,
+    source: str = "mcp",
+    mem_type: str = "general",
+    episode_ctx: str = "",
+    coaching_instructions: str = "",
+    concept_vocabulary: list[str] | None = None,
+) -> str:
+    """Build the production encoding prompt matching the daemon's format.
+
+    This is a Python port of buildCompressionPrompt() from
+    internal/agent/encoding/agent.go.
+    """
+    if concept_vocabulary is None:
+        concept_vocabulary = DEFAULT_CONCEPT_VOCABULARY
+
+    parts = []
+
+    if source == "ingest":
+        parts.append(
+            "Catalog this source code file. Describe what the file IS and DOES.\n\n"
+            "Fill in every JSON field based on the actual file content below:\n"
+            "- gist: What this file is in under 60 characters.\n"
+            "- summary: The file's purpose in under 100 characters.\n"
+            "- content: A compressed description of what the file contains and how it works.\n"
+            "- narrative: The file's role in the project architecture and why it matters.\n"
+            "- concepts: 3-5 keywords describing the file's domain. PREFER exact terms from the vocabulary list below; only use new terms if no vocabulary term fits.\n"
+            "- structured_concepts: Extract topics, entities, actions, and causal relationships. Keep each array to 3-5 items max. Use short strings, not sentences.\n"
+            "- significance: One of routine, notable, important, or critical.\n"
+            "- emotional_tone: neutral.\n"
+            "- outcome: success.\n"
+            "- salience: 0.7+ for core implementation, 0.5 for tests/utilities, 0.3 for generated files.\n\n"
+        )
+    else:
+        parts.append(
+            "Encode this event into memory. Read the content below and summarize what actually happened.\n\n"
+            "Fill in every JSON field based on the actual event content below:\n"
+            "- gist: What happened in under 60 characters.\n"
+            "- summary: What happened and why it matters in under 100 characters.\n"
+            "- content: The key details someone would need to understand this event later.\n"
+            "- narrative: The story of what happened including context and meaning.\n"
+            "- concepts: 3-5 keywords about the event. PREFER exact terms from the vocabulary list below; only use new terms if no vocabulary term fits.\n"
+            "- structured_concepts: Extract topics, entities, actions, and causal relationships. Keep each array to 3-5 items max. Use short strings, not sentences.\n"
+            "- significance: One of routine, notable, important, or critical.\n"
+            "- emotional_tone: One of neutral, satisfying, frustrating, exciting, or concerning.\n"
+            "- outcome: One of success, failure, ongoing, or unknown.\n"
+            "- salience: 0.7+ for decisions/errors/insights, 0.5 for notable activity, 0.3 for routine file saves.\n\n"
+        )
+
+    if concept_vocabulary:
+        parts.append(
+            "IMPORTANT: Extract concepts from the CONTENT of the memory, not from what kind of memory it is. "
+            "A decision about database indexing should have concepts like 'database', 'performance' — NOT 'decision'. "
+            "Do NOT use metadata as concepts (e.g., 'source:mcp', 'type:insight', project names).\n\n"
+        )
+        parts.append(
+            "CONCEPT VOCABULARY — prefer terms from this list when they match the content topic. "
+            "Invent a new term if no vocabulary term fits the actual subject matter:\n"
+        )
+        parts.append(", ".join(concept_vocabulary))
+        parts.append("\n\n")
+
+    if episode_ctx:
+        parts.append(episode_ctx)
+    if coaching_instructions:
+        parts.append(coaching_instructions)
+        parts.append("\n\n")
+
+    parts.append(f"SOURCE: {source}\n")
+    parts.append(f"TYPE: {mem_type}\n")
+    parts.append(f"CONTENT:\n{content}\n")
+
+    return "".join(parts)
+
+
 # --- Placeholder Detection ---
 
 PLACEHOLDER_GISTS = frozenset({

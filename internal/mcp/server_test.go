@@ -32,7 +32,7 @@ func TestHandleInitialize(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	srv := NewMCPServer(&mockStore{}, nil, &mockBus{}, logger, "test", "", []string{}, 0, nil, "", DefaultMemoryDefaults())
 
-	req := &jsonRPCRequest{
+	req := &JSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      1,
 		Method:  "initialize",
@@ -91,7 +91,7 @@ func TestHandleToolsList(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	srv := NewMCPServer(&mockStore{}, nil, &mockBus{}, logger, "test", "", []string{}, 0, nil, "", DefaultMemoryDefaults())
 
-	req := &jsonRPCRequest{
+	req := &JSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      2,
 		Method:  "tools/list",
@@ -314,7 +314,7 @@ func TestHandleRequestDispatch(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.method, func(t *testing.T) {
-			req := &jsonRPCRequest{
+			req := &JSONRPCRequest{
 				JSONRPC: "2.0",
 				ID:      1,
 				Method:  tc.method,

@@ -13,6 +13,7 @@ import (
 	"github.com/appsprout-dev/mnemonic/internal/api/routes"
 	"github.com/appsprout-dev/mnemonic/internal/events"
 	"github.com/appsprout-dev/mnemonic/internal/llm"
+	"github.com/appsprout-dev/mnemonic/internal/mcp"
 	"github.com/appsprout-dev/mnemonic/internal/store"
 	"github.com/appsprout-dev/mnemonic/internal/web"
 )
@@ -30,7 +31,7 @@ type ServerConfig struct {
 type ServerDeps struct {
 	Store                 store.Store
 	LLM                   llm.Provider
-	ModelManager          llm.ModelManager        // can be nil if not using embedded provider
+	ModelManager          llm.ModelManager // can be nil if not using embedded provider
 	Bus                   events.Bus
 	Retriever             *retrieval.RetrievalAgent
 	Consolidator          routes.ConsolidationRunner // can be nil if disabled
@@ -43,6 +44,7 @@ type ServerDeps struct {
 	ServiceRestarter      routes.ServiceRestarter // can be nil if not installed as service
 	PIDRestart            routes.PIDRestartFunc   // fallback restart when service manager unavailable
 	MCPToolCount          int                     // number of registered MCP tools
+	MCPSessions           *mcp.SessionManager     // HTTP MCP session manager (nil = disabled)
 	StartTime             time.Time               // daemon start time for uptime calculation
 	Log                   *slog.Logger
 }
@@ -172,6 +174,13 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/forum/posts/{id}", routes.HandleGetForumPost(s.deps.Store, s.deps.Log))
 	s.mux.HandleFunc("PATCH /api/v1/forum/posts/{id}", routes.HandleUpdateForumPost(s.deps.Store, s.deps.Log))
 	s.mux.HandleFunc("POST /api/v1/forum/posts/{id}/internalize", routes.HandleInternalizeForumPost(s.deps.Store, s.deps.Bus, s.deps.Log))
+
+	// MCP over HTTP transport (shares daemon's LLM, store, agents — no subprocess needed)
+	if s.deps.MCPSessions != nil {
+		mcpHandler := routes.HandleMCP(s.deps.MCPSessions, s.deps.Log)
+		s.mux.HandleFunc("POST /mcp", mcpHandler)
+		s.mux.HandleFunc("DELETE /mcp", mcpHandler)
+	}
 
 	// WebSocket
 	s.mux.HandleFunc("GET /ws", routes.HandleWebSocket(s.deps.Bus, s.deps.Log))
