@@ -38,13 +38,7 @@ EPISODE_CONTEXT_STUB = (
     "(make test), 1 MCP remember call.\n\n"
 )
 
-RELATED_MEMORY_STUB = (
-    "RELATED EXISTING MEMORIES (for context, do not copy into encoding):\n"
-    "- [mem-001] Decision: chose SQLite over Postgres for local-first simplicity\n"
-    "- [mem-002] Insight: spread activation with decay 0.7 limits distant associations\n\n"
-)
-
-# Ids that get episode + related context (per issue spec: 2 of 25)
+# Ids that get episode context (per issue spec: 2 of 25)
 CONTEXT_IDS = {3, 18}
 
 
@@ -110,14 +104,11 @@ def format_for_training(
 
     # Build the production-format user prompt
     episode_ctx = EPISODE_CONTEXT_STUB if entry_id in CONTEXT_IDS else ""
-    related_ctx = RELATED_MEMORY_STUB if entry_id in CONTEXT_IDS else ""
-
     user_prompt = build_production_prompt(
         content=raw_input,
         source=source,
         mem_type=mem_type,
         episode_ctx=episode_ctx,
-        related_ctx=related_ctx,
     )
 
     # The assistant response is the gold JSON

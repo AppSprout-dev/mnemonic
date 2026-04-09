@@ -466,10 +466,10 @@ blockquote.quote .quote-body {
     font-size: 0.88rem;
     font-weight: bold;
     color: var(--text-dim);
-    background: linear-gradient(to bottom, rgba(92,114,184,0.08), rgba(92,114,184,0.02));
+    background: var(--bg-primary, #0f172a);
     border-bottom: 1px solid var(--border-color);
     position: sticky;
-    top: 30px;
+    top: 0;
     z-index: 50;
     display: flex;
     justify-content: space-between;

@@ -30,7 +30,7 @@ type ServerConfig struct {
 type ServerDeps struct {
 	Store                 store.Store
 	LLM                   llm.Provider
-	ModelManager          llm.ModelManager        // can be nil if not using embedded provider
+	ModelManager          llm.ModelManager // can be nil if not using embedded provider
 	Bus                   events.Bus
 	Retriever             *retrieval.RetrievalAgent
 	Consolidator          routes.ConsolidationRunner // can be nil if disabled

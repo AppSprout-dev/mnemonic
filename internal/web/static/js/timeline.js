@@ -158,7 +158,10 @@ export function renderTimelineItems() {
 export function renderTimelineCard(item, idx) {
     var kind = item._kind;
     var salPct = Math.min(100, Math.round((item._salience || 0) * 100));
-    var absTime = item._date.toLocaleString(undefined, { hour: '2-digit', minute: '2-digit' });
+    var h = item._date.getHours(), m = item._date.getMinutes();
+    var ampm = h >= 12 ? 'PM' : 'AM';
+    h = h % 12 || 12;
+    var absTime = h + ':' + (m < 10 ? '0' : '') + m + ' ' + ampm;
     var concepts = item._concepts || [];
     var source = item._source || '';
     var project = item._project || '';
