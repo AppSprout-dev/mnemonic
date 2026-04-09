@@ -1014,6 +1014,27 @@ Rotation parameter overhead per layer (rank=64):
 - **Hardware:** Local RX 7800 XT, 16GB VRAM, ROCm 7.2.1. Daemon stopped for training. VRAM budget: ~8 GB base (bf16) + ~132 MB spokes (fp32) + ~264 MB optimizer + activations (gradient checkpointing). Expected to fit within 16 GB.
 - **Metrics:** Primary: 7-metric faithfulness eval (EPR, FR, TED, CCS, MIH, NP, SC). Secondary: eval loss/PPL, stress_test_hallucination.py (7/7 target), novel schema compliance. Tertiary: inference throughput (tok/s) at RQ4 via llama.cpp.
 - **Inference plan:** Export via export_qwen35_spokes.py (now parameterized for any Qwen 3.5 size), quantize to RQ4 via rotorq_quantize_gguf.py, benchmark throughput on RX 7800 XT. Expected: ~2.25 GB weights (RQ4), ~60-70 tok/s.
-- **Open question:** Should spokes be placed on all 32 layers, or only the 8 full-attention layers? DeltaNet layers use linear attention with recurrent state — spoke adaptation may not be needed there. Could test attention-only spoke placement as a follow-up (EXP-28).
+- **Open question:** Should spokes be placed on all 32 layers, or only the 8 full-attention layers? DeltaNet layers use linear attention with recurrent state — spoke adaptation may not be needed there.
 - **Result:** (pending — blocked on EXP-26 completion)
+- **Verdict:** (pending)
+
+### EXP-28: Project Bespoke — Structured Pruning of Gemma 4 31B to Mnemonic's Own Model
+
+- **Date:** 2026-04-09
+- **Status:** REGISTERED
+- **Hypothesis:** Gemma 4 31B (30.7B, 60-layer dense transformer) contains a structured subnetwork of ~1.5-2B parameters that, when extracted via targeted structured pruning and continued pretraining on mnemonic's encoding data, will match or exceed the current Qwen 3.5 2B + spokes system on all faithfulness metrics while running 3-5x faster at inference.
+- **Variable:** Model identity. Current system: frozen pretrained Qwen 2B + 25M trainable spoke adapters (someone else's model with our paint). Target: a standalone 1.5-2B model extracted from Gemma 4 31B, purpose-built for mnemonic's tasks (our model).
+- **Control:** EXP-26 (Qwen 3.5 2B + spokes, v7 data, 7-metric faithfulness eval).
+- **Prediction:** The pruned model matches EXP-26 on all 7 faithfulness metrics (EPR >90%, FR <5%, TED 0%, SC 100%, CCS <0.7, MIH 3/3, NP >95%) and stress test 7/7. Inference speed >200 tok/s on RX 7800 XT (current: 95 tok/s). VRAM <1.5GB (current: ~3GB). If the pruned 2B doesn't beat the full Qwen 2B + spokes on encoding quality, the 31B's extra capacity didn't provide better "lottery tickets" for this task.
+- **Method:** Sheared LLaMA (Xia et al., ICLR 2024) adapted for Gemma 4 architecture. Targeted structural pruning with learned masks — jointly prunes layers, attention heads, hidden dimensions, and FFN intermediate dimensions. Followed by continued pretraining on mnemonic encoding data with dynamic batch loading. Progressive targets: 8B → 4B → 2B → 1.5B to find the quality cliff.
+- **Config (Phase 1 — full fine-tune baseline):** Gemma 4 31B (all params unfrozen, bf16), full mnemonic task data (v7 + encoding captures), LR TBD (sweep needed), gradient checkpointing. MI300X droplet (192GB HBM3e). Collect per-layer importance metrics.
+- **Config (Phase 2 — pruning):** Learned pruning masks on encoding task loss. Target shapes: 20 layers / hidden 2048 / 16 heads / FFN 5504 for ~2B target. 3K-5K mask-learning steps, then 5-10B tokens continued pretraining. MI300X.
+- **Config (Phase 3 — local deployment):** Export pruned model as standalone GGUF. Benchmark on RX 7800 XT via llama.cpp. No spoke adapters needed — encoding behavior baked into the model. Optional: add spokes for multi-task (synthesis, retrieval).
+- **Data:** V7 encoding dataset (5,292 train / 588 eval) for fine-tuning and pruning. May need additional pretraining tokens (diverse text) for continued pretraining phase.
+- **Hardware:** MI300X (192GB) for Phases 1-2. RX 7800 XT (16GB) for Phase 3 and all evaluation. Estimated MI300X cost: $80-160.
+- **References:** Sheared LLaMA (arxiv:2310.06694), Lottery Ticket Hypothesis (arxiv:1803.03635), SliceGPT (arxiv:2401.15024), LLM-Pruner (arxiv:2305.11627). Felix-LM design paper.
+- **Tracking:** GitHub issue #386 (Project Bespoke epic)
+- **Metrics:** Primary: 7-metric faithfulness eval + stress test. Secondary: inference tok/s, VRAM, encoding latency. Tertiary: per-pruning-target quality curves (quality vs model size).
+- **Go/no-go gate:** After Phase 2 pruning to 2B: if quality < EXP-26 on >2 faithfulness metrics, STOP. The 31B doesn't provide better subnetworks for this task than the native 2B.
+- **Result:** (pending)
 - **Verdict:** (pending)
