@@ -4,6 +4,71 @@ All notable changes to Mnemonic will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.35.0](https://github.com/AppSprout-dev/mnemonic/compare/v0.34.1...v0.35.0) (2026-04-10)
+
+
+### Features
+
+* 210 mnemonic-specific scenarios, bespoke generator, fix encoding token limit ([3ebecc1](https://github.com/AppSprout-dev/mnemonic/commit/3ebecc18841ee479327e4cda9bbb06f102d78fe2))
+* add conciseness guidance for structured_concepts encoding ([dc6dabe](https://github.com/AppSprout-dev/mnemonic/commit/dc6dabeadbd4d64bc7ebd072e2a79812f3f90754))
+* add Gemma 4 E2B spoke GGUF export script ([f96dbbb](https://github.com/AppSprout-dev/mnemonic/commit/f96dbbb9ccd67663732387db6f4ad4179fc078c2))
+* add serve_spokes.py for OpenAI-compatible spoke model serving ([26613ab](https://github.com/AppSprout-dev/mnemonic/commit/26613ab252d16fb0cab3dfdf0fd12764e4a30ff6))
+* add thinking-mode support to bake-off harness ([665082b](https://github.com/AppSprout-dev/mnemonic/commit/665082b76a01aef9842773688dd675d023994092))
+* backfill verification metrics + fix chart dot visibility ([1b78795](https://github.com/AppSprout-dev/mnemonic/commit/1b787956af396aaadc6833094a570fe74b69ca7b))
+* continuous learning Phase A — runtime verification & experience collection ([#391](https://github.com/AppSprout-dev/mnemonic/issues/391)) ([82140a1](https://github.com/AppSprout-dev/mnemonic/commit/82140a181cbe44963028ea4d67c24958d8ddcfba))
+* dashboard encoding quality metrics (EPR, TED, experience buffer) ([2545de1](https://github.com/AppSprout-dev/mnemonic/commit/2545de11a1751b1d5d7029d091d8412010ec1eb7))
+* dashboard narrative + lifecycle chart overhaul ([5ce22bf](https://github.com/AppSprout-dev/mnemonic/commit/5ce22bf7d05247e37fb204bd576011935040d033))
+* distribution balance data gen, fix batch_encode source preservation ([b1bfd96](https://github.com/AppSprout-dev/mnemonic/commit/b1bfd96732d2ccb4ebb74f9b72379b236a5488ee))
+* EXP-15 through EXP-19, Gemma 4 adapter, data pipeline, quality testing ([e4b94e7](https://github.com/AppSprout-dev/mnemonic/commit/e4b94e7feccf31d537aab9bc6b42310f39518b5c))
+* EXP-15-19 training research, Gemma 4 adapter, data pipeline ([f6ce427](https://github.com/AppSprout-dev/mnemonic/commit/f6ce427200ab818a4e8b453398a985edeb8319a8))
+* EXP-20 data quality pipeline, targeted data generation, MI300X prep ([6d75333](https://github.com/AppSprout-dev/mnemonic/commit/6d75333c40b7f09c8f2b8ce2385f3c2222810eb6))
+* EXP-25 faithfulness probe — confirmed at seq_len 2375 ([d3b6f3a](https://github.com/AppSprout-dev/mnemonic/commit/d3b6f3a955e08579fdf4006d42414d255b7c6559)), closes [#381](https://github.com/AppSprout-dev/mnemonic/issues/381)
+* EXP-25 faithfulness probe, encoding fixes, MCP HTTP transport ([45a7cd5](https://github.com/AppSprout-dev/mnemonic/commit/45a7cd55f1aac417f32b675a140c902b8746a63b))
+* EXP-29 candidate model evaluation — bake-off tooling and research designs ([e4a8b01](https://github.com/AppSprout-dev/mnemonic/commit/e4a8b0171529253a4f8c344129e1baef1c4cc23b))
+* EXP-29 candidate model evaluation + faithful prompt ([5d470a9](https://github.com/AppSprout-dev/mnemonic/commit/5d470a9defc50078f053c8c1749dc345c0e572a6))
+* faithful prompt format for encoding — rules-first design (EXP-29) ([cfb9dc1](https://github.com/AppSprout-dev/mnemonic/commit/cfb9dc106076671cb29065e62e861a45209f7151))
+* fix spoke GGUF export, gist merge bug, bump token limits to 4096 ([e9fbfaa](https://github.com/AppSprout-dev/mnemonic/commit/e9fbfaa97f95de1253f48c707abd7b1932f6d834))
+* Gemma chat template support for embedded provider ([e647578](https://github.com/AppSprout-dev/mnemonic/commit/e647578d3c7824ce8fbec92c2faab0445cff98e6))
+* Gemma E2B spoke training + continuous learning Phase A + dashboard overhaul ([6d0d0eb](https://github.com/AppSprout-dev/mnemonic/commit/6d0d0eb3b56ac972f22302122d6a1a3a9585ec10))
+* Gemma E2B spoke training setup (EXP-30) ([fc54802](https://github.com/AppSprout-dev/mnemonic/commit/fc54802283749a28a1974e8cc7b11018b8d51256))
+* layer importance profiling script for structured pruning ([f6c1a62](https://github.com/AppSprout-dev/mnemonic/commit/f6c1a6293196eaf79be167261c47bc363e3e2724))
+* MI300X Gemma 4 E2B training infrastructure, wandb logging ([dc42349](https://github.com/AppSprout-dev/mnemonic/commit/dc423497711e911ade5b327a5078656521622ce6))
+* Model Control Center with embedded LLM and runtime switching ([d2aec19](https://github.com/AppSprout-dev/mnemonic/commit/d2aec199f410446e55c739c7f267edaba507ace8))
+* Model Control Center with embedded LLM inference ([ad2a86b](https://github.com/AppSprout-dev/mnemonic/commit/ad2a86bf2b46fd8501fce6b10e3cbdaf9d532eaf))
+* procedural generator + 96 handwritten mnemonic scenarios v2 ([79ed030](https://github.com/AppSprout-dev/mnemonic/commit/79ed030f227222db05c99de6faea99e9dc7e2ffa))
+* prompt ablation reveals faithful variant as best encoding approach ([f5bd07c](https://github.com/AppSprout-dev/mnemonic/commit/f5bd07c168d3671955a36e715ec5dba96d95ebe4))
+* research analytics dashboard overhaul ([f7e1e56](https://github.com/AppSprout-dev/mnemonic/commit/f7e1e567a723e8bdda2209e013277ef0663ac41d))
+* RotorQ RQ4 quantizer + benchmark scripts ([ba8e66d](https://github.com/AppSprout-dev/mnemonic/commit/ba8e66df1c7f959c0326cc7f515c0b3135858055))
+* RQ4 GPU inference, RQ3 experiment, spoke fusion, fused GGUF export ([b603dbc](https://github.com/AppSprout-dev/mnemonic/commit/b603dbcbfbd560ca5859491d8d6a790d0b6ad12b))
+* RQ4 GPU inference, spoke fusion, handoff recall fixes ([de1efd5](https://github.com/AppSprout-dev/mnemonic/commit/de1efd534b7de71394acca173ce9ab53d133ee34))
+* serve MCP over HTTP transport from daemon ([65fe6cf](https://github.com/AppSprout-dev/mnemonic/commit/65fe6cf1fde7feb3a9a5c95a4e413a354d4e44d5))
+* serve MCP over HTTP transport from daemon ([#384](https://github.com/AppSprout-dev/mnemonic/issues/384)) ([47a093f](https://github.com/AppSprout-dev/mnemonic/commit/47a093ff134fea946903be54c5382a8af8071f8f))
+* spoke routing infrastructure, llama.cpp inference, TurboQuant reference ([f51db44](https://github.com/AppSprout-dev/mnemonic/commit/f51db442c8a22e484032f0029d2316da8efa5329))
+* TurboQuant prompt cache compression, EXP-22 registration ([f8ccf51](https://github.com/AppSprout-dev/mnemonic/commit/f8ccf5186c1b929e093c1e8d7e7f32c97bd93408))
+* update EXP-20 config, pre-register EXP-21 (bottleneck rotation) ([040c596](https://github.com/AppSprout-dev/mnemonic/commit/040c596268a2fdd6b115225b5862b2506584eee7))
+* v6 smoke test 7/7 stress, add advisory board rule ([304d884](https://github.com/AppSprout-dev/mnemonic/commit/304d884ca95fd7ddbd0149a4e0c3ba26740756a5))
+* v7 diverse input generation pipeline ([8c30d06](https://github.com/AppSprout-dev/mnemonic/commit/8c30d06e022c505519d21822d110fe69e1c628a2))
+
+
+### Bug Fixes
+
+* encoding faithfulness + amend raw_id + dashboard timeline bugs ([9e874ab](https://github.com/AppSprout-dev/mnemonic/commit/9e874ab87a123eeda74d12945df5d78472151226))
+* encoding faithfulness, amend raw_id, dashboard timeline ([671b1b6](https://github.com/AppSprout-dev/mnemonic/commit/671b1b6cd0969f1a6e68400d5522e7802c406c44))
+* FR metric now measures content fields only, not concepts ([3b12bde](https://github.com/AppSprout-dev/mnemonic/commit/3b12bdea96a302c0a8c090312a85c41862094b2b))
+* GBNF grammar via chat completions payload, not server-level flag ([87ec76a](https://github.com/AppSprout-dev/mnemonic/commit/87ec76a8eb4ac610e4cc03817ea13131f0c4341c))
+* gist merge FK violation, ambiguous column in FTS concept search ([042a1e3](https://github.com/AppSprout-dev/mnemonic/commit/042a1e3409b29c0c917755c563fc8df5fa1f36b7))
+* handoff recall, type-filtered search, consolidation exclusions ([0ca58bf](https://github.com/AppSprout-dev/mnemonic/commit/0ca58bf3375fc92e5a76faf9fdf6891ad3374789))
+* inline migration 016 for continuous learning tables ([3bc78ab](https://github.com/AppSprout-dev/mnemonic/commit/3bc78ab19b6c6311216e28d3ef2368818b9e367d))
+* preserve full content in handoff-type memories ([831a9fe](https://github.com/AppSprout-dev/mnemonic/commit/831a9fe5780014013b675e8cc161ee8b8eebd69d))
+* preserve full content in handoff-type memories ([ac17492](https://github.com/AppSprout-dev/mnemonic/commit/ac17492f7ee3d07fd43fe7bdfc84aea803332351))
+* sparse templates with proper gist mapping, dedup to 51 unique ([27a400b](https://github.com/AppSprout-dev/mnemonic/commit/27a400b0dedd5c49800b0005deace0ea399b3a57))
+* SQL flagged_rate query handles legacy "null" string values. ([2545de1](https://github.com/AppSprout-dev/mnemonic/commit/2545de11a1751b1d5d7029d091d8412010ec1eb7))
+* stress test --checkpoint arg, batch_encode model upgrade, misc fixes ([0c1c5d1](https://github.com/AppSprout-dev/mnemonic/commit/0c1c5d1cd5b420f74cd789a3f8af5d41648a84cb))
+* stress test Gemma support, batched generation, JSON parser ([cd9e6c7](https://github.com/AppSprout-dev/mnemonic/commit/cd9e6c7e97873de751741156319bc2e9e1e3d776))
+* update TestFormatPrompt for ChatML format ([d959878](https://github.com/AppSprout-dev/mnemonic/commit/d959878eeadbb1f96d41ba50eb4619d35e4fc1db))
+* use theme-neutral grey dots for EPR chart ([053fff8](https://github.com/AppSprout-dev/mnemonic/commit/053fff810d1dfe95bb9d1e2dcf1dee77937e6f4a))
+* write SQL NULL for empty flags (not JSON "null" string). ([2545de1](https://github.com/AppSprout-dev/mnemonic/commit/2545de11a1751b1d5d7029d091d8412010ec1eb7))
+
 ## [0.34.1](https://github.com/AppSprout-dev/mnemonic/compare/v0.34.0...v0.34.1) (2026-03-29)
 
 
