@@ -232,63 +232,62 @@ func TestConfigMaxSimilarSearchResultsPassedToStore(t *testing.T) {
 	}
 }
 
-func TestConfigConceptVocabularyIncludedInPrompt(t *testing.T) {
-	tests := []struct {
-		name           string
-		vocabulary     []string
-		expectInPrompt string
-	}{
-		{"custom_vocab", []string{"golang", "memory", "sqlite"}, "golang, memory, sqlite"},
-		{"empty_vocab", nil, ""},
+func TestFaithfulPromptFormatUsed(t *testing.T) {
+	// Verify the faithful prompt format (EXP-29) is used in the encoding pipeline.
+	// The faithful prompt leads with FAITHFULNESS, PRESERVATION, MINIMALITY rules
+	// and does NOT inject concept vocabulary (which hurt faithfulness in testing).
+	var capturedPrompt string
+
+	s := &mockStore{
+		getRawFn: func(_ context.Context, _ string) (store.RawMemory, error) {
+			return store.RawMemory{ID: "raw1", Content: "test content", Source: "mcp", Type: "decision"}, nil
+		},
+		writeMemoryFn: func(_ context.Context, _ store.Memory) error { return nil },
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			var capturedPrompt string
-
-			s := &mockStore{
-				getRawFn: func(_ context.Context, _ string) (store.RawMemory, error) {
-					return store.RawMemory{ID: "raw1", Content: "test content", Source: "mcp", Type: "decision"}, nil
-				},
-				writeMemoryFn: func(_ context.Context, _ store.Memory) error { return nil },
-			}
-
-			p := &mockLLMProvider{
-				completeFn: func(_ context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
-					for _, msg := range req.Messages {
-						if msg.Role == "user" {
-							capturedPrompt = msg.Content
-						}
-					}
-					return llm.CompletionResponse{
-						Content: `{"gist":"test","summary":"test","content":"test","narrative":"test","concepts":["test"],"salience":0.5,"significance":"routine","emotional_tone":"neutral","outcome":"success"}`,
-					}, nil
-				},
-				embedFn: func(_ context.Context, _ string) ([]float32, error) {
-					return []float32{0.1, 0.2, 0.3}, nil
-				},
-			}
-
-			cfg := DefaultConfig()
-			cfg.ConceptVocabulary = tc.vocabulary
-			agent := NewEncodingAgentWithConfig(s, p, testLogger(), cfg)
-			agent.bus = newMockBus()
-
-			err := agent.encodeMemory(context.Background(), "raw1")
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			if tc.expectInPrompt != "" {
-				if !strings.Contains(capturedPrompt, tc.expectInPrompt) {
-					t.Errorf("expected vocabulary %q in prompt, not found", tc.expectInPrompt)
-				}
-			} else {
-				if strings.Contains(capturedPrompt, "CONCEPT VOCABULARY") {
-					t.Error("expected no vocabulary section in prompt with nil vocabulary")
+	p := &mockLLMProvider{
+		completeFn: func(_ context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
+			for _, msg := range req.Messages {
+				if msg.Role == "user" {
+					capturedPrompt = msg.Content
 				}
 			}
-		})
+			return llm.CompletionResponse{
+				Content: `{"gist":"test","summary":"test","content":"test","narrative":"test","concepts":["test"],"salience":0.5,"significance":"routine","emotional_tone":"neutral","outcome":"success"}`,
+			}, nil
+		},
+		embedFn: func(_ context.Context, _ string) ([]float32, error) {
+			return []float32{0.1, 0.2, 0.3}, nil
+		},
+	}
+
+	cfg := DefaultConfig()
+	cfg.ConceptVocabulary = []string{"golang", "memory", "sqlite"}
+	agent := NewEncodingAgentWithConfig(s, p, testLogger(), cfg)
+	agent.bus = newMockBus()
+
+	err := agent.encodeMemory(context.Background(), "raw1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Faithful prompt rules must be present
+	if !strings.Contains(capturedPrompt, "FAITHFULNESS") {
+		t.Error("expected FAITHFULNESS rule in prompt")
+	}
+	if !strings.Contains(capturedPrompt, "PRESERVATION") {
+		t.Error("expected PRESERVATION rule in prompt")
+	}
+	if !strings.Contains(capturedPrompt, "MINIMALITY") {
+		t.Error("expected MINIMALITY rule in prompt")
+	}
+
+	// Concept vocabulary should NOT be injected (EXP-29 showed it hurts faithfulness)
+	if strings.Contains(capturedPrompt, "CONCEPT VOCABULARY") {
+		t.Error("concept vocabulary should not be in faithful prompt — it hurts faithfulness (EXP-29)")
+	}
+	if strings.Contains(capturedPrompt, "golang, memory, sqlite") {
+		t.Error("concept vocabulary terms should not appear in prompt")
 	}
 }
 

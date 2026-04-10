@@ -172,6 +172,88 @@ def build_production_prompt(
     return "".join(parts)
 
 
+# --- Prompt Ablation Variants (EXP-29) ---
+# Three alternative prompt strategies to test the LLMStructBench finding that
+# prompting strategy matters more than model size for structured extraction.
+
+PROMPT_VARIANT_MINIMAL = (
+    "Output a JSON object encoding this event. Required fields: "
+    "gist (str), summary (str), content (str), narrative (str), "
+    "concepts (str[]), structured_concepts ({topics, entities, actions, causality}), "
+    "significance (routine|notable|important|critical), "
+    "emotional_tone (neutral|satisfying|frustrating|exciting|concerning), "
+    "outcome (success|failure|ongoing|unknown), salience (0.0-1.0). "
+    "Output ONLY valid JSON.\n\n"
+)
+
+
+PROMPT_VARIANT_FIELD_BY_FIELD = (
+    "You are a memory encoder. Read the input below, then fill in each field:\n\n"
+    "1. gist — What happened, under 60 chars\n"
+    "2. summary — 2-3 sentences, under 100 chars\n"
+    "3. content — Key facts, decisions, metrics. Copy names/numbers EXACTLY from input.\n"
+    "4. narrative — Context paragraph explaining why this matters\n"
+    "5. concepts — 3-5 keyword strings\n"
+    "6. structured_concepts — Extract {topics: [{label,path}], entities: [{name,type,context}], "
+    "actions: [{verb,object,details}], causality: [{relation,description}]}\n"
+    "7. significance — routine / notable / important / critical\n"
+    "8. emotional_tone — neutral / satisfying / frustrating / exciting / concerning\n"
+    "9. outcome — success / failure / ongoing / unknown\n"
+    "10. salience — float 0.0-1.0\n\n"
+    "CRITICAL: Every name, number, file path, and metric in the input MUST appear "
+    "in the output. Do NOT add information that isn't in the input.\n\n"
+    "Output a single JSON object with all 10 fields.\n\n"
+)
+
+
+PROMPT_VARIANT_FAITHFUL = (
+    "TASK: Compress the following observation into structured JSON.\n\n"
+    "RULES:\n"
+    "- FAITHFULNESS: Every fact in your output must come from the input. "
+    "Do not infer, speculate, or add context from your training data.\n"
+    "- PRESERVATION: Copy all proper nouns, numbers, file paths, version strings, "
+    "and technical identifiers VERBATIM from the input.\n"
+    "- MINIMALITY: If the input is short, the output should be short. "
+    "Do not pad with generic filler.\n\n"
+    "SCHEMA: {gist, summary, content, narrative, concepts, structured_concepts, "
+    "significance, emotional_tone, outcome, salience}\n"
+    "- significance: routine | notable | important | critical\n"
+    "- emotional_tone: neutral | satisfying | frustrating | exciting | concerning\n"
+    "- outcome: success | failure | ongoing | unknown\n"
+    "- salience: float 0.0-1.0\n\n"
+    "Output ONLY the JSON object. No explanation.\n\n"
+)
+
+
+def build_prompt_variant(
+    content: str,
+    variant: str = "production",
+    source: str = "mcp",
+    mem_type: str = "general",
+) -> str:
+    """Build encoding prompt using a specified variant.
+
+    Variants:
+        production — full daemon prompt (build_production_prompt)
+        minimal — compressed schema-only instructions
+        field_by_field — numbered field list with faithfulness emphasis
+        faithful — rules-first prompt emphasizing no hallucination
+    """
+    if variant == "production":
+        return build_production_prompt(content, source=source, mem_type=mem_type)
+
+    prompt_map = {
+        "minimal": PROMPT_VARIANT_MINIMAL,
+        "field_by_field": PROMPT_VARIANT_FIELD_BY_FIELD,
+        "faithful": PROMPT_VARIANT_FAITHFUL,
+    }
+    prefix = prompt_map.get(variant)
+    if prefix is None:
+        raise ValueError(f"Unknown variant: {variant}")
+
+    return f"{prefix}SOURCE: {source}\nTYPE: {mem_type}\nCONTENT:\n{content}\n"
+
+
 # --- Placeholder Detection ---
 
 PLACEHOLDER_GISTS = frozenset({
