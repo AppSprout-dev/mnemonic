@@ -1103,5 +1103,67 @@ Rotation parameter overhead per layer (rank=64):
 - **Hardware:** Local RX 7800 XT only. No MI300X needed.
 - **Estimated time:** ~4-6 hours (download GGUFs + 6 models x 2 conditions x 25 inputs x ~30-60s per encoding).
 - **Tracking:** GitHub issue #390 (informs #386 Project Bespoke and EXP-26)
-- **Result:** (pending)
-- **Verdict:** (pending)
+
+#### Results
+
+**Critical methodology note:** Initial runs used `/completion` endpoint (raw prompt, no chat template) — produced near-zero valid output. All models require `/v1/chat/completions` with `chat_template_kwargs.enable_thinking: false` for structured output. Rule added at `.claude/rules/llm-inference.md`.
+
+**Zero-shot (Q8_0, chat completions, thinking disabled):**
+
+| Model | Valid JSON | SC | EPR | FR | NP | TED | CCS | MIH | tok/s |
+|-------|-----------|-----|------|-----|------|-----|------|------|-------|
+| Qwen 3.5 0.8B | 24/25 | 0/24 | 74.4% | 11.3% | 72.0% | 0 | 3/3 | 0/3 | ~167 |
+| Qwen 3.5 2B | 4/25 | 0/4 | 70.6% | 0.0% | 69.2% | 0 | - | - | ~135 |
+| **Qwen 3.5 4B** | 22/25 | 0/22 | **87.2%** | 10.3% | **87.1%** | 0 | 3/3 | 0/2 | ~135 |
+| Nemotron 3 Nano 4B | 6/25 | 0/6 | 69.2% | 3.8% | 71.8% | 0 | - | - | ~90 |
+| **Gemma 4 E2B** | **25/25** | 0/25 | 75.1% | 8.5% | 73.3% | 0 | 3/3 | 0/3 | ~100 |
+| Gemma 4 E4B | 25/25 | 0/25 | 57.8% | 11.6% | 54.1% | 0 | 3/3 | 0/3 | ~100 |
+
+**3-shot (Q8_0, top 3 candidates):**
+
+| Model | Valid JSON | SC | EPR | FR | NP | CCS | MIH | tok/s |
+|-------|-----------|-----|------|-----|------|------|------|-------|
+| **Qwen 3.5 4B** | 18/25 | 9/18 (50%) | **94.7%** | 14.2% | **95.6%** | 3/3 | 1/3 | ~69 |
+| **Gemma 4 E2B** | 24/25 | **21/24 (88%)** | 82.5% | 6.8% | 82.6% | 3/3 | 2/3 | ~100 |
+| Nemotron 3 Nano 4B | 15/25 | 10/15 (67%) | 92.3% | 6.3% | 93.1% | 2/2 | 2/3 | ~88 |
+
+**GBNF constrained decoding (Qwen 3.5 4B, zero-shot + grammar via chat completions):**
+
+| Metric | Without grammar | With grammar |
+|--------|----------------|-------------|
+| Valid JSON | 22/25 | 10/25 |
+| SC (of valid) | 0% | 50% |
+| NP (dense) | 0% | 54.4% |
+
+Grammar improves SC and dense-number handling when it works, but template interaction reduces valid output rate (10/25 vs 22/25). Engineering work needed for production deployment.
+
+#### FR Metric Calibration
+
+Manual audit of all 41 "fabricated" entities across 3-shot results: **~90% are false positives**. ~80% are verb synonyms ("Decided" → "Selected"), ~15% are regex matching artifacts, ~5% are true fabrication. **True fabrication rate is ~1-2% across all models, not the 6-14% the metric reports.** FR metric needs lemmatization or verb exclusion. This limitation applies to all reported FR values.
+
+#### Key Findings
+
+1. **SC is 0% zero-shot across ALL models** — no model produces fully schema-compliant output without examples or grammar. GBNF grammar or fine-tuning required.
+2. **Qwen 3.5 4B leads on faithfulness** — highest EPR (87.2% zero-shot, 94.7% 3-shot) and NP (87.1%, 95.6%). Best at preserving what's in the input.
+3. **Gemma 4 E2B leads on reliability** — 25/25 valid JSON zero-shot, 24/25 3-shot, 88% SC 3-shot. Never fails to produce parseable output.
+4. **Nemotron 3 Nano 4B has lowest true fabrication** but only 6/25 valid zero-shot (fails on out-of-domain content). Highest learning delta from examples (+23pp EPR zero-shot to 3-shot).
+5. **Gemma 4 E4B underperformed E2B** — larger model was worse (57.8% vs 75.1% EPR). Size doesn't help for this architecture.
+6. **Qwen 3.5 2B (current base) was worst without spokes** — 4/25 valid. Confirms EXP-25's finding that fine-tuning/spokes are essential.
+7. **Dense number preservation is universally broken** — all models, all conditions, except GBNF grammar (54.4%). Needs targeted training data.
+8. **4B-class did NOT consistently beat 2B-class** on EPR (avg 71.4% vs 73.4%). Architecture and pretraining matter more than raw size in this range.
+
+#### Category-Level Analysis (zero-shot)
+
+| Category | Gemma E2B | Qwen 4B | Nemotron 4B |
+|----------|-----------|---------|-------------|
+| out-of-domain (8) | 8/8, 76.6% EPR | 8/8, 82.8% EPR | 2/8 valid |
+| adversarial-twin (6) | 6/6, 82.6% EPR | 6/6, **95.9% EPR** | 1/6 valid |
+| dense-numbers (2) | 2/2, 34.2% EPR | 1/2, 57.5% EPR | 0/2 valid |
+| minimal (3) | 3/3, 100% EPR | 2/3, 100% EPR | 0/3 valid |
+| edge (6) | 6/6, 67.0% EPR | 5/6, 84.8% EPR | 3/6, 83.1% EPR |
+
+Nemotron failures are concentrated in out-of-domain and non-tech content. On tech-domain inputs, it's competitive.
+
+- **Prediction assessment:** Nemotron's structured output training did NOT translate to higher SC (still 0%). Larger models did NOT consistently beat smaller ones. DeltaNet models (Qwen) performed comparably to dense attention (Gemma). The exploratory framing was appropriate — no strong directional prediction held.
+- **Verdict:** PARTIALLY CONFIRMED — multiple candidates demonstrated meaningful encoding quality (EPR >60%, valid JSON >80%), but SC >50% was only achieved with 3-shot examples, not zero-shot. The null hypothesis (pretraining doesn't matter) is REFUTED: Gemma E2B's 25/25 reliability vs Qwen 2B's 4/25 shows pretraining makes a large difference in robustness. However, the v7 training data remains essential — no model achieves target EPR (>90%) or SC (100%) without fine-tuning.
+- **Recommendation:** Fine-tune both Gemma 4 E2B (reliability) and Qwen 3.5 4B (faithfulness) on v7 data and compare. The winner becomes the production encoding model. GBNF grammar should be deployed alongside for structural enforcement. Continuous learning (issue #391) provides the mechanism for ongoing improvement.

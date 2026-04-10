@@ -35,7 +35,7 @@ from pathlib import Path
 import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from training_constants import build_production_prompt  # noqa: E402
+from training_constants import build_production_prompt, build_prompt_variant  # noqa: E402
 from eval_faithfulness import (  # noqa: E402
     evaluate_dataset,
     parse_json_response,
@@ -254,6 +254,7 @@ def generate_encoding(
     few_shot_examples: list[dict] | None = None,
     enable_thinking: bool = False,
     use_grammar: bool = False,
+    prompt_variant: str = "production",
 ) -> tuple[dict | None, dict]:
     """Generate an encoding via the chat completions API (or /completion with grammar).
 
@@ -350,6 +351,7 @@ def run_model_eval(
     few_shot: int = 0,
     use_grammar: bool = False,
     enable_thinking: bool = False,
+    prompt_variant: str = "production",
 ) -> dict | None:
     """Run evaluation for a single model. Returns results dict or None on failure."""
     model_info = CANDIDATES[model_key]
@@ -368,6 +370,8 @@ def run_model_eval(
         tags.append("grammar")
     if enable_thinking:
         tags.append("thinking")
+    if prompt_variant != "production":
+        tags.append(prompt_variant)
     tag_str = "+" + "+".join(tags) if tags else ""
     print(f"\n{'='*70}")
     print(f"Evaluating: {model_info['name']} ({quant}{tag_str})")
@@ -572,6 +576,12 @@ def main():
         "--thinking",
         action="store_true",
         help="Enable thinking/reasoning mode (model generates chain-of-thought before answer)",
+    )
+    parser.add_argument(
+        "--prompt-variant",
+        choices=["production", "minimal", "field_by_field", "faithful"],
+        default="production",
+        help="Prompt variant (default: production)",
     )
     args = parser.parse_args()
 
