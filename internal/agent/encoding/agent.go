@@ -1217,53 +1217,61 @@ func (ea *EncodingAgent) compressAndExtractConcepts(ctx context.Context, raw sto
 }
 
 // buildCompressionPrompt constructs the LLM prompt for memory compression and concept extraction.
-// NOTE: The prompt deliberately avoids showing a JSON template because the local LLM model
-// echoes template placeholder text verbatim into the output fields. Structured output
-// (response_format with json_schema) enforces the JSON structure instead.
+//
+// Uses the "faithful" prompt format (EXP-29): rules-first design that leads with
+// FAITHFULNESS, PRESERVATION, MINIMALITY before the schema. This format produced
+// 99.6% EPR, 100% NP, 0.9% FR on the EXP-25 probe set — the best result across
+// all models and conditions tested.
+//
+// The previous verbose prompt (field-by-field descriptions, concept vocabulary,
+// coaching instructions) actively hurt faithfulness by confusing the model with
+// noise. See training/docs/experiment_registry.md EXP-29 for full data.
 func buildCompressionPrompt(content, source, memType, episodeCtx, coachingInstructions string, conceptVocabulary []string) string {
 	var b strings.Builder
 
 	if source == "ingest" {
-		b.WriteString(`Catalog this source code file. Describe what the file IS and DOES.
+		// Ingest (file cataloging) keeps its own prompt — different task.
+		b.WriteString(`TASK: Catalog this source code file into structured JSON.
 
-Fill in every JSON field based on the actual file content below:
-- gist: What this file is in under 60 characters.
-- summary: The file's purpose in under 100 characters.
-- content: A compressed description of what the file contains and how it works.
-- narrative: The file's role in the project architecture and why it matters.
-- concepts: 3-5 keywords describing the file's domain. PREFER exact terms from the vocabulary list below; only use new terms if no vocabulary term fits.
-- structured_concepts: Extract topics, entities, actions, and causal relationships. Keep each array to 3-5 items max. Use short strings, not sentences.
-- significance: One of routine, notable, important, or critical.
-- emotional_tone: neutral.
-- outcome: success.
-- salience: 0.7+ for core implementation, 0.5 for tests/utilities, 0.3 for generated files.
+RULES:
+- FAITHFULNESS: Every fact in your output must come from the file content. Do not infer, speculate, or add context from your training data.
+- PRESERVATION: Copy all function names, type names, file paths, import paths, and version strings VERBATIM from the file.
+- MINIMALITY: Describe what the file IS and DOES. Do not pad with generic filler.
+
+SCHEMA: {gist, summary, content, narrative, concepts, structured_concepts, significance, emotional_tone, outcome, salience}
+- gist: What this file is, under 60 characters
+- significance: routine | notable | important | critical
+- emotional_tone: neutral
+- outcome: success
+- salience: 0.7+ for core implementation, 0.5 for tests/utilities, 0.3 for generated files
+- structured_concepts: {topics: [{label, path}], entities: [{name, type, context}], actions: [{verb, object, details}], causality: [{relation, description}]}
+
+Output ONLY the JSON object. No explanation.
 
 `)
 	} else {
-		b.WriteString(`Encode this event into memory. Read the content below and summarize what actually happened.
+		// Event encoding — faithful prompt format from EXP-29.
+		b.WriteString(`TASK: Compress the following observation into structured JSON.
 
-Fill in every JSON field based on the actual event content below:
-- gist: What happened in under 60 characters.
-- summary: What happened and why it matters in under 100 characters.
-- content: The key details someone would need to understand this event later.
-- narrative: The story of what happened including context and meaning.
-- concepts: 3-5 keywords about the event. PREFER exact terms from the vocabulary list below; only use new terms if no vocabulary term fits.
-- structured_concepts: Extract topics, entities, actions, and causal relationships. Keep each array to 3-5 items max. Use short strings, not sentences.
-- significance: One of routine, notable, important, or critical.
-- emotional_tone: One of neutral, satisfying, frustrating, exciting, or concerning.
-- outcome: One of success, failure, ongoing, or unknown.
-- salience: 0.7+ for decisions/errors/insights, 0.5 for notable activity, 0.3 for routine file saves.
+RULES:
+- FAITHFULNESS: Every fact in your output must come from the input. Do not infer, speculate, or add context from your training data.
+- PRESERVATION: Copy all proper nouns, numbers, file paths, version strings, and technical identifiers VERBATIM from the input.
+- MINIMALITY: If the input is short, the output should be short. Do not pad with generic filler.
+
+SCHEMA: {gist, summary, content, narrative, concepts, structured_concepts, significance, emotional_tone, outcome, salience}
+- significance: routine | notable | important | critical
+- emotional_tone: neutral | satisfying | frustrating | exciting | concerning
+- outcome: success | failure | ongoing | unknown
+- salience: 0.0-1.0
+- structured_concepts: {topics: [{label, path}], entities: [{name, type, context}], actions: [{verb, object, details}], causality: [{relation, description}]}
+
+Output ONLY the JSON object. No explanation.
 
 `)
 	}
 
-	if len(conceptVocabulary) > 0 {
-		b.WriteString("IMPORTANT: Extract concepts from the CONTENT of the memory, not from what kind of memory it is. A decision about database indexing should have concepts like 'database', 'performance' — NOT 'decision'. Do NOT use metadata as concepts (e.g., 'source:mcp', 'type:insight', project names).\n\n")
-		b.WriteString("CONCEPT VOCABULARY — prefer terms from this list when they match the content topic. Invent a new term if no vocabulary term fits the actual subject matter:\n")
-		b.WriteString(strings.Join(conceptVocabulary, ", "))
-		b.WriteString("\n\n")
-	}
-
+	// Episode context and coaching are still appended if present —
+	// they provide per-memory context, not general instructions.
 	if episodeCtx != "" {
 		b.WriteString(episodeCtx)
 	}
