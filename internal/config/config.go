@@ -16,29 +16,30 @@ import (
 
 // Config is the root configuration structure.
 type Config struct {
-	LLM            LLMConfig            `yaml:"llm"`
-	Store          StoreConfig          `yaml:"store"`
-	Memory         MemoryConfig         `yaml:"memory"`
-	Perception     PerceptionConfig     `yaml:"perception"`
-	Encoding       EncodingConfig       `yaml:"encoding"`
-	Consolidation  ConsolidationConfig  `yaml:"consolidation"`
-	Retrieval      RetrievalConfig      `yaml:"retrieval"`
-	Metacognition  MetacognitionConfig  `yaml:"metacognition"`
-	Dreaming       DreamingConfig       `yaml:"dreaming"`
-	Episoding      EpisodingConfig      `yaml:"episoding"`
-	Abstraction    AbstractionConfig    `yaml:"abstraction"`
-	Orchestrator   OrchestratorConfig   `yaml:"orchestrator"`
-	Reactor        ReactorConfig        `yaml:"reactor"`
-	Forum          ForumConfig          `yaml:"forum"`
-	MemoryDefaults MemoryDefaultsConfig `yaml:"memory_defaults"`
-	MCP            MCPConfig            `yaml:"mcp"`
-	AgentSDK       AgentSDKConfig       `yaml:"agent_sdk"`
-	Training       TrainingConfig       `yaml:"training"`
-	Coaching       CoachingConfig       `yaml:"coaching"`
-	API            APIConfig            `yaml:"api"`
-	Web            WebConfig            `yaml:"web"`
-	Logging        LoggingConfig        `yaml:"logging"`
-	Projects       []ProjectConfig      `yaml:"projects"`
+	LLM                LLMConfig                `yaml:"llm"`
+	Store              StoreConfig              `yaml:"store"`
+	Memory             MemoryConfig             `yaml:"memory"`
+	Perception         PerceptionConfig         `yaml:"perception"`
+	Encoding           EncodingConfig           `yaml:"encoding"`
+	Consolidation      ConsolidationConfig      `yaml:"consolidation"`
+	Retrieval          RetrievalConfig          `yaml:"retrieval"`
+	Metacognition      MetacognitionConfig      `yaml:"metacognition"`
+	Dreaming           DreamingConfig           `yaml:"dreaming"`
+	Episoding          EpisodingConfig          `yaml:"episoding"`
+	Abstraction        AbstractionConfig        `yaml:"abstraction"`
+	Orchestrator       OrchestratorConfig       `yaml:"orchestrator"`
+	Reactor            ReactorConfig            `yaml:"reactor"`
+	Forum              ForumConfig              `yaml:"forum"`
+	MemoryDefaults     MemoryDefaultsConfig     `yaml:"memory_defaults"`
+	MCP                MCPConfig                `yaml:"mcp"`
+	AgentSDK           AgentSDKConfig           `yaml:"agent_sdk"`
+	Training           TrainingConfig           `yaml:"training"`
+	Coaching           CoachingConfig           `yaml:"coaching"`
+	ContinuousLearning ContinuousLearningConfig `yaml:"continuous_learning"`
+	API                APIConfig                `yaml:"api"`
+	Web                WebConfig                `yaml:"web"`
+	Logging            LoggingConfig            `yaml:"logging"`
+	Projects           []ProjectConfig          `yaml:"projects"`
 }
 
 // LLMConfig holds LLM provider settings.
@@ -471,6 +472,28 @@ type TrainingConfig struct {
 // CoachingConfig holds settings for the Claude→local LLM coaching system.
 type CoachingConfig struct {
 	CoachingFile string `yaml:"coaching_file"`
+}
+
+// ContinuousLearningConfig holds settings for the continuous learning pipeline.
+type ContinuousLearningConfig struct {
+	Enabled  bool             `yaml:"enabled"`
+	Training CLTrainingConfig `yaml:"training"`
+	Trigger  CLTriggerConfig  `yaml:"trigger"`
+}
+
+// CLTrainingConfig holds training-specific settings for continuous learning.
+type CLTrainingConfig struct {
+	MinNewExamples    int     `yaml:"min_new_examples"`     // minimum experience entries before training (default: 50)
+	MaxExamplesPerRun int     `yaml:"max_examples_per_run"` // cap batch size (default: 200)
+	ReplayRatio       float64 `yaml:"replay_ratio"`         // fraction from base dataset (default: 0.30)
+	RollbackVersions  int     `yaml:"rollback_versions"`    // keep last N spoke versions (default: 3)
+}
+
+// CLTriggerConfig holds trigger settings for continuous learning.
+type CLTriggerConfig struct {
+	Auto           bool   `yaml:"auto"`            // metacognition auto-trigger (default: false)
+	Manual         bool   `yaml:"manual"`          // MCP tool trigger (default: true)
+	TrainingWindow string `yaml:"training_window"` // auto-trigger window, e.g. "02:00-06:00"
 }
 
 // LoggingConfig holds logging settings.

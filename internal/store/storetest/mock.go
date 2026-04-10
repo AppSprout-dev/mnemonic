@@ -366,6 +366,30 @@ func (MockStore) GetDailyDigestThread(context.Context, string, time.Time) (store
 	return store.ForumPost{}, store.ErrNotFound
 }
 
+// --- Continuous Learning ---
+
+func (MockStore) WriteVerificationResult(context.Context, string, float64, float64, []string) error {
+	return nil
+}
+func (MockStore) WriteExperienceEntry(context.Context, store.ExperienceEntry) error { return nil }
+func (MockStore) UpdateExperienceRecallScore(context.Context, string, string) error { return nil }
+func (MockStore) ReclassifyExperienceBuffer(context.Context) (int, error)           { return 0, nil }
+func (MockStore) ListExperienceByCategory(context.Context, string, int) ([]store.ExperienceEntry, error) {
+	return nil, nil
+}
+func (MockStore) GetExperienceBufferStats(context.Context) (store.ExperienceStats, error) {
+	return store.ExperienceStats{}, nil
+}
+func (MockStore) WriteRecallFeedbackEntry(context.Context, store.RecallFeedbackEntry) error {
+	return nil
+}
+func (MockStore) GetRecallHistory(context.Context, string) ([]store.RecallFeedbackEntry, error) {
+	return nil, nil
+}
+func (MockStore) GetEncodingQualityWindow(context.Context, int) (store.EncodingQualityWindow, error) {
+	return store.EncodingQualityWindow{}, nil
+}
+
 // --- Lifecycle ---
 
 func (MockStore) Close() error { return nil }

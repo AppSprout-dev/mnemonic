@@ -10,7 +10,7 @@ import (
 // migration is added. It is written to PRAGMA user_version after InitSchema
 // completes, and read by the pre-migration backup logic to skip backups when
 // the schema is already current.
-const SchemaVersion = 15
+const SchemaVersion = 16
 
 const schema = `
 -- Raw observations before encoding

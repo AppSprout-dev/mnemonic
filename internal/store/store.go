@@ -582,6 +582,69 @@ type AnalyticsStore interface {
 	GetAnalytics(ctx context.Context) (AnalyticsData, error)
 }
 
+// ExperienceEntry represents a training candidate in the experience buffer.
+type ExperienceEntry struct {
+	ID             string    `json:"id"`
+	RawID          string    `json:"raw_id"`
+	MemoryID       string    `json:"memory_id"`
+	EncodingEPR    float64   `json:"encoding_epr"`
+	EncodingFR     float64   `json:"encoding_fr"`
+	EncodingFlags  []string  `json:"encoding_flags"`
+	RecallScore    float64   `json:"recall_score"`
+	RecallCount    int       `json:"recall_count"`
+	Category       string    `json:"category"` // gold, needs_improvement, ambiguous
+	UsedInTraining bool      `json:"used_in_training"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+// ExperienceStats summarizes the experience buffer contents.
+type ExperienceStats struct {
+	Gold             int `json:"gold"`
+	NeedsImprovement int `json:"needs_improvement"`
+	Ambiguous        int `json:"ambiguous"`
+	Total            int `json:"total"`
+}
+
+// RecallFeedbackEntry links a recall query to a specific memory's feedback rating.
+type RecallFeedbackEntry struct {
+	ID              string    `json:"id"`
+	Query           string    `json:"query"`
+	MemoryID        string    `json:"memory_id"`
+	Feedback        string    `json:"feedback"` // helpful, partial, irrelevant
+	RecallSessionID string    `json:"recall_session_id"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+// EncodingQualityWindow holds rolling quality metrics for drift detection.
+type EncodingQualityWindow struct {
+	WindowSize  int     `json:"window_size"`
+	MeanEPR     float64 `json:"mean_epr"`
+	TEDRate     float64 `json:"ted_rate"`
+	FlaggedRate float64 `json:"flagged_rate"`
+	SampleCount int     `json:"sample_count"`
+}
+
+// ContinuousLearningStore manages experience collection for continuous learning.
+type ContinuousLearningStore interface {
+	// Verification results (written during encoding)
+	WriteVerificationResult(ctx context.Context, memoryID string, epr float64, fr float64, flags []string) error
+
+	// Experience buffer
+	WriteExperienceEntry(ctx context.Context, entry ExperienceEntry) error
+	UpdateExperienceRecallScore(ctx context.Context, memoryID string, feedback string) error
+	ReclassifyExperienceBuffer(ctx context.Context) (int, error)
+	ListExperienceByCategory(ctx context.Context, category string, limit int) ([]ExperienceEntry, error)
+	GetExperienceBufferStats(ctx context.Context) (ExperienceStats, error)
+
+	// Recall-encoding linkage
+	WriteRecallFeedbackEntry(ctx context.Context, entry RecallFeedbackEntry) error
+	GetRecallHistory(ctx context.Context, memoryID string) ([]RecallFeedbackEntry, error)
+
+	// Quality drift detection
+	GetEncodingQualityWindow(ctx context.Context, windowSize int) (EncodingQualityWindow, error)
+}
+
 // Store is the full abstraction for persistent memory.
 // It composes all sub-interfaces — consumers that need only a subset
 // should accept the relevant sub-interface instead.
@@ -602,6 +665,7 @@ type Store interface {
 	UsageStore
 	ForumStore
 	AnalyticsStore
+	ContinuousLearningStore
 
 	// --- Lifecycle ---
 	Close() error

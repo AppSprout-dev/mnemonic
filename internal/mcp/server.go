@@ -2002,6 +2002,24 @@ func (srv *MCPServer) handleFeedback(ctx context.Context, args map[string]interf
 		return nil, fmt.Errorf("failed to store feedback: %w", err)
 	}
 
+	// Update experience buffer recall scores for each memory that received feedback
+	for _, memID := range memoryIDs {
+		if err := srv.store.UpdateExperienceRecallScore(ctx, memID, quality); err != nil {
+			srv.log.Debug("no experience entry for memory (may predate continuous learning)", "memory_id", memID)
+		}
+
+		// Also record the recall-encoding linkage
+		rfEntry := store.RecallFeedbackEntry{
+			Query:           query,
+			MemoryID:        memID,
+			Feedback:        quality,
+			RecallSessionID: srv.sessionID,
+		}
+		if err := srv.store.WriteRecallFeedbackEntry(ctx, rfEntry); err != nil {
+			srv.log.Warn("failed to write recall feedback entry", "memory_id", memID, "error", err)
+		}
+	}
+
 	// If query_id is provided, look up traversal data and adjust association strengths
 	adjustments := 0
 	if queryID != "" {

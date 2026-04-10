@@ -1045,6 +1045,33 @@ func (ea *EncodingAgent) encodeMemory(ctx context.Context, rawID string) error {
 
 	ea.log.Debug("compression completed", "raw_id", raw.ID, "summary_length", len(compression.Summary))
 
+	// Step 2b: Verify faithfulness (EPR, TED, FR, MIG)
+	verification := verifyFaithfulness(raw.Content, compression)
+	ea.log.Debug("verification completed",
+		"raw_id", raw.ID,
+		"epr", verification.EPR,
+		"fr", verification.FR,
+		"ted", verification.TED,
+		"flags", verification.Flags,
+	)
+	if verification.TED {
+		ea.log.Warn("template echo detected in encoding",
+			"raw_id", raw.ID,
+			"flags", verification.Flags,
+		)
+		// Reduce salience for template-echoed encodings
+		if compression.Salience > 0.1 {
+			compression.Salience -= 0.1
+		}
+	}
+	if verification.EPR < 0.7 {
+		ea.log.Warn("low entity preservation rate",
+			"raw_id", raw.ID,
+			"epr", verification.EPR,
+			"input_entities", verification.InputEntities,
+		)
+	}
+
 	// Step 3: Generate embedding (truncate to avoid exceeding model context)
 	embeddingText := agentutil.Truncate(compression.Summary+" "+compression.Content, ea.maxEmbedding())
 	embedding, err := ea.llmProvider.Embed(ctx, embeddingText)
@@ -1065,6 +1092,25 @@ func (ea *EncodingAgent) encodeMemory(ctx context.Context, rawID string) error {
 		claimed = false
 		return nil
 	}
+	// Step 8b: Store verification metrics and experience buffer entry
+	if result.memoryID != "" {
+		if err := ea.store.WriteVerificationResult(ctx, result.memoryID, verification.EPR, verification.FR, verification.Flags); err != nil {
+			ea.log.Warn("failed to write verification result", "memory_id", result.memoryID, "error", err)
+		}
+
+		entry := store.ExperienceEntry{
+			RawID:         raw.ID,
+			MemoryID:      result.memoryID,
+			EncodingEPR:   verification.EPR,
+			EncodingFR:    verification.FR,
+			EncodingFlags: verification.Flags,
+			Category:      "ambiguous",
+		}
+		if err := ea.store.WriteExperienceEntry(ctx, entry); err != nil {
+			ea.log.Warn("failed to write experience entry", "memory_id", result.memoryID, "error", err)
+		}
+	}
+
 	// Encoding succeeded — don't unclaim on defer
 	claimed = false
 
