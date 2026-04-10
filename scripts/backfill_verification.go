@@ -172,7 +172,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("open db: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	rows, err := db.Query(`
 		SELECT m.id, COALESCE(m.summary, ''), COALESCE(m.content, ''),
@@ -184,7 +184,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("query: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	type entry struct {
 		id         string

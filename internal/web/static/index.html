@@ -643,14 +643,19 @@
         .concept-time { flex: 0 0 auto; font-size: 0.7rem; color: var(--text-muted); min-width: 45px; text-align: right; }
         /* ── Research Analytics Brief ── */
         .ra-brief {
-            font-size: 0.82rem; line-height: 1.6; color: var(--text-muted); margin-bottom: 14px;
+            font-size: 0.78rem; line-height: 1.5; color: var(--text-muted); margin-bottom: 14px;
             padding: 12px 16px; background: var(--bg-card); border: 1px solid var(--border-subtle);
-            border-radius: var(--radius-md); border-left: 3px solid var(--accent-cyan);
+            border-radius: var(--radius-md);
         }
         .ra-brief strong { color: var(--text-primary); font-weight: 600; }
         .ra-brief .ra-warn { color: var(--accent-orange); }
         .ra-brief .ra-good { color: var(--accent-green); }
         .ra-brief .ra-bad { color: var(--accent-red); }
+        .ra-brief-headline { font-size: 0.85rem; color: var(--text-primary); margin-bottom: 8px; }
+        .ra-brief-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .ra-brief-col-label { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); margin-bottom: 4px; }
+        .ra-brief-col ul { margin: 0; padding-left: 16px; }
+        .ra-brief-col li { margin-bottom: 2px; }
         /* ── Research Analytics KPI cards ── */
         .ra-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 8px; }
         .ra-kpi { background: var(--bg-row); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 12px 14px; }
