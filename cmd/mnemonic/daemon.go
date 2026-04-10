@@ -193,7 +193,7 @@ func checkLLMFromAPI(healthURL, llmEndpoint, token string) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	var health map[string]interface{}
+	var health map[string]any
 	if json.NewDecoder(resp.Body).Decode(&health) != nil {
 		return
 	}

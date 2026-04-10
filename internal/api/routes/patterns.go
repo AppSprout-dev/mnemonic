@@ -31,7 +31,7 @@ func HandleListPatterns(s store.Store, log *slog.Logger) http.HandlerFunc {
 			patterns = []store.Pattern{}
 		}
 
-		writeJSON(w, http.StatusOK, map[string]interface{}{
+		writeJSON(w, http.StatusOK, map[string]any{
 			"patterns":  patterns,
 			"count":     len(patterns),
 			"timestamp": time.Now().Format(time.RFC3339),
@@ -73,7 +73,7 @@ func HandleListAbstractions(s store.Store, log *slog.Logger) http.HandlerFunc {
 			abstractions = []store.Abstraction{}
 		}
 
-		writeJSON(w, http.StatusOK, map[string]interface{}{
+		writeJSON(w, http.StatusOK, map[string]any{
 			"abstractions": abstractions,
 			"count":        len(abstractions),
 			"timestamp":    time.Now().Format(time.RFC3339),
@@ -126,7 +126,7 @@ func HandleArchivePattern(s store.Store, log *slog.Logger) http.HandlerFunc {
 		}
 
 		log.Info("pattern state updated", "id", id, "state", body.State)
-		writeJSON(w, http.StatusOK, map[string]interface{}{
+		writeJSON(w, http.StatusOK, map[string]any{
 			"id":    id,
 			"state": body.State,
 		})
@@ -150,7 +150,7 @@ func HandleListProjects(s store.Store, log *slog.Logger) http.HandlerFunc {
 			projects = []string{}
 		}
 
-		writeJSON(w, http.StatusOK, map[string]interface{}{
+		writeJSON(w, http.StatusOK, map[string]any{
 			"projects":  projects,
 			"count":     len(projects),
 			"timestamp": time.Now().Format(time.RFC3339),

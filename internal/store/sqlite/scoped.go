@@ -76,7 +76,7 @@ func (s *SQLiteStore) SearchByType(ctx context.Context, types []string, limit in
 		return nil, nil
 	}
 	placeholders := make([]string, len(types))
-	args := make([]interface{}, len(types))
+	args := make([]any, len(types))
 	for i, t := range types {
 		placeholders[i] = "?"
 		args[i] = t
@@ -190,8 +190,8 @@ func (s *SQLiteStore) ListRuntimeExclusions(ctx context.Context) ([]string, erro
 }
 
 // GetProjectSummary returns aggregate stats for a specific project.
-func (s *SQLiteStore) GetProjectSummary(ctx context.Context, project string) (map[string]interface{}, error) {
-	summary := make(map[string]interface{})
+func (s *SQLiteStore) GetProjectSummary(ctx context.Context, project string) (map[string]any, error) {
+	summary := make(map[string]any)
 
 	// Count memories by state
 	var active, fading, archived, total int

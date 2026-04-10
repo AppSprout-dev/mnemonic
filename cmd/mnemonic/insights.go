@@ -65,14 +65,14 @@ func insightsCommand(configPath string) {
 }
 
 // formatDetailValue renders a detail value in a human-friendly way.
-func formatDetailValue(val interface{}) string {
+func formatDetailValue(val any) string {
 	switch v := val.(type) {
 	case float64:
 		if v == float64(int64(v)) {
 			return fmt.Sprintf("%d", int64(v))
 		}
 		return fmt.Sprintf("%.1f%%", v*100)
-	case map[string]interface{}:
+	case map[string]any:
 		parts := []string{}
 		for k, mv := range v {
 			switch n := mv.(type) {

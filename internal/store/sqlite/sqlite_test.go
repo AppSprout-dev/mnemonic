@@ -57,7 +57,7 @@ func TestWriteRawReadRaw(t *testing.T) {
 		Source:          "terminal",
 		Type:            "command_executed",
 		Content:         "cd /tmp && ls -la",
-		Metadata:        map[string]interface{}{"shell": "bash"},
+		Metadata:        map[string]any{"shell": "bash"},
 		HeuristicScore:  0.75,
 		InitialSalience: 0.6,
 		Processed:       false,
@@ -545,7 +545,7 @@ func TestWriteMetaObservation(t *testing.T) {
 		ID:              "obs-1",
 		ObservationType: "quality_audit",
 		Severity:        "warning",
-		Details: map[string]interface{}{
+		Details: map[string]any{
 			"score": 0.72,
 			"issue": "Low quality memories detected",
 		},
@@ -570,21 +570,21 @@ func TestListMetaObservations(t *testing.T) {
 			ID:              "obs-1",
 			ObservationType: "quality_audit",
 			Severity:        "warning",
-			Details:         map[string]interface{}{"issue": "test1"},
+			Details:         map[string]any{"issue": "test1"},
 			CreatedAt:       time.Now(),
 		},
 		{
 			ID:              "obs-2",
 			ObservationType: "quality_audit",
 			Severity:        "info",
-			Details:         map[string]interface{}{"issue": "test2"},
+			Details:         map[string]any{"issue": "test2"},
 			CreatedAt:       time.Now(),
 		},
 		{
 			ID:              "obs-3",
 			ObservationType: "source_balance",
 			Severity:        "critical",
-			Details:         map[string]interface{}{"issue": "test3"},
+			Details:         map[string]any{"issue": "test3"},
 			CreatedAt:       time.Now(),
 		},
 	}

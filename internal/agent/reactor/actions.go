@@ -52,7 +52,7 @@ func (a *LogMetaObservationAction) Execute(ctx context.Context, _ events.Event, 
 		ID:              uuid.New().String(),
 		ObservationType: "autonomous_action",
 		Severity:        "info",
-		Details: map[string]interface{}{
+		Details: map[string]any{
 			"action":  a.ActionName,
 			"trigger": a.TriggerName,
 		},

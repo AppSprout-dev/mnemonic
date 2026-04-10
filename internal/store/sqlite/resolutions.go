@@ -112,7 +112,7 @@ func (s *SQLiteStore) SearchByEntity(ctx context.Context, name string, entityTyp
 		FROM memories m
 		JOIN concept_sets cs ON cs.memory_id = m.id
 		WHERE cs.entities LIKE ?`
-	args := []interface{}{"%" + name + "%"}
+	args := []any{"%" + name + "%"}
 
 	if entityType != "" {
 		query += ` AND cs.entities LIKE ?`

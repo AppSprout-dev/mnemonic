@@ -255,7 +255,7 @@ func (fw *FilesystemWatcher) sendEvent(path string, eventType string) {
 		Path:      path,
 		Content:   content,
 		Timestamp: time.Now(),
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"op":      eventType,
 			"backend": "fsevents",
 		},

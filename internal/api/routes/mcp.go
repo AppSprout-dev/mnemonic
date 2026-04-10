@@ -78,13 +78,13 @@ func handleMCPDelete(sm *mcp.SessionManager, log *slog.Logger, w http.ResponseWr
 }
 
 // writeJSONRPCError writes a JSON-RPC error response.
-func writeJSONRPCError(w http.ResponseWriter, id interface{}, code int, message string) {
+func writeJSONRPCError(w http.ResponseWriter, id any, code int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK) // JSON-RPC errors are still 200
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"jsonrpc": "2.0",
 		"id":      id,
-		"error": map[string]interface{}{
+		"error": map[string]any{
 			"code":    code,
 			"message": message,
 		},

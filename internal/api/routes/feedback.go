@@ -80,7 +80,7 @@ func HandleFeedback(s store.Store, log *slog.Logger) http.HandlerFunc {
 			ID:              uuid.New().String(),
 			ObservationType: "retrieval_feedback",
 			Severity:        "info",
-			Details: map[string]interface{}{
+			Details: map[string]any{
 				"query_id": req.QueryID,
 				"quality":  req.Quality,
 				"source":   "web_ui",

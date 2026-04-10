@@ -17,9 +17,9 @@ var activeWSConns atomic.Int32
 
 // WebSocketMessage is the format for messages sent over the WebSocket.
 type WebSocketMessage struct {
-	Type      string      `json:"type"`
-	Timestamp string      `json:"timestamp"`
-	Payload   interface{} `json:"payload"`
+	Type      string `json:"type"`
+	Timestamp string `json:"timestamp"`
+	Payload   any    `json:"payload"`
 }
 
 // wsConn wraps a WebSocket connection with subscription management.
@@ -212,7 +212,7 @@ func (wc *wsConn) cleanup(bus events.Bus) {
 // wsConnEventToMessage converts an events.Event to a WebSocketMessage.
 func wsConnEventToMessage(evt events.Event) WebSocketMessage {
 	// Serialize the event to a generic map for JSON encoding
-	var payload interface{}
+	var payload any
 
 	switch e := evt.(type) {
 	case events.RawMemoryCreated:
@@ -249,7 +249,7 @@ func wsConnEventToMessage(evt events.Event) WebSocketMessage {
 		payload = e
 	default:
 		// Fallback for unknown event types
-		payload = map[string]interface{}{}
+		payload = map[string]any{}
 	}
 
 	return WebSocketMessage{

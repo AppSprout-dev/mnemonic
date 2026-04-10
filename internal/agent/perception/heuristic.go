@@ -646,5 +646,5 @@ type Event struct {
 	Path      string
 	Content   string
 	Timestamp time.Time
-	Metadata  map[string]interface{}
+	Metadata  map[string]any
 }

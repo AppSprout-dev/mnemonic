@@ -12,8 +12,8 @@ import (
 func HandleListModels(mgr llm.ModelManager, log *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if mgr == nil {
-			writeJSON(w, http.StatusOK, map[string]interface{}{
-				"models":  []interface{}{},
+			writeJSON(w, http.StatusOK, map[string]any{
+				"models":  []any{},
 				"enabled": false,
 				"message": "embedded provider not active",
 			})
@@ -29,7 +29,7 @@ func HandleListModels(mgr llm.ModelManager, log *slog.Logger) http.HandlerFunc {
 
 		active := mgr.ActiveModel()
 
-		writeJSON(w, http.StatusOK, map[string]interface{}{
+		writeJSON(w, http.StatusOK, map[string]any{
 			"models":  models,
 			"active":  active,
 			"enabled": true,
@@ -42,7 +42,7 @@ func HandleListModels(mgr llm.ModelManager, log *slog.Logger) http.HandlerFunc {
 func HandleActiveModel(mgr llm.ModelManager, log *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if mgr == nil {
-			writeJSON(w, http.StatusOK, map[string]interface{}{
+			writeJSON(w, http.StatusOK, map[string]any{
 				"enabled": false,
 				"message": "embedded provider not active",
 			})
@@ -50,7 +50,7 @@ func HandleActiveModel(mgr llm.ModelManager, log *slog.Logger) http.HandlerFunc 
 		}
 
 		active := mgr.ActiveModel()
-		writeJSON(w, http.StatusOK, map[string]interface{}{
+		writeJSON(w, http.StatusOK, map[string]any{
 			"active":  active,
 			"enabled": true,
 		})
@@ -111,7 +111,7 @@ func HandleSwapModel(mgr llm.ModelManager, log *slog.Logger) http.HandlerFunc {
 		}
 
 		active := mgr.ActiveModel()
-		writeJSON(w, http.StatusOK, map[string]interface{}{
+		writeJSON(w, http.StatusOK, map[string]any{
 			"status": "ok",
 			"active": active,
 		})

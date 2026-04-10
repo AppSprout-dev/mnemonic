@@ -868,9 +868,9 @@ func (ea *EncodingAgent) persistEncodedMemory(ctx context.Context, raw store.Raw
 
 	// Create explicit associations from metadata (set via MCP remember associate_with param).
 	if rawAssoc, ok := raw.Metadata["explicit_associations"]; ok {
-		if assocList, ok := rawAssoc.([]interface{}); ok {
+		if assocList, ok := rawAssoc.([]any); ok {
 			for _, entry := range assocList {
-				if m, ok := entry.(map[string]interface{}); ok {
+				if m, ok := entry.(map[string]any); ok {
 					targetID, _ := m["memory_id"].(string)
 					relation, _ := m["relation"].(string)
 					if targetID == "" || relation == "" {

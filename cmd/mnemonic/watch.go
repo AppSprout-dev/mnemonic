@@ -59,7 +59,7 @@ func watchCommand(configPath string) {
 
 // formatWatchEvent formats and prints a WebSocket event with colors.
 func formatWatchEvent(data []byte) {
-	var evt map[string]interface{}
+	var evt map[string]any
 	if err := json.Unmarshal(data, &evt); err != nil {
 		// Raw text event
 		ts := time.Now().Format("15:04:05")

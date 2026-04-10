@@ -56,7 +56,7 @@ func HandleListForumCategories(s store.Store, log *slog.Logger) http.HandlerFunc
 			return
 		}
 
-		writeJSON(w, http.StatusOK, map[string]interface{}{
+		writeJSON(w, http.StatusOK, map[string]any{
 			"categories": summaries,
 		})
 	}
@@ -99,7 +99,7 @@ func HandleListForumThreads(s store.Store, log *slog.Logger) http.HandlerFunc {
 
 		count, _ := s.CountForumPosts(ctx)
 
-		writeJSON(w, http.StatusOK, map[string]interface{}{
+		writeJSON(w, http.StatusOK, map[string]any{
 			"threads":     threads,
 			"total_posts": count,
 		})
@@ -126,7 +126,7 @@ func HandleGetForumThread(s store.Store, log *slog.Logger) http.HandlerFunc {
 			return
 		}
 
-		writeJSON(w, http.StatusOK, map[string]interface{}{
+		writeJSON(w, http.StatusOK, map[string]any{
 			"thread_id": id,
 			"posts":     posts,
 			"count":     len(posts),
@@ -230,7 +230,7 @@ func HandleCreateForumPost(s store.Store, bus events.Bus, log *slog.Logger) http
 			"mentions", mentions,
 		)
 
-		writeJSON(w, http.StatusCreated, map[string]interface{}{
+		writeJSON(w, http.StatusCreated, map[string]any{
 			"id":        postID,
 			"thread_id": threadID,
 			"mentions":  mentions,
@@ -367,7 +367,7 @@ func HandleInternalizeForumPost(s store.Store, bus events.Bus, log *slog.Logger)
 			Source:          "forum",
 			Type:            memType,
 			Content:         post.Content,
-			Metadata:        map[string]interface{}{"forum_post_id": post.ID, "author": post.AuthorName},
+			Metadata:        map[string]any{"forum_post_id": post.ID, "author": post.AuthorName},
 			HeuristicScore:  1.0,
 			InitialSalience: 0.85,
 			Processed:       false,
@@ -400,7 +400,7 @@ func HandleInternalizeForumPost(s store.Store, bus events.Bus, log *slog.Logger)
 			"type", memType,
 		)
 
-		writeJSON(w, http.StatusOK, map[string]interface{}{
+		writeJSON(w, http.StatusOK, map[string]any{
 			"raw_memory_id": rawID,
 			"type":          memType,
 			"status":        "internalized",

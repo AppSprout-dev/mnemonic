@@ -139,7 +139,7 @@ CONTENT: User decided to use SQLite instead of Postgres for the mnemonic daemon 
 	}
 
 	// Parse and verify required fields exist
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal([]byte(resp.Text), &result); err != nil {
 		t.Fatalf("grammar output is not valid JSON: %v\nOutput: %s", err, resp.Text)
 	}
@@ -152,7 +152,7 @@ CONTENT: User decided to use SQLite instead of Postgres for the mnemonic daemon 
 	}
 
 	// Verify structured_concepts has its sub-fields
-	if sc, ok := result["structured_concepts"].(map[string]interface{}); ok {
+	if sc, ok := result["structured_concepts"].(map[string]any); ok {
 		for _, subfield := range []string{"topics", "entities", "actions", "causality"} {
 			if _, ok := sc[subfield]; !ok {
 				t.Errorf("missing structured_concepts.%s in grammar output", subfield)

@@ -286,7 +286,7 @@ func (cw *ClipboardWatcher) sendEvent(content string) {
 		Type:      "clipboard_changed",
 		Content:   content,
 		Timestamp: time.Now(),
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"platform": runtime.GOOS,
 			"size":     len(content),
 		},

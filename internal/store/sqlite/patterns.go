@@ -181,7 +181,7 @@ func (s *SQLiteStore) SearchPatternsByEmbedding(ctx context.Context, embedding [
 }
 
 // nullableTime converts a zero time to nil for SQL NULL.
-func nullableTime(t time.Time) interface{} {
+func nullableTime(t time.Time) any {
 	if t.IsZero() {
 		return nil
 	}

@@ -203,7 +203,7 @@ func decodeStringSlice(jsonStr string) ([]string, error) {
 }
 
 // Helper to encode map as JSON
-func encodeMap(m map[string]interface{}) (string, error) {
+func encodeMap(m map[string]any) (string, error) {
 	if len(m) == 0 {
 		return "{}", nil
 	}
@@ -215,11 +215,11 @@ func encodeMap(m map[string]interface{}) (string, error) {
 }
 
 // Helper to decode JSON map
-func decodeMap(jsonStr string) (map[string]interface{}, error) {
+func decodeMap(jsonStr string) (map[string]any, error) {
 	if jsonStr == "" || jsonStr == "{}" {
-		return make(map[string]interface{}), nil
+		return make(map[string]any), nil
 	}
-	var m map[string]interface{}
+	var m map[string]any
 	err := json.Unmarshal([]byte(jsonStr), &m)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal map: %w", err)
@@ -234,7 +234,7 @@ const rawMemoryColumns = `id, timestamp, source, type, content, metadata, heuris
 func scanRawMemory(row *sql.Row) (store.RawMemory, error) {
 	var raw store.RawMemory
 	var metadataStr sql.NullString
-	var processedVal interface{}
+	var processedVal any
 	var project, sessionID sql.NullString
 
 	err := row.Scan(
@@ -278,7 +278,7 @@ func scanRawMemory(row *sql.Row) (store.RawMemory, error) {
 		}
 		raw.Metadata = m
 	} else {
-		raw.Metadata = make(map[string]interface{})
+		raw.Metadata = make(map[string]any)
 	}
 
 	return raw, nil
@@ -292,7 +292,7 @@ func scanRawMemoryRows(rows *sql.Rows) ([]store.RawMemory, error) {
 	for rows.Next() {
 		var raw store.RawMemory
 		var metadataStr sql.NullString
-		var processedVal interface{}
+		var processedVal any
 		var project, sessionID sql.NullString
 
 		err := rows.Scan(
@@ -334,7 +334,7 @@ func scanRawMemoryRows(rows *sql.Rows) ([]store.RawMemory, error) {
 			}
 			raw.Metadata = m
 		} else {
-			raw.Metadata = make(map[string]interface{})
+			raw.Metadata = make(map[string]any)
 		}
 
 		rawMemories = append(rawMemories, raw)
@@ -557,7 +557,7 @@ func (s *SQLiteStore) CountRawUnprocessedByPathPatterns(ctx context.Context, pat
 	}
 
 	conditions := make([]string, len(patterns))
-	args := make([]interface{}, len(patterns))
+	args := make([]any, len(patterns))
 	for i, p := range patterns {
 		conditions[i] = "json_extract(metadata, '$.path') LIKE ?"
 		args[i] = "%" + p + "%"
@@ -583,7 +583,7 @@ func (s *SQLiteStore) BulkMarkRawProcessedByPathPatterns(ctx context.Context, pa
 	}
 
 	conditions := make([]string, len(patterns))
-	args := make([]interface{}, len(patterns))
+	args := make([]any, len(patterns))
 	for i, p := range patterns {
 		conditions[i] = "json_extract(metadata, '$.path') LIKE ?"
 		args[i] = "%" + p + "%"
@@ -613,7 +613,7 @@ func (s *SQLiteStore) ArchiveMemoriesByRawPathPatterns(ctx context.Context, patt
 	}
 
 	conditions := make([]string, len(patterns))
-	args := make([]interface{}, len(patterns))
+	args := make([]any, len(patterns))
 	for i, p := range patterns {
 		conditions[i] = "json_extract(r.metadata, '$.path') LIKE ?"
 		args[i] = "%" + p + "%"
@@ -805,7 +805,7 @@ func (s *SQLiteStore) WriteMemory(ctx context.Context, mem store.Memory) error {
 	`
 
 	// Convert empty episode ID to nil so FK constraint allows NULL
-	var episodeID interface{}
+	var episodeID any
 	if mem.EpisodeID != "" {
 		episodeID = mem.EpisodeID
 	}
@@ -1086,20 +1086,20 @@ func (s *SQLiteStore) IncrementAccess(ctx context.Context, id string) error {
 // ListMemories lists memories with pagination.
 func (s *SQLiteStore) ListMemories(ctx context.Context, state string, limit, offset int) ([]store.Memory, error) {
 	var query string
-	var args []interface{}
+	var args []any
 
 	if state == "" {
 		query = `
 		SELECT ` + memoryColumns + `
 		FROM memories ORDER BY created_at DESC LIMIT ? OFFSET ?
 		`
-		args = []interface{}{limit, offset}
+		args = []any{limit, offset}
 	} else {
 		query = `
 		SELECT ` + memoryColumns + `
 		FROM memories WHERE state = ? ORDER BY created_at DESC LIMIT ? OFFSET ?
 		`
-		args = []interface{}{state, limit, offset}
+		args = []any{state, limit, offset}
 	}
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -1213,7 +1213,7 @@ func (s *SQLiteStore) SearchByEmbedding(ctx context.Context, embedding []float32
 
 	// Batch-fetch all matched memories in a single query
 	placeholders := make([]string, len(matches))
-	args := make([]interface{}, len(matches))
+	args := make([]any, len(matches))
 	scoreByID := make(map[string]float32, len(matches))
 	orderByID := make(map[string]int, len(matches))
 	for i, m := range matches {
@@ -1288,7 +1288,7 @@ func (s *SQLiteStore) SearchByConceptsInProject(ctx context.Context, concepts []
 		return []store.Memory{}, nil
 	}
 
-	args := []interface{}{ftsQuery}
+	args := []any{ftsQuery}
 	query := `
 	SELECT ` + aliasedMemoryColumns("m") + `
 	FROM memories m
@@ -1573,7 +1573,7 @@ func (s *SQLiteStore) BatchMergeMemories(ctx context.Context, sourceIDs []string
 	`
 
 	// Convert empty episode ID to nil so FK constraint allows NULL
-	var gistEpisodeID interface{}
+	var gistEpisodeID any
 	if gist.EpisodeID != "" {
 		gistEpisodeID = gist.EpisodeID
 	}
@@ -2061,7 +2061,7 @@ func (s *SQLiteStore) GetAssociationsForMemoryIDs(ctx context.Context, memoryIDs
 		chunk := memoryIDs[start:end]
 
 		placeholders := make([]string, len(chunk))
-		args := make([]interface{}, 0, len(chunk)*2)
+		args := make([]any, 0, len(chunk)*2)
 		for i, id := range chunk {
 			placeholders[i] = "?"
 			args = append(args, id)
@@ -2596,7 +2596,7 @@ func (s *SQLiteStore) SetMeta(ctx context.Context, key, value string) error {
 // Helper functions
 
 // nullableString converts an empty string to nil for SQL NULL, or returns the string.
-func nullableString(s string) interface{} {
+func nullableString(s string) any {
 	if s == "" {
 		return nil
 	}

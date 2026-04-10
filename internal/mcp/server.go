@@ -27,17 +27,17 @@ import (
 // JSONRPCRequest is a JSON-RPC 2.0 request.
 type JSONRPCRequest struct {
 	JSONRPC string          `json:"jsonrpc"`
-	ID      interface{}     `json:"id,omitempty"`
+	ID      any             `json:"id,omitempty"`
 	Method  string          `json:"method"`
 	Params  json.RawMessage `json:"params,omitempty"`
 }
 
 // JSONRPCResponse is a JSON-RPC 2.0 response.
 type JSONRPCResponse struct {
-	JSONRPC string      `json:"jsonrpc"`
-	ID      interface{} `json:"id,omitempty"`
-	Result  interface{} `json:"result,omitempty"`
-	Error   *rpcError   `json:"error,omitempty"`
+	JSONRPC string    `json:"jsonrpc"`
+	ID      any       `json:"id,omitempty"`
+	Result  any       `json:"result,omitempty"`
+	Error   *rpcError `json:"error,omitempty"`
 }
 
 type rpcError struct {
@@ -254,12 +254,12 @@ func (srv *MCPServer) handleRequest(ctx context.Context, req *JSONRPCRequest) *J
 
 // handleInitialize returns the MCP initialization response.
 func (srv *MCPServer) handleInitialize(req *JSONRPCRequest) *JSONRPCResponse {
-	result := map[string]interface{}{
+	result := map[string]any{
 		"protocolVersion": "2024-11-05",
-		"capabilities": map[string]interface{}{
-			"tools": map[string]interface{}{},
+		"capabilities": map[string]any{
+			"tools": map[string]any{},
 		},
-		"serverInfo": map[string]interface{}{
+		"serverInfo": map[string]any{
 			"name":    "mnemonic",
 			"version": srv.version,
 		},
@@ -269,14 +269,14 @@ func (srv *MCPServer) handleInitialize(req *JSONRPCRequest) *JSONRPCResponse {
 
 // ToolDefinition describes an MCP tool.
 type ToolDefinition struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	InputSchema map[string]interface{} `json:"inputSchema"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	InputSchema map[string]any `json:"inputSchema"`
 }
 
 // handleToolsList returns the list of available tools.
 func (srv *MCPServer) handleToolsList(req *JSONRPCRequest) *JSONRPCResponse {
-	result := map[string]interface{}{
+	result := map[string]any{
 		"tools": allToolDefs(),
 	}
 
@@ -285,8 +285,8 @@ func (srv *MCPServer) handleToolsList(req *JSONRPCRequest) *JSONRPCResponse {
 
 // toolCallParams represents the parameters for a tools/call request.
 type toolCallParams struct {
-	Name      string                 `json:"name"`
-	Arguments map[string]interface{} `json:"arguments"`
+	Name      string         `json:"name"`
+	Arguments map[string]any `json:"arguments"`
 }
 
 // handleToolCall dispatches tool calls to their respective handlers.
@@ -297,7 +297,7 @@ func (srv *MCPServer) handleToolCall(ctx context.Context, req *JSONRPCRequest) *
 	}
 
 	start := time.Now()
-	var result interface{}
+	var result any
 	var toolErr error
 
 	switch params.Name {
@@ -364,7 +364,7 @@ func (srv *MCPServer) handleToolCall(ctx context.Context, req *JSONRPCRequest) *
 }
 
 // recordToolUsage logs metrics for an MCP tool invocation.
-func (srv *MCPServer) recordToolUsage(ctx context.Context, params toolCallParams, start time.Time, result interface{}, toolErr error) {
+func (srv *MCPServer) recordToolUsage(ctx context.Context, params toolCallParams, start time.Time, result any, toolErr error) {
 	rec := store.ToolUsageRecord{
 		Timestamp: start,
 		ToolName:  params.Name,
@@ -410,7 +410,7 @@ func (srv *MCPServer) recordToolUsage(ctx context.Context, params toolCallParams
 			srv.checkAcceptance(result)
 		case "feedback":
 			if ids, ok := params.Arguments["memory_ids"]; ok {
-				if idList, ok := ids.([]interface{}); ok {
+				if idList, ok := ids.([]any); ok {
 					for _, id := range idList {
 						if idStr, ok := id.(string); ok {
 							if _, suggested := srv.contextSuggestedIDs[idStr]; suggested {
@@ -431,7 +431,7 @@ func (srv *MCPServer) recordToolUsage(ctx context.Context, params toolCallParams
 
 // checkAcceptance scans a recall result for memory IDs that were previously
 // suggested by get_context and marks them as accepted.
-func (srv *MCPServer) checkAcceptance(result interface{}) {
+func (srv *MCPServer) checkAcceptance(result any) {
 	// The result is a toolResult map with "content" containing text.
 	// Memory IDs appear as UUIDs in the text output — scan for matches.
 	resultBytes, err := json.Marshal(result)
@@ -448,7 +448,7 @@ func (srv *MCPServer) checkAcceptance(result interface{}) {
 }
 
 // handleRemember stores a new memory in the system.
-func (srv *MCPServer) handleRemember(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+func (srv *MCPServer) handleRemember(ctx context.Context, args map[string]any) (any, error) {
 	text, ok := args["text"].(string)
 	if !ok || text == "" {
 		return nil, fmt.Errorf("text parameter is required and must be a string")
@@ -472,9 +472,9 @@ func (srv *MCPServer) handleRemember(ctx context.Context, args map[string]interf
 	// Parse optional explicit associations.
 	var explicitAssoc []map[string]string
 	var invalidAssocIDs []string
-	if rawAssoc, ok := args["associate_with"].([]interface{}); ok {
+	if rawAssoc, ok := args["associate_with"].([]any); ok {
 		for _, entry := range rawAssoc {
-			if m, ok := entry.(map[string]interface{}); ok {
+			if m, ok := entry.(map[string]any); ok {
 				memID, _ := m["memory_id"].(string)
 				relation, _ := m["relation"].(string)
 				if memID != "" && relation != "" {
@@ -492,7 +492,7 @@ func (srv *MCPServer) handleRemember(ctx context.Context, args map[string]interf
 		}
 	}
 
-	metadata := map[string]interface{}{
+	metadata := map[string]any{
 		"mcp_session_id": srv.sessionID,
 		"memory_type":    memType,
 		"project":        project,
@@ -577,7 +577,7 @@ func (srv *MCPServer) syncActivityFromDaemon() {
 // handleRecall retrieves memories using semantic search and spread activation.
 // All recall paths (project-scoped, concept-filtered, default) go through the
 // retrieval agent for spread activation and synthesis.
-func (srv *MCPServer) handleRecall(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+func (srv *MCPServer) handleRecall(ctx context.Context, args map[string]any) (any, error) {
 	srv.syncActivityFromDaemon()
 
 	query, ok := args["query"].(string)
@@ -617,7 +617,7 @@ func (srv *MCPServer) handleRecall(ctx context.Context, args map[string]interfac
 	}
 
 	var concepts []string
-	if c, ok := args["concepts"].([]interface{}); ok {
+	if c, ok := args["concepts"].([]any); ok {
 		for _, v := range c {
 			if s, ok := v.(string); ok {
 				concepts = append(concepts, s)
@@ -626,7 +626,7 @@ func (srv *MCPServer) handleRecall(ctx context.Context, args map[string]interfac
 	}
 
 	var excludeConcepts []string
-	if c, ok := args["exclude_concepts"].([]interface{}); ok {
+	if c, ok := args["exclude_concepts"].([]any); ok {
 		for _, v := range c {
 			if s, ok := v.(string); ok {
 				excludeConcepts = append(excludeConcepts, s)
@@ -650,7 +650,7 @@ func (srv *MCPServer) handleRecall(ctx context.Context, args map[string]interfac
 	}
 
 	// Parse types (plural) — overrides type (singular) if set
-	if types, ok := args["types"].([]interface{}); ok && len(types) > 0 {
+	if types, ok := args["types"].([]any); ok && len(types) > 0 {
 		var typeStrs []string
 		for _, v := range types {
 			if s, ok := v.(string); ok {
@@ -860,10 +860,10 @@ func (srv *MCPServer) handleRecall(ctx context.Context, args map[string]interfac
 
 // formatRecallJSON builds a structured map from retrieval results.
 // assocMap is optional — when non-nil, associations are included per memory.
-func formatRecallJSON(result retrieval.QueryResponse, assocMap map[string][]store.Association) map[string]interface{} {
-	memories := make([]map[string]interface{}, len(result.Memories))
+func formatRecallJSON(result retrieval.QueryResponse, assocMap map[string][]store.Association) map[string]any {
+	memories := make([]map[string]any, len(result.Memories))
 	for i, m := range result.Memories {
-		memories[i] = map[string]interface{}{
+		memories[i] = map[string]any{
 			"id":           m.Memory.ID,
 			"raw_id":       m.Memory.RawID,
 			"score":        m.Score,
@@ -886,10 +886,10 @@ func formatRecallJSON(result retrieval.QueryResponse, assocMap map[string][]stor
 				if len(assocs) < limit {
 					limit = len(assocs)
 				}
-				jsonAssocs := make([]map[string]interface{}, limit)
+				jsonAssocs := make([]map[string]any, limit)
 				for j := 0; j < limit; j++ {
 					a := assocs[j]
-					jsonAssocs[j] = map[string]interface{}{
+					jsonAssocs[j] = map[string]any{
 						"target_id":     a.TargetID,
 						"strength":      a.Strength,
 						"relation_type": a.RelationType,
@@ -900,9 +900,9 @@ func formatRecallJSON(result retrieval.QueryResponse, assocMap map[string][]stor
 		}
 	}
 
-	patterns := make([]map[string]interface{}, len(result.Patterns))
+	patterns := make([]map[string]any, len(result.Patterns))
 	for i, p := range result.Patterns {
-		patterns[i] = map[string]interface{}{
+		patterns[i] = map[string]any{
 			"id":          p.ID,
 			"title":       p.Title,
 			"type":        p.PatternType,
@@ -911,9 +911,9 @@ func formatRecallJSON(result retrieval.QueryResponse, assocMap map[string][]stor
 		}
 	}
 
-	abstractions := make([]map[string]interface{}, len(result.Abstractions))
+	abstractions := make([]map[string]any, len(result.Abstractions))
 	for i, a := range result.Abstractions {
-		abstractions[i] = map[string]interface{}{
+		abstractions[i] = map[string]any{
 			"id":          a.ID,
 			"title":       a.Title,
 			"level":       a.Level,
@@ -922,7 +922,7 @@ func formatRecallJSON(result retrieval.QueryResponse, assocMap map[string][]stor
 		}
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"query_id":     result.QueryID,
 		"memories":     memories,
 		"patterns":     patterns,
@@ -933,10 +933,10 @@ func formatRecallJSON(result retrieval.QueryResponse, assocMap map[string][]stor
 }
 
 // formatMemoriesJSON builds a JSON array from a slice of memories (for recall_project, recall_timeline, recall_session).
-func formatMemoriesJSON(memories []store.Memory) []map[string]interface{} {
-	result := make([]map[string]interface{}, len(memories))
+func formatMemoriesJSON(memories []store.Memory) []map[string]any {
+	result := make([]map[string]any, len(memories))
 	for i, m := range memories {
-		result[i] = map[string]interface{}{
+		result[i] = map[string]any{
 			"id":           m.ID,
 			"raw_id":       m.RawID,
 			"summary":      m.Summary,
@@ -956,10 +956,10 @@ func formatMemoriesJSON(memories []store.Memory) []map[string]interface{} {
 }
 
 // formatPatternsJSON builds a JSON array from a slice of patterns.
-func formatPatternsJSON(patterns []store.Pattern) []map[string]interface{} {
-	result := make([]map[string]interface{}, len(patterns))
+func formatPatternsJSON(patterns []store.Pattern) []map[string]any {
+	result := make([]map[string]any, len(patterns))
 	for i, p := range patterns {
-		result[i] = map[string]interface{}{
+		result[i] = map[string]any{
 			"title":       p.Title,
 			"type":        p.PatternType,
 			"strength":    p.Strength,
@@ -972,10 +972,10 @@ func formatPatternsJSON(patterns []store.Pattern) []map[string]interface{} {
 }
 
 // handleBatchRecall runs multiple recall queries in parallel and returns combined JSON results.
-func (srv *MCPServer) handleBatchRecall(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+func (srv *MCPServer) handleBatchRecall(ctx context.Context, args map[string]any) (any, error) {
 	srv.syncActivityFromDaemon()
 
-	queriesRaw, ok := args["queries"].([]interface{})
+	queriesRaw, ok := args["queries"].([]any)
 	if !ok || len(queriesRaw) == 0 {
 		return nil, fmt.Errorf("queries parameter is required and must be a non-empty array")
 	}
@@ -987,14 +987,14 @@ func (srv *MCPServer) handleBatchRecall(ctx context.Context, args map[string]int
 	type batchResult struct {
 		Index int
 		Query string
-		Data  map[string]interface{}
+		Data  map[string]any
 		Err   error
 	}
 
 	results := make(chan batchResult, len(queriesRaw))
 
 	for i, qRaw := range queriesRaw {
-		qMap, ok := qRaw.(map[string]interface{})
+		qMap, ok := qRaw.(map[string]any)
 		if !ok {
 			results <- batchResult{Index: i, Err: fmt.Errorf("query %d: invalid format", i)}
 			continue
@@ -1006,7 +1006,7 @@ func (srv *MCPServer) handleBatchRecall(ctx context.Context, args map[string]int
 			continue
 		}
 
-		go func(idx int, q string, qArgs map[string]interface{}) {
+		go func(idx int, q string, qArgs map[string]any) {
 			limit := 5
 			if l, ok := qArgs["limit"].(float64); ok {
 				limit = int(l)
@@ -1053,11 +1053,11 @@ func (srv *MCPServer) handleBatchRecall(ctx context.Context, args map[string]int
 	}
 
 	// Collect results in order.
-	collected := make([]map[string]interface{}, len(queriesRaw))
+	collected := make([]map[string]any, len(queriesRaw))
 	for range queriesRaw {
 		r := <-results
 		if r.Err != nil {
-			collected[r.Index] = map[string]interface{}{
+			collected[r.Index] = map[string]any{
 				"query": r.Query,
 				"error": r.Err.Error(),
 			}
@@ -1067,7 +1067,7 @@ func (srv *MCPServer) handleBatchRecall(ctx context.Context, args map[string]int
 		}
 	}
 
-	jsonBytes, err := json.Marshal(map[string]interface{}{
+	jsonBytes, err := json.Marshal(map[string]any{
 		"results": collected,
 	})
 	if err != nil {
@@ -1081,7 +1081,7 @@ func (srv *MCPServer) handleBatchRecall(ctx context.Context, args map[string]int
 // handleGetContext returns proactive memory suggestions based on recent daemon activity.
 // It reads recent watcher events from the DB, extracts concepts, and finds related
 // encoded memories the agent hasn't already recalled this session.
-func (srv *MCPServer) handleGetContext(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+func (srv *MCPServer) handleGetContext(ctx context.Context, args map[string]any) (any, error) {
 	sinceMinutes := 10
 	if m, ok := args["since_minutes"].(float64); ok && int(m) > 0 {
 		sinceMinutes = int(m)
@@ -1325,7 +1325,7 @@ func (srv *MCPServer) handleGetContext(ctx context.Context, args map[string]inte
 
 	// Format output.
 	if outputFormat == "json" {
-		jsonResp := map[string]interface{}{
+		jsonResp := map[string]any{
 			"recent_events": len(relevant),
 			"themes":        topConcepts,
 			"suggestions":   formatMemoriesJSON(suggestions),
@@ -1412,13 +1412,13 @@ func formatDuration(d time.Duration) string {
 }
 
 // handleForget archives a memory by ID.
-func (srv *MCPServer) handleForget(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+func (srv *MCPServer) handleForget(ctx context.Context, args map[string]any) (any, error) {
 	// Collect IDs from memory_id (string) and/or memory_ids (array).
 	var ids []string
 	if singleID, ok := args["memory_id"].(string); ok && singleID != "" {
 		ids = append(ids, singleID)
 	}
-	if rawIDs, ok := args["memory_ids"].([]interface{}); ok {
+	if rawIDs, ok := args["memory_ids"].([]any); ok {
 		for _, raw := range rawIDs {
 			if id, ok := raw.(string); ok && id != "" {
 				ids = append(ids, id)
@@ -1461,7 +1461,7 @@ func (srv *MCPServer) handleForget(ctx context.Context, args map[string]interfac
 }
 
 // handleStatus returns system statistics and health information.
-func (srv *MCPServer) handleStatus(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+func (srv *MCPServer) handleStatus(ctx context.Context, args map[string]any) (any, error) {
 	stats, err := srv.store.GetStatistics(ctx)
 	if err != nil {
 		srv.log.Error("failed to get statistics", "error", err)
@@ -1568,7 +1568,7 @@ func (srv *MCPServer) handleStatus(ctx context.Context, args map[string]interfac
 
 // handleRecallProject retrieves project-scoped memories with an activity summary.
 // Routes through the retrieval agent for spread activation and synthesis.
-func (srv *MCPServer) handleRecallProject(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+func (srv *MCPServer) handleRecallProject(ctx context.Context, args map[string]any) (any, error) {
 	srv.syncActivityFromDaemon()
 
 	project := srv.project
@@ -1682,7 +1682,7 @@ func (srv *MCPServer) handleRecallProject(ctx context.Context, args map[string]i
 	srv.log.Info("project recall completed", "project", project)
 
 	if outputFormat == "json" {
-		jsonResp := map[string]interface{}{
+		jsonResp := map[string]any{
 			"project":  project,
 			"summary":  summary,
 			"patterns": formatPatternsJSON(patterns),
@@ -1712,7 +1712,7 @@ func (srv *MCPServer) handleRecallProject(ctx context.Context, args map[string]i
 }
 
 // handleRecallTimeline retrieves memories in chronological order within a time range.
-func (srv *MCPServer) handleRecallTimeline(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+func (srv *MCPServer) handleRecallTimeline(ctx context.Context, args map[string]any) (any, error) {
 	hoursBack := 24
 	if h, ok := args["hours_back"].(float64); ok {
 		hoursBack = int(h)
@@ -1744,7 +1744,7 @@ func (srv *MCPServer) handleRecallTimeline(ctx context.Context, args map[string]
 	srv.log.Info("timeline recall completed", "hours_back", hoursBack, "memories", len(filtered))
 
 	if outputFormat == "json" {
-		jsonResp := map[string]interface{}{
+		jsonResp := map[string]any{
 			"hours_back": hoursBack,
 			"memories":   formatMemoriesJSON(filtered),
 		}
@@ -1770,7 +1770,7 @@ func (srv *MCPServer) handleRecallTimeline(ctx context.Context, args map[string]
 }
 
 // handleSessionSummary summarizes the current or specified session.
-func (srv *MCPServer) handleSessionSummary(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+func (srv *MCPServer) handleSessionSummary(ctx context.Context, args map[string]any) (any, error) {
 	sessionID := srv.sessionID
 	if s, ok := args["session_id"].(string); ok && s != "" {
 		sessionID = s
@@ -1850,7 +1850,7 @@ func (srv *MCPServer) handleSessionSummary(ctx context.Context, args map[string]
 }
 
 // handleGetPatterns retrieves discovered patterns.
-func (srv *MCPServer) handleGetPatterns(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+func (srv *MCPServer) handleGetPatterns(ctx context.Context, args map[string]any) (any, error) {
 	project := ""
 	if p, ok := args["project"].(string); ok {
 		project = p
@@ -1904,7 +1904,7 @@ func (srv *MCPServer) handleGetPatterns(ctx context.Context, args map[string]int
 }
 
 // handleGetInsights returns metacognition observations and abstractions.
-func (srv *MCPServer) handleGetInsights(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+func (srv *MCPServer) handleGetInsights(ctx context.Context, args map[string]any) (any, error) {
 	limit := 10
 	if l, ok := args["limit"].(float64); ok {
 		limit = int(l)
@@ -1959,7 +1959,7 @@ func (srv *MCPServer) handleGetInsights(ctx context.Context, args map[string]int
 // srv.memDefaults.FeedbackStrengthDelta and srv.memDefaults.FeedbackSalienceBoost are now on srv.memDefaults.
 
 // handleFeedback records quality feedback for a recall result and adjusts association strengths.
-func (srv *MCPServer) handleFeedback(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+func (srv *MCPServer) handleFeedback(ctx context.Context, args map[string]any) (any, error) {
 	query, ok := args["query"].(string)
 	if !ok || query == "" {
 		return nil, fmt.Errorf("query parameter is required")
@@ -1971,7 +1971,7 @@ func (srv *MCPServer) handleFeedback(ctx context.Context, args map[string]interf
 	}
 
 	var memoryIDs []string
-	if ids, ok := args["memory_ids"].([]interface{}); ok {
+	if ids, ok := args["memory_ids"].([]any); ok {
 		for _, v := range ids {
 			if s, ok := v.(string); ok {
 				memoryIDs = append(memoryIDs, s)
@@ -1986,7 +1986,7 @@ func (srv *MCPServer) handleFeedback(ctx context.Context, args map[string]interf
 		ID:              uuid.New().String(),
 		ObservationType: "retrieval_feedback",
 		Severity:        "info",
-		Details: map[string]interface{}{
+		Details: map[string]any{
 			"query":      query,
 			"quality":    quality,
 			"memory_ids": memoryIDs,
@@ -2140,7 +2140,7 @@ func (srv *MCPServer) handleFeedback(ctx context.Context, args map[string]interf
 }
 
 // handleAuditEncodings returns recent raw→encoded memory pairs for quality review.
-func (srv *MCPServer) handleAuditEncodings(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+func (srv *MCPServer) handleAuditEncodings(ctx context.Context, args map[string]any) (any, error) {
 	limit := 5
 	if l, ok := args["limit"].(float64); ok && int(l) > 0 {
 		limit = int(l)
@@ -2231,14 +2231,14 @@ func (srv *MCPServer) handleAuditEncodings(ctx context.Context, args map[string]
 }
 
 // handleCoachLocalLLM writes coaching instructions for the local LLM.
-func (srv *MCPServer) handleCoachLocalLLM(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+func (srv *MCPServer) handleCoachLocalLLM(ctx context.Context, args map[string]any) (any, error) {
 	coachingYAML, ok := args["coaching_yaml"].(string)
 	if !ok || strings.TrimSpace(coachingYAML) == "" {
 		return nil, fmt.Errorf("coaching_yaml parameter is required and must be a non-empty string")
 	}
 
 	// Validate: must be parseable YAML with a 'coaching' key
-	var check map[string]interface{}
+	var check map[string]any
 	if err := json.Unmarshal([]byte(coachingYAML), &check); err != nil {
 		// Not JSON — try YAML parsing via a simpler check
 		// We can't import yaml in mcp package easily, so validate structure via json roundtrip
@@ -2289,7 +2289,7 @@ func (srv *MCPServer) handleCoachLocalLLM(ctx context.Context, args map[string]i
 }
 
 // handleIngestProject ingests a local directory into the memory system.
-func (srv *MCPServer) handleIngestProject(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+func (srv *MCPServer) handleIngestProject(ctx context.Context, args map[string]any) (any, error) {
 	directory, ok := args["directory"].(string)
 	if !ok || directory == "" {
 		return nil, fmt.Errorf("directory parameter is required and must be a string")
@@ -2360,7 +2360,7 @@ func (srv *MCPServer) handleIngestProject(ctx context.Context, args map[string]i
 // Helper functions
 
 // errorResponse creates a JSON-RPC error response.
-func errorResponse(id interface{}, code int, message string) *JSONRPCResponse {
+func errorResponse(id any, code int, message string) *JSONRPCResponse {
 	return &JSONRPCResponse{
 		JSONRPC: "2.0",
 		ID:      id,
@@ -2372,7 +2372,7 @@ func errorResponse(id interface{}, code int, message string) *JSONRPCResponse {
 }
 
 // successResponse creates a JSON-RPC success response.
-func successResponse(id interface{}, result interface{}) *JSONRPCResponse {
+func successResponse(id any, result any) *JSONRPCResponse {
 	return &JSONRPCResponse{
 		JSONRPC: "2.0",
 		ID:      id,
@@ -2381,9 +2381,9 @@ func successResponse(id interface{}, result interface{}) *JSONRPCResponse {
 }
 
 // toolResult creates an MCP tool result with text content.
-func toolResult(text string) map[string]interface{} {
-	return map[string]interface{}{
-		"content": []map[string]interface{}{
+func toolResult(text string) map[string]any {
+	return map[string]any{
+		"content": []map[string]any{
 			{
 				"type": "text",
 				"text": text,
@@ -2393,9 +2393,9 @@ func toolResult(text string) map[string]interface{} {
 }
 
 // toolError creates an MCP tool error result.
-func toolError(text string) map[string]interface{} {
-	return map[string]interface{}{
-		"content": []map[string]interface{}{
+func toolError(text string) map[string]any {
+	return map[string]any{
+		"content": []map[string]any{
 			{
 				"type": "text",
 				"text": fmt.Sprintf("Error: %s", text),
@@ -2406,7 +2406,7 @@ func toolError(text string) map[string]interface{} {
 }
 
 // parseRecallFilters extracts optional source/state/min_salience from MCP args.
-func parseRecallFilters(args map[string]interface{}) (source, state, memType string, minSalience float32) {
+func parseRecallFilters(args map[string]any) (source, state, memType string, minSalience float32) {
 	if s, ok := args["source"].(string); ok {
 		source = s
 	}
@@ -2475,7 +2475,7 @@ func (srv *MCPServer) onSessionEnd(ctx context.Context) {
 		ID:              fmt.Sprintf("session-end-%s", srv.sessionID),
 		ObservationType: "session_end",
 		Severity:        "info",
-		Details: map[string]interface{}{
+		Details: map[string]any{
 			"session_id":       srv.sessionID,
 			"project":          srv.project,
 			"memories_created": memCount,
@@ -2500,7 +2500,7 @@ func (srv *MCPServer) onSessionEnd(ctx context.Context) {
 }
 
 // handleListSessions returns recent MCP sessions with metadata.
-func (srv *MCPServer) handleListSessions(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+func (srv *MCPServer) handleListSessions(ctx context.Context, args map[string]any) (any, error) {
 	limit := 10
 	if l, ok := args["limit"].(float64); ok && int(l) > 0 {
 		limit = int(l)
@@ -2534,7 +2534,7 @@ func (srv *MCPServer) handleListSessions(ctx context.Context, args map[string]in
 }
 
 // handleRecallSession retrieves all memories from a specific session.
-func (srv *MCPServer) handleRecallSession(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+func (srv *MCPServer) handleRecallSession(ctx context.Context, args map[string]any) (any, error) {
 	sessionID, ok := args["session_id"].(string)
 	if !ok || sessionID == "" {
 		return nil, fmt.Errorf("session_id parameter is required")
@@ -2562,9 +2562,9 @@ func (srv *MCPServer) handleRecallSession(ctx context.Context, args map[string]i
 
 	if len(memories) == 0 {
 		if outputFormat == "json" {
-			jsonBytes, _ := json.Marshal(map[string]interface{}{
+			jsonBytes, _ := json.Marshal(map[string]any{
 				"session_id": sessionID,
-				"memories":   []interface{}{},
+				"memories":   []any{},
 			})
 			return toolResult(string(jsonBytes)), nil
 		}
@@ -2572,7 +2572,7 @@ func (srv *MCPServer) handleRecallSession(ctx context.Context, args map[string]i
 	}
 
 	if outputFormat == "json" {
-		jsonResp := map[string]interface{}{
+		jsonResp := map[string]any{
 			"session_id": sessionID,
 			"memories":   formatMemoriesJSON(memories),
 		}
@@ -2593,7 +2593,7 @@ func (srv *MCPServer) handleRecallSession(ctx context.Context, args map[string]i
 }
 
 // handleExcludePath adds a watcher exclusion pattern to the DB.
-func (srv *MCPServer) handleExcludePath(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+func (srv *MCPServer) handleExcludePath(ctx context.Context, args map[string]any) (any, error) {
 	pattern, ok := args["pattern"].(string)
 	if !ok || pattern == "" {
 		return nil, fmt.Errorf("pattern parameter is required")
@@ -2608,7 +2608,7 @@ func (srv *MCPServer) handleExcludePath(ctx context.Context, args map[string]int
 }
 
 // handleListExclusions returns all runtime watcher exclusion patterns.
-func (srv *MCPServer) handleListExclusions(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+func (srv *MCPServer) handleListExclusions(ctx context.Context, args map[string]any) (any, error) {
 	patterns, err := srv.store.ListRuntimeExclusions(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing exclusions: %w", err)
@@ -2627,7 +2627,7 @@ func (srv *MCPServer) handleListExclusions(ctx context.Context, args map[string]
 }
 
 // handleAmend updates a memory's content in place, preserving associations and history.
-func (srv *MCPServer) handleAmend(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+func (srv *MCPServer) handleAmend(ctx context.Context, args map[string]any) (any, error) {
 	rawID, _ := args["raw_id"].(string)
 	memoryID, _ := args["memory_id"].(string)
 
@@ -2683,7 +2683,7 @@ func (srv *MCPServer) handleAmend(ctx context.Context, args map[string]interface
 }
 
 // handleCheckMemory inspects a memory's encoding status, concepts, and associations.
-func (srv *MCPServer) handleCheckMemory(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+func (srv *MCPServer) handleCheckMemory(ctx context.Context, args map[string]any) (any, error) {
 	rawID, _ := args["raw_id"].(string)
 	memoryID, _ := args["memory_id"].(string)
 
@@ -2767,7 +2767,7 @@ func (srv *MCPServer) handleCheckMemory(ctx context.Context, args map[string]int
 }
 
 // handleDismissPattern archives a pattern by ID.
-func (srv *MCPServer) handleDismissPattern(_ context.Context, args map[string]interface{}) (interface{}, error) {
+func (srv *MCPServer) handleDismissPattern(_ context.Context, args map[string]any) (any, error) {
 	patternID, _ := args["pattern_id"].(string)
 	if patternID == "" {
 		return nil, fmt.Errorf("pattern_id is required")
@@ -2782,7 +2782,7 @@ func (srv *MCPServer) handleDismissPattern(_ context.Context, args map[string]in
 }
 
 // handleDismissAbstraction archives an abstraction by ID.
-func (srv *MCPServer) handleDismissAbstraction(_ context.Context, args map[string]interface{}) (interface{}, error) {
+func (srv *MCPServer) handleDismissAbstraction(_ context.Context, args map[string]any) (any, error) {
 	abstractionID, _ := args["abstraction_id"].(string)
 	if abstractionID == "" {
 		return nil, fmt.Errorf("abstraction_id is required")
@@ -2797,7 +2797,7 @@ func (srv *MCPServer) handleDismissAbstraction(_ context.Context, args map[strin
 }
 
 // handleCreateHandoff stores a structured session handoff note as a high-salience memory.
-func (srv *MCPServer) handleCreateHandoff(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+func (srv *MCPServer) handleCreateHandoff(ctx context.Context, args map[string]any) (any, error) {
 	// Parse all fields.
 	var completed, pending, toTest, knownIssues []string
 	for _, pair := range []struct {
@@ -2809,7 +2809,7 @@ func (srv *MCPServer) handleCreateHandoff(ctx context.Context, args map[string]i
 		{"to_test", &toTest},
 		{"known_issues", &knownIssues},
 	} {
-		if raw, ok := args[pair.key].([]interface{}); ok {
+		if raw, ok := args[pair.key].([]any); ok {
 			for _, v := range raw {
 				if s, ok := v.(string); ok && s != "" {
 					*pair.dest = append(*pair.dest, s)
@@ -2856,7 +2856,7 @@ func (srv *MCPServer) handleCreateHandoff(ctx context.Context, args map[string]i
 		Processed:       false,
 		Project:         srv.project,
 		SessionID:       srv.sessionID,
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"mcp_session_id":    srv.sessionID,
 			"memory_type":       "handoff",
 			"project":           srv.project,

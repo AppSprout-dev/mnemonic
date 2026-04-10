@@ -184,7 +184,7 @@ var queries = []benchQuery{
 
 var client = &http.Client{Timeout: 180 * time.Second}
 
-func postJSON(path string, body interface{}) ([]byte, int, error) {
+func postJSON(path string, body any) ([]byte, int, error) {
 	data, err := json.Marshal(body)
 	if err != nil {
 		return nil, 0, err
