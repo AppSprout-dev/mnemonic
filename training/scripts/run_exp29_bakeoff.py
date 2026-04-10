@@ -18,6 +18,9 @@ Usage:
 
     # Just generate the comparison report from existing results
     python run_exp29_bakeoff.py --report-only
+
+    # Run with GBNF grammar constraint
+    python run_exp29_bakeoff.py --model qwen35-4b --quant Q8_0 --grammar
 """
 
 import argparse
@@ -111,6 +114,55 @@ CANDIDATES = {
 # Chosen to cover: out-of-domain (#1 recipe), minimal (#15), production (#22 handoff)
 FEW_SHOT_IDS = [1, 15, 22]
 
+# GBNF grammar for encoding response — copied from internal/llm/grammar.go
+GBNF_ENCODING = r"""root ::= "{" ws gist-kv "," ws summary-kv "," ws content-kv "," ws narrative-kv "," ws concepts-kv "," ws structured-concepts-kv "," ws significance-kv "," ws emotional-tone-kv "," ws outcome-kv "," ws salience-kv ws "}"
+
+gist-kv              ::= "\"gist\"" ws ":" ws string
+summary-kv           ::= "\"summary\"" ws ":" ws string
+content-kv           ::= "\"content\"" ws ":" ws string
+narrative-kv         ::= "\"narrative\"" ws ":" ws string
+concepts-kv          ::= "\"concepts\"" ws ":" ws string-array
+structured-concepts-kv ::= "\"structured_concepts\"" ws ":" ws sc-object
+significance-kv      ::= "\"significance\"" ws ":" ws significance-enum
+emotional-tone-kv    ::= "\"emotional_tone\"" ws ":" ws tone-enum
+outcome-kv           ::= "\"outcome\"" ws ":" ws outcome-enum
+salience-kv          ::= "\"salience\"" ws ":" ws number
+
+significance-enum ::= "\"routine\"" | "\"notable\"" | "\"important\"" | "\"critical\""
+tone-enum         ::= "\"neutral\"" | "\"satisfying\"" | "\"frustrating\"" | "\"exciting\"" | "\"concerning\""
+outcome-enum      ::= "\"success\"" | "\"failure\"" | "\"ongoing\"" | "\"unknown\""
+
+string-array ::= "[" ws "]" | "[" ws string ("," ws string)* ws "]"
+
+sc-object    ::= "{" ws topics-kv "," ws entities-kv "," ws actions-kv "," ws causality-kv ws "}"
+topics-kv    ::= "\"topics\"" ws ":" ws topic-array
+entities-kv  ::= "\"entities\"" ws ":" ws entity-array
+actions-kv   ::= "\"actions\"" ws ":" ws action-array
+causality-kv ::= "\"causality\"" ws ":" ws causality-array
+
+topic-array     ::= "[" ws "]" | "[" ws topic-obj ("," ws topic-obj)* ws "]"
+topic-obj       ::= "{" ws "\"label\"" ws ":" ws string "," ws "\"path\"" ws ":" ws string ws "}"
+
+entity-array    ::= "[" ws "]" | "[" ws entity-obj ("," ws entity-obj)* ws "]"
+entity-obj      ::= "{" ws "\"name\"" ws ":" ws string "," ws "\"type\"" ws ":" ws string "," ws "\"context\"" ws ":" ws string ws "}"
+
+action-array    ::= "[" ws "]" | "[" ws action-obj ("," ws action-obj)* ws "]"
+action-obj      ::= "{" ws "\"verb\"" ws ":" ws string "," ws "\"object\"" ws ":" ws string "," ws "\"details\"" ws ":" ws string ws "}"
+
+causality-array ::= "[" ws "]" | "[" ws causality-obj ("," ws causality-obj)* ws "]"
+causality-obj   ::= "{" ws "\"relation\"" ws ":" ws string "," ws "\"description\"" ws ":" ws string ws "}"
+
+string ::=
+  "\"" (
+    [^\\"\x00-\x1f] |
+    "\\" (["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F])
+  )* "\""
+
+number ::= "-"? ("0" | [1-9] [0-9]*) ("." [0-9]+)? ([eE] [-+]? [0-9]+)?
+
+ws     ::= ([ \t\n] ws)?
+"""
+
 SERVER_PORT = 8080
 SERVER_URL = f"http://127.0.0.1:{SERVER_PORT}"
 LLAMA_SERVER = os.environ.get(
@@ -139,7 +191,9 @@ def find_llama_server() -> str:
     )
 
 
-def start_server(model_path: str, n_gpu_layers: int = 99) -> subprocess.Popen:
+def start_server(
+    model_path: str, n_gpu_layers: int = 99,
+) -> subprocess.Popen:
     """Start llama-server with a model and wait for it to be ready."""
     server_bin = find_llama_server()
     cmd = [
@@ -151,6 +205,7 @@ def start_server(model_path: str, n_gpu_layers: int = 99) -> subprocess.Popen:
         "--flash-attn", "on",
         "--parallel", "1",
     ]
+    # Grammar is passed per-request in the /completion payload, not server-level
 
     print(f"  Starting llama-server: {' '.join(cmd[:6])}...", flush=True)
     log_path = RESULTS_DIR / "llama_server.log"
@@ -198,19 +253,23 @@ def generate_encoding(
     mem_type: str,
     few_shot_examples: list[dict] | None = None,
     enable_thinking: bool = False,
+    use_grammar: bool = False,
 ) -> tuple[dict | None, dict]:
-    """Generate an encoding via the chat completions API.
+    """Generate an encoding via the chat completions API (or /completion with grammar).
 
     Uses /v1/chat/completions with each model's native chat template.
-    Supports thinking/no-thinking mode via chat_template_kwargs.
+    When use_grammar=True, falls back to /completion with grammar field since
+    --grammar-file only applies to the /completion endpoint in llama.cpp.
     Returns (parsed_json, metadata) where metadata includes timing info.
     """
-    # Build system message from production prompt (without the content part)
+    metadata = {"error": None, "latency_ms": 0, "tokens_generated": 0}
+
+    # Use /v1/chat/completions for all modes — grammar field is supported
+    # (undocumented but confirmed in llama.cpp server-common.cpp line 918)
     system_prompt = build_production_prompt("", source=source, mem_type=mem_type)
 
     messages = [{"role": "system", "content": system_prompt}]
 
-    # Add few-shot examples if provided
     if few_shot_examples:
         for ex in few_shot_examples:
             ex_content = (
@@ -224,7 +283,6 @@ def generate_encoding(
                 "content": json.dumps(ex["gold_output"], ensure_ascii=False),
             })
 
-    # Add the actual input
     user_content = f"SOURCE: {source}\nTYPE: {mem_type}\nCONTENT:\n{raw_input}"
     messages.append({"role": "user", "content": user_content})
 
@@ -235,8 +293,8 @@ def generate_encoding(
         "stop": ["\n\n\n"],
         "chat_template_kwargs": {"enable_thinking": enable_thinking},
     }
-
-    metadata = {"error": None, "latency_ms": 0, "tokens_generated": 0}
+    if use_grammar:
+        payload["grammar"] = GBNF_ENCODING
 
     try:
         t0 = time.monotonic()
@@ -287,6 +345,7 @@ def run_model_eval(
     model_key: str,
     quant: str,
     few_shot: int = 0,
+    use_grammar: bool = False,
 ) -> dict | None:
     """Run evaluation for a single model. Returns results dict or None on failure."""
     model_info = CANDIDATES[model_key]
@@ -300,10 +359,13 @@ def run_model_eval(
         print(f"  GGUF not found: {model_path}")
         return None
 
+    grammar_tag = "+grammar" if use_grammar else ""
     print(f"\n{'='*70}")
-    print(f"Evaluating: {model_info['name']} ({quant})")
+    print(f"Evaluating: {model_info['name']} ({quant}{grammar_tag})")
     print(f"  File: {gguf_file}")
     print(f"  Few-shot: {few_shot}")
+    if use_grammar:
+        print(f"  Grammar: GBNF encoding schema (enum-constrained)")
     print(f"{'='*70}")
 
     # Load gold data
@@ -327,7 +389,8 @@ def run_model_eval(
             print(f"  [{entry_id:>2}] {category}: ", end="", flush=True)
 
             output, metadata = generate_encoding(
-                raw_input, source, mem_type, few_shot_examples
+                raw_input, source, mem_type, few_shot_examples,
+                use_grammar=use_grammar,
             )
 
             if output:
@@ -347,6 +410,7 @@ def run_model_eval(
         evaluation["model_key"] = model_key
         evaluation["quant"] = quant
         evaluation["few_shot"] = few_shot
+        evaluation["grammar"] = use_grammar
         evaluation["params"] = model_info["params"]
         evaluation["family"] = model_info["family"]
         if latencies:
@@ -360,7 +424,8 @@ def run_model_eval(
         # Save results
         RESULTS_DIR.mkdir(parents=True, exist_ok=True)
         condition = f"{few_shot}shot" if few_shot > 0 else "0shot"
-        result_file = RESULTS_DIR / f"{model_key}_{quant}_{condition}.json"
+        grammar_suffix = "_grammar" if use_grammar else ""
+        result_file = RESULTS_DIR / f"{model_key}_{quant}_{condition}{grammar_suffix}.json"
         with open(result_file, "w") as f:
             json.dump(evaluation, f, indent=2, default=str)
         print(f"\n  Results saved: {result_file}")
@@ -481,6 +546,11 @@ def main():
         action="store_true",
         help="Just generate comparison report from existing results",
     )
+    parser.add_argument(
+        "--grammar",
+        action="store_true",
+        help="Enable GBNF grammar constraint for schema enforcement",
+    )
     args = parser.parse_args()
 
     if args.report_only:
@@ -491,7 +561,9 @@ def main():
 
     all_results = []
     for model_key in models:
-        result = run_model_eval(model_key, args.quant, args.few_shot)
+        result = run_model_eval(
+            model_key, args.quant, args.few_shot, use_grammar=args.grammar,
+        )
         if result:
             all_results.append(result)
 
