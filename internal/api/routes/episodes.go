@@ -35,7 +35,7 @@ func HandleListEpisodes(s store.Store, log *slog.Logger) http.HandlerFunc {
 			episodes = []store.Episode{}
 		}
 
-		writeJSON(w, http.StatusOK, map[string]interface{}{
+		writeJSON(w, http.StatusOK, map[string]any{
 			"episodes":  episodes,
 			"count":     len(episodes),
 			"limit":     limit,
@@ -84,7 +84,7 @@ func HandleGetEpisode(s store.Store, log *slog.Logger) http.HandlerFunc {
 			}
 		}
 
-		writeJSON(w, http.StatusOK, map[string]interface{}{
+		writeJSON(w, http.StatusOK, map[string]any{
 			"episode":   episode,
 			"memories":  memories,
 			"timestamp": time.Now().Format(time.RFC3339),
@@ -122,7 +122,7 @@ func HandleMemoryContext(s store.Store, log *slog.Logger) http.HandlerFunc {
 			return
 		}
 
-		response := map[string]interface{}{
+		response := map[string]any{
 			"memory":    mem,
 			"timestamp": time.Now().Format(time.RFC3339),
 		}

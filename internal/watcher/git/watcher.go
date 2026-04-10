@@ -237,7 +237,7 @@ func (gw *GitWatcher) checkAllRepos() {
 			Path:      repo,
 			Content:   content,
 			Timestamp: time.Now(),
-			Metadata: map[string]interface{}{
+			Metadata: map[string]any{
 				"repo": repo,
 			},
 		}

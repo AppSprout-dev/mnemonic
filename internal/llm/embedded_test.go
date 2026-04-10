@@ -283,10 +283,18 @@ func TestFormatPrompt(t *testing.T) {
 		{Role: "system", Content: "You are helpful."},
 		{Role: "user", Content: "Hello"},
 	}
-	got := formatPrompt(messages)
-	expected := "<|system|>\nYou are helpful.\n<|user|>\nHello\n<|assistant|>\n"
+	got := formatPrompt(messages, "chatml")
+	// ChatML format with /no_think for Qwen 3.5 thinking mode suppression
+	expected := "<|im_start|>system\nYou are helpful. /no_think<|im_end|>\n<|im_start|>user\nHello<|im_end|>\n<|im_start|>assistant\n"
 	if got != expected {
-		t.Errorf("formatPrompt mismatch:\ngot:  %q\nwant: %q", got, expected)
+		t.Errorf("formatPrompt(chatml) mismatch:\ngot:  %q\nwant: %q", got, expected)
+	}
+
+	// Gemma format — system role mapped to user turn
+	gotGemma := formatPrompt(messages, "gemma")
+	expectedGemma := "<start_of_turn>user\nYou are helpful.<end_of_turn>\n<start_of_turn>user\nHello<end_of_turn>\n<start_of_turn>model\n"
+	if gotGemma != expectedGemma {
+		t.Errorf("formatPrompt(gemma) mismatch:\ngot:  %q\nwant: %q", gotGemma, expectedGemma)
 	}
 }
 

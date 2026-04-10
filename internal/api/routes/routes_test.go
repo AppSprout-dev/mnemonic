@@ -220,7 +220,7 @@ func TestHandleCreateMemoryEmptyContent(t *testing.T) {
 			t.Fatalf("expected status 400, got %d", rr.Code)
 		}
 
-		var errResp map[string]interface{}
+		var errResp map[string]any
 		if err := json.NewDecoder(rr.Body).Decode(&errResp); err != nil {
 			t.Fatalf("failed to decode error response: %v", err)
 		}
@@ -264,7 +264,7 @@ func TestHandleCreateMemoryInvalidJSON(t *testing.T) {
 			t.Fatalf("expected status 400, got %d", rr.Code)
 		}
 
-		var errResp map[string]interface{}
+		var errResp map[string]any
 		if err := json.NewDecoder(rr.Body).Decode(&errResp); err != nil {
 			t.Fatalf("failed to decode error response: %v", err)
 		}
@@ -560,7 +560,7 @@ func TestHandleGetMemoryNotFound(t *testing.T) {
 			t.Fatalf("expected status 404, got %d; body: %s", rr.Code, rr.Body.String())
 		}
 
-		var errResp map[string]interface{}
+		var errResp map[string]any
 		if err := json.NewDecoder(rr.Body).Decode(&errResp); err != nil {
 			t.Fatalf("failed to decode error response: %v", err)
 		}
@@ -724,7 +724,7 @@ func TestHandleCreateMemoryStoreError(t *testing.T) {
 			t.Fatalf("expected status 500, got %d", rr.Code)
 		}
 
-		var errResp map[string]interface{}
+		var errResp map[string]any
 		if err := json.NewDecoder(rr.Body).Decode(&errResp); err != nil {
 			t.Fatalf("failed to decode error response: %v", err)
 		}

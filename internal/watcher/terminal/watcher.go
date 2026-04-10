@@ -314,7 +314,7 @@ func (tw *TerminalWatcher) sendEvent(command string) {
 		Type:      "command_executed",
 		Content:   command,
 		Timestamp: time.Now(),
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"shell": tw.cfg.Shell,
 		},
 	}

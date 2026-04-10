@@ -176,6 +176,13 @@ func (da *DreamingAgent) runCycle(ctx context.Context) (*DreamReport, error) {
 		da.log.Error("cross-project linking phase failed", "error", err)
 	}
 
+	// Phase 4.5: Reclassify experience buffer entries based on accumulated feedback
+	if reclassified, err := da.store.ReclassifyExperienceBuffer(ctx); err != nil && ctx.Err() == nil {
+		da.log.Error("experience buffer reclassification failed", "error", err)
+	} else if reclassified > 0 {
+		da.log.Info("reclassified experience buffer entries", "count", reclassified)
+	}
+
 	// Phase 5: Link replayed memories to matching patterns
 	if err := da.linkToPatterns(ctx, replayed, report); err != nil && ctx.Err() == nil {
 		da.log.Error("pattern linking phase failed", "error", err)

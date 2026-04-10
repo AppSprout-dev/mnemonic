@@ -440,7 +440,7 @@ func (fw *FilesystemWatcher) emitPollEvent(dir string) {
 		Type:      "dir_activity",
 		Path:      dir,
 		Timestamp: time.Now(),
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"detection": "polling",
 		},
 	}
@@ -553,7 +553,7 @@ func (fw *FilesystemWatcher) sendEvent(event fsnotify.Event) {
 		Path:      event.Name,
 		Content:   content,
 		Timestamp: time.Now(),
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"op": event.Op.String(),
 		},
 	}

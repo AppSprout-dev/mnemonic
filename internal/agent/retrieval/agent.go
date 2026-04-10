@@ -893,7 +893,7 @@ func (ra *RetrievalAgent) synthesisTools() []llm.Tool {
 
 // executeTool dispatches a tool call to the appropriate read-only Store method and returns the result as a string.
 func (ra *RetrievalAgent) executeTool(ctx context.Context, tc llm.ToolCall) string {
-	var args map[string]interface{}
+	var args map[string]any
 	if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
 		return fmt.Sprintf("Error parsing arguments: %v", err)
 	}
@@ -1170,7 +1170,7 @@ func ParseQueryConcepts(query string) []string {
 }
 
 // GetStats returns retrieval statistics.
-func (ra *RetrievalAgent) GetStats() map[string]interface{} {
+func (ra *RetrievalAgent) GetStats() map[string]any {
 	ra.mu.RLock()
 	defer ra.mu.RUnlock()
 
@@ -1179,7 +1179,7 @@ func (ra *RetrievalAgent) GetStats() map[string]interface{} {
 		avgMemoriesPerQuery = float64(ra.stats.TotalMemoriesHit) / float64(ra.stats.TotalQueries)
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"total_queries":            ra.stats.TotalQueries,
 		"total_memories_retrieved": ra.stats.TotalMemoriesHit,
 		"avg_memories_per_query":   avgMemoriesPerQuery,

@@ -1392,11 +1392,11 @@ func TestPollAndProcessRawMemories_SkipsExcludedPaths(t *testing.T) {
 			return []store.RawMemory{
 				{
 					ID: "venv-1", Content: "pip config", Source: "filesystem", Type: "file_modified",
-					Metadata: map[string]interface{}{"path": "/home/user/Projects/foo/.venv/lib/python3.12/site-packages/pip/config.py"},
+					Metadata: map[string]any{"path": "/home/user/Projects/foo/.venv/lib/python3.12/site-packages/pip/config.py"},
 				},
 				{
 					ID: "good-1", Content: "real code", Source: "user", Type: "explicit",
-					Metadata: map[string]interface{}{"path": "/home/user/Projects/foo/main.go"},
+					Metadata: map[string]any{"path": "/home/user/Projects/foo/main.go"},
 				},
 			}, nil
 		},

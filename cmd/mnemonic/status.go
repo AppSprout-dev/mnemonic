@@ -58,7 +58,7 @@ func statusCommand(configPath string) {
 		defer func() { _ = healthResp.Body.Close() }()
 		if healthResp.StatusCode == 200 {
 			apiReachable = true
-			var health map[string]interface{}
+			var health map[string]any
 			if json.NewDecoder(healthResp.Body).Decode(&health) == nil {
 				llmStatus, _ := health["llm"].(string)
 				storeStatus, _ := health["store"].(string)
@@ -90,9 +90,9 @@ func statusCommand(configPath string) {
 		statsResp, err := apiGet(apiBase+"/stats", cfg.API.Token)
 		if err == nil {
 			defer func() { _ = statsResp.Body.Close() }()
-			var data map[string]interface{}
+			var data map[string]any
 			if json.NewDecoder(statsResp.Body).Decode(&data) == nil {
-				s, _ := data["store"].(map[string]interface{})
+				s, _ := data["store"].(map[string]any)
 				if s == nil {
 					s = data
 				}
@@ -207,7 +207,7 @@ func statusCommand(configPath string) {
 }
 
 // intVal safely extracts an int from a JSON map.
-func intVal(m map[string]interface{}, key string) int {
+func intVal(m map[string]any, key string) int {
 	if v, ok := m[key]; ok {
 		switch n := v.(type) {
 		case float64:

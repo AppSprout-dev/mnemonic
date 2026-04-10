@@ -586,15 +586,15 @@ func computeContentHash(source, memType, content string) string {
 
 // mergeMetadata merges event metadata with additional fields.
 func (pa *PerceptionAgent) mergeMetadata(
-	eventMetadata map[string]interface{},
+	eventMetadata map[string]any,
 	path string,
 	heuristicScore float32,
-) map[string]interface{} {
+) map[string]any {
 	if eventMetadata == nil {
-		eventMetadata = make(map[string]interface{})
+		eventMetadata = make(map[string]any)
 	}
 
-	merged := make(map[string]interface{})
+	merged := make(map[string]any)
 	for k, v := range eventMetadata {
 		merged[k] = v
 	}

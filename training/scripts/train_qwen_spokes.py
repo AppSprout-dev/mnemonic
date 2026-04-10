@@ -169,19 +169,20 @@ def evaluate(model, eval_loader, device) -> float:
     total_loss = 0.0
     total_tokens = 0
 
-    for input_ids, labels, attention_mask in eval_loader:
-        input_ids = input_ids.to(device)
-        labels = labels.to(device)
-        attention_mask = attention_mask.to(device)
+    with torch.no_grad():
+        for input_ids, labels, attention_mask in eval_loader:
+            input_ids = input_ids.to(device)
+            labels = labels.to(device)
+            attention_mask = attention_mask.to(device)
 
-        # Don't pass labels — avoids HF internal loss materialization (~2GB for 248K vocab)
-        outputs = model(input_ids=input_ids, attention_mask=attention_mask)
-        loss_sum, n_tokens = chunked_cross_entropy(outputs.logits, labels)
+            # Don't pass labels — avoids HF internal loss materialization (~2GB for 248K vocab)
+            outputs = model(input_ids=input_ids, attention_mask=attention_mask)
+            loss_sum, n_tokens = chunked_cross_entropy(outputs.logits, labels)
 
-        total_loss += loss_sum.item()
-        total_tokens += n_tokens
+            total_loss += loss_sum.item()
+            total_tokens += n_tokens
 
-        del outputs
+            del outputs
 
     model.train()
     return total_loss / max(total_tokens, 1)

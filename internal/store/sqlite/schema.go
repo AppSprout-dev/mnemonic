@@ -10,7 +10,7 @@ import (
 // migration is added. It is written to PRAGMA user_version after InitSchema
 // completes, and read by the pre-migration backup logic to skip backups when
 // the schema is already current.
-const SchemaVersion = 15
+const SchemaVersion = 16
 
 const schema = `
 -- Raw observations before encoding
@@ -566,6 +566,51 @@ INSERT OR IGNORE INTO forum_categories (id, name, slug, description, icon, color
 
 	// Episode-memory backfill is handled by the episoding agent on episode close.
 	// No startup SQL backfill — the JSON LIKE scan is too slow on large DBs.
+
+	// Migration 016: Continuous learning — verification metrics + experience buffer + recall feedback (#391)
+	for _, col := range []struct{ column, def string }{
+		{"encoding_epr", "REAL DEFAULT NULL"},
+		{"encoding_fr", "REAL DEFAULT NULL"},
+		{"encoding_flags", "TEXT DEFAULT NULL"},
+	} {
+		_, err = db.Exec(fmt.Sprintf(`ALTER TABLE memories ADD COLUMN %s %s`, col.column, col.def))
+		if err != nil && !isAlterTableDuplicateColumn(err) {
+			return fmt.Errorf("failed to add memories.%s column: %w", col.column, err)
+		}
+	}
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS recall_feedback (
+		id TEXT PRIMARY KEY,
+		query TEXT NOT NULL,
+		memory_id TEXT NOT NULL,
+		feedback TEXT NOT NULL,
+		recall_session_id TEXT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (memory_id) REFERENCES memories(id)
+	)`); err != nil {
+		return fmt.Errorf("failed to create recall_feedback table: %w", err)
+	}
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_recall_feedback_memory ON recall_feedback(memory_id)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_recall_feedback_session ON recall_feedback(recall_session_id)`)
+
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS experience_buffer (
+		id TEXT PRIMARY KEY,
+		raw_id TEXT NOT NULL,
+		memory_id TEXT NOT NULL,
+		encoding_epr REAL,
+		encoding_fr REAL,
+		encoding_flags TEXT,
+		recall_score REAL,
+		recall_count INTEGER DEFAULT 0,
+		category TEXT DEFAULT 'ambiguous',
+		used_in_training INTEGER DEFAULT 0,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (memory_id) REFERENCES memories(id)
+	)`); err != nil {
+		return fmt.Errorf("failed to create experience_buffer table: %w", err)
+	}
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_experience_buffer_category ON experience_buffer(category)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_experience_buffer_memory ON experience_buffer(memory_id)`)
 
 	// Record the schema version so pre-migration backups can skip when current.
 	if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", SchemaVersion)); err != nil {

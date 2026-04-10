@@ -52,7 +52,7 @@ func (a *LogMetaObservationAction) Execute(ctx context.Context, _ events.Event, 
 		ID:              uuid.New().String(),
 		ObservationType: "autonomous_action",
 		Severity:        "info",
-		Details: map[string]interface{}{
+		Details: map[string]any{
 			"action":  a.ActionName,
 			"trigger": a.TriggerName,
 		},
@@ -426,8 +426,8 @@ func (a *RespondToMentionAction) Execute(ctx context.Context, trigger events.Eve
 	} else {
 		// Build context for the LLM
 		var systemPrompt strings.Builder
-		systemPrompt.WriteString(fmt.Sprintf("You are the %s (%s) of the Mnemonic cognitive memory system. ", personality.Name, personality.Title))
-		systemPrompt.WriteString(fmt.Sprintf("Your tone is %s. ", personality.Tone))
+		fmt.Fprintf(&systemPrompt, "You are the %s (%s) of the Mnemonic cognitive memory system. ", personality.Name, personality.Title)
+		fmt.Fprintf(&systemPrompt, "Your tone is %s. ", personality.Tone)
 		systemPrompt.WriteString("A human has @mentioned you in a forum thread. Respond helpfully and concisely (2-4 sentences max) based on your role. ")
 		systemPrompt.WriteString("Do not use markdown formatting. Be direct and informative.")
 

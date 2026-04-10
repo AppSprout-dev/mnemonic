@@ -33,19 +33,19 @@ const (
 
 // RawMemory is a raw observation before encoding.
 type RawMemory struct {
-	ID              string                 `json:"id"`
-	Timestamp       time.Time              `json:"timestamp"`
-	Source          string                 `json:"source"` // "terminal", "filesystem", "clipboard", "user", "mcp"
-	Type            string                 `json:"type"`   // "file_created", "command_executed", etc.
-	Content         string                 `json:"content"`
-	Metadata        map[string]interface{} `json:"metadata,omitempty"`
-	HeuristicScore  float32                `json:"heuristic_score"`
-	InitialSalience float32                `json:"initial_salience"`
-	Processed       bool                   `json:"processed"`
-	Project         string                 `json:"project,omitempty"`
-	SessionID       string                 `json:"session_id,omitempty"`
-	ContentHash     string                 `json:"content_hash,omitempty"`
-	CreatedAt       time.Time              `json:"created_at"`
+	ID              string         `json:"id"`
+	Timestamp       time.Time      `json:"timestamp"`
+	Source          string         `json:"source"` // "terminal", "filesystem", "clipboard", "user", "mcp"
+	Type            string         `json:"type"`   // "file_created", "command_executed", etc.
+	Content         string         `json:"content"`
+	Metadata        map[string]any `json:"metadata,omitempty"`
+	HeuristicScore  float32        `json:"heuristic_score"`
+	InitialSalience float32        `json:"initial_salience"`
+	Processed       bool           `json:"processed"`
+	Project         string         `json:"project,omitempty"`
+	SessionID       string         `json:"session_id,omitempty"`
+	ContentHash     string         `json:"content_hash,omitempty"`
+	CreatedAt       time.Time      `json:"created_at"`
 }
 
 // Memory is an encoded, compressed memory unit.
@@ -188,11 +188,11 @@ type ConsolidationRecord struct {
 
 // MetaObservation represents a system observation from metacognition analysis.
 type MetaObservation struct {
-	ID              string                 `json:"id"`
-	ObservationType string                 `json:"observation_type"` // quality_audit, source_balance, recall_effectiveness, consolidation_health
-	Severity        string                 `json:"severity"`         // info, warning, critical
-	Details         map[string]interface{} `json:"details"`
-	CreatedAt       time.Time              `json:"created_at"`
+	ID              string         `json:"id"`
+	ObservationType string         `json:"observation_type"` // quality_audit, source_balance, recall_effectiveness, consolidation_health
+	Severity        string         `json:"severity"`         // info, warning, critical
+	Details         map[string]any `json:"details"`
+	CreatedAt       time.Time      `json:"created_at"`
 }
 
 // EventEntry represents a single event within an episode timeline.
@@ -455,7 +455,7 @@ type SearchStore interface {
 	ListMemoriesByTimeRange(ctx context.Context, from, to time.Time, limit int) ([]Memory, error)
 	ListMemoriesBySession(ctx context.Context, sessionID string) ([]Memory, error)
 	SearchByType(ctx context.Context, types []string, limit int) ([]Memory, error)
-	GetProjectSummary(ctx context.Context, project string) (map[string]interface{}, error)
+	GetProjectSummary(ctx context.Context, project string) (map[string]any, error)
 	ListProjects(ctx context.Context) ([]string, error)
 }
 
@@ -582,6 +582,84 @@ type AnalyticsStore interface {
 	GetAnalytics(ctx context.Context) (AnalyticsData, error)
 }
 
+// ExperienceEntry represents a training candidate in the experience buffer.
+type ExperienceEntry struct {
+	ID             string    `json:"id"`
+	RawID          string    `json:"raw_id"`
+	MemoryID       string    `json:"memory_id"`
+	EncodingEPR    float64   `json:"encoding_epr"`
+	EncodingFR     float64   `json:"encoding_fr"`
+	EncodingFlags  []string  `json:"encoding_flags"`
+	RecallScore    float64   `json:"recall_score"`
+	RecallCount    int       `json:"recall_count"`
+	Category       string    `json:"category"` // gold, needs_improvement, ambiguous
+	UsedInTraining bool      `json:"used_in_training"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+// ExperienceStats summarizes the experience buffer contents.
+type ExperienceStats struct {
+	Gold             int `json:"gold"`
+	NeedsImprovement int `json:"needs_improvement"`
+	Ambiguous        int `json:"ambiguous"`
+	Total            int `json:"total"`
+}
+
+// RecallFeedbackEntry links a recall query to a specific memory's feedback rating.
+type RecallFeedbackEntry struct {
+	ID              string    `json:"id"`
+	Query           string    `json:"query"`
+	MemoryID        string    `json:"memory_id"`
+	Feedback        string    `json:"feedback"` // helpful, partial, irrelevant
+	RecallSessionID string    `json:"recall_session_id"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+// EncodingQualityWindow holds rolling quality metrics for drift detection.
+type EncodingQualityWindow struct {
+	WindowSize  int     `json:"window_size"`
+	MeanEPR     float64 `json:"mean_epr"`
+	TEDRate     float64 `json:"ted_rate"`
+	FlaggedRate float64 `json:"flagged_rate"`
+	SampleCount int     `json:"sample_count"`
+}
+
+// ContinuousLearningStore manages experience collection for continuous learning.
+type ContinuousLearningStore interface {
+	// Verification results (written during encoding)
+	WriteVerificationResult(ctx context.Context, memoryID string, epr float64, fr float64, flags []string) error
+
+	// Experience buffer
+	WriteExperienceEntry(ctx context.Context, entry ExperienceEntry) error
+	UpdateExperienceRecallScore(ctx context.Context, memoryID string, feedback string) error
+	ReclassifyExperienceBuffer(ctx context.Context) (int, error)
+	ListExperienceByCategory(ctx context.Context, category string, limit int) ([]ExperienceEntry, error)
+	GetExperienceBufferStats(ctx context.Context) (ExperienceStats, error)
+
+	// Recall-encoding linkage
+	WriteRecallFeedbackEntry(ctx context.Context, entry RecallFeedbackEntry) error
+	GetRecallHistory(ctx context.Context, memoryID string) ([]RecallFeedbackEntry, error)
+
+	// Quality drift detection
+	GetEncodingQualityWindow(ctx context.Context, windowSize int) (EncodingQualityWindow, error)
+
+	// Recent encoding quality for dashboard detail view
+	ListRecentEncodingQuality(ctx context.Context, limit int) ([]EncodingQualityEntry, error)
+}
+
+// EncodingQualityEntry is a single encoding's quality metrics for display.
+type EncodingQualityEntry struct {
+	MemoryID  string    `json:"memory_id"`
+	Summary   string    `json:"summary"`
+	Source    string    `json:"source"`
+	EPR       float64   `json:"epr"`
+	FR        float64   `json:"fr"`
+	Flags     []string  `json:"flags"`
+	Salience  float32   `json:"salience"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // Store is the full abstraction for persistent memory.
 // It composes all sub-interfaces — consumers that need only a subset
 // should accept the relevant sub-interface instead.
@@ -602,6 +680,7 @@ type Store interface {
 	UsageStore
 	ForumStore
 	AnalyticsStore
+	ContinuousLearningStore
 
 	// --- Lifecycle ---
 	Close() error

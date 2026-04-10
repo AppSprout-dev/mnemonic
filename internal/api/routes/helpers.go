@@ -24,14 +24,14 @@ func parseIntParam(r *http.Request, name string, defaultVal, min, max int) int {
 func writeError(w http.ResponseWriter, statusCode int, message string, code string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"error": message,
 		"code":  code,
 	})
 }
 
 // writeJSON sends a JSON response with the given status code.
-func writeJSON(w http.ResponseWriter, statusCode int, data interface{}) {
+func writeJSON(w http.ResponseWriter, statusCode int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	_ = json.NewEncoder(w).Encode(data)

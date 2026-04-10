@@ -552,7 +552,10 @@ export async function loadAnalytics() {
             '<div class="ra-kpi" id="kpiLearning"></div>' +
             '<div class="ra-kpi" id="kpiQuality"></div>' +
             '<div class="ra-kpi" id="kpiDensity"></div>' +
-            '<div class="ra-kpi" id="kpiRetrieval"></div>';
+            '<div class="ra-kpi" id="kpiRetrieval"></div>' +
+            '<div class="ra-kpi" id="kpiEPR"></div>' +
+            '<div class="ra-kpi" id="kpiTED"></div>' +
+            '<div class="ra-kpi" id="kpiExperience"></div>';
 
         // Pipeline Health card
         var el1 = document.getElementById('kpiPipeline');
@@ -561,11 +564,16 @@ export async function loadAnalytics() {
             '<div class="ra-kpi-footer"><span class="ra-kpi-delta ' + pipelineDelta.cls + '">' + pipelineDelta.text + '</span><span class="ra-kpi-target">target &gt;50%</span></div>';
         _renderSparkline(document.getElementById('sparkPipeline'), pipelineSpark, _thresholdColor(encodingRate, 50, 30));
 
-        // MCP Survival card
+        // Source Breakdown card (replaces MCP Survival — survival rate was misleading)
         var el2 = document.getElementById('kpiMcp');
-        el2.innerHTML = '<div class="ra-kpi-label">MCP Survival</div>' +
-            '<div class="ra-kpi-row"><span class="ra-kpi-value" style="color:' + _thresholdColor(mcpSurv, 80, 60) + '">' + mcpSurv.toFixed(0) + '%</span></div>' +
-            '<div class="ra-kpi-footer"><span class="ra-kpi-delta neutral">' + ((sn.mcp || {}).active || 0) + ' / ' + ((sn.mcp || {}).total || 0) + ' active</span><span class="ra-kpi-target">target &gt;80%</span></div>';
+        var mcpTotal = (sn.mcp || {}).total || 0;
+        var fsTotal = (sn.filesystem || {}).total || 0;
+        var termTotal = (sn.terminal || {}).total || 0;
+        var clipTotal = (sn.clipboard || {}).total || 0;
+        var mcpPct = (p.total_encoded || 0) > 0 ? (mcpTotal / (p.total_encoded || 1) * 100) : 0;
+        el2.innerHTML = '<div class="ra-kpi-label">MCP Signal</div>' +
+            '<div class="ra-kpi-row"><span class="ra-kpi-value" style="color:' + _thresholdColor(mcpPct, 40, 20) + '">' + mcpPct.toFixed(0) + '%</span></div>' +
+            '<div class="ra-kpi-footer"><span class="ra-kpi-delta neutral">' + mcpTotal + ' mcp \u00b7 ' + fsTotal + ' fs \u00b7 ' + termTotal + ' term</span><span class="ra-kpi-target">high-value source</span></div>';
 
         // Recall Learning card
         var el3 = document.getElementById('kpiLearning');
@@ -603,6 +611,40 @@ export async function loadAnalytics() {
                 '<div class="ra-kpi-footer"><span class="ra-kpi-delta neutral">' + totalQ + ' queries' + (avgMs > 0 ? ' \u00b7 ' + avgMs.toFixed(0) + 'ms avg' : '') + '</span><span class="ra-kpi-target">target &gt;3 per query</span></div>';
         } catch(e) { el6.innerHTML = '<div class="ra-kpi-label">Retrieval Perf</div><div class="ra-kpi-row"><span class="ra-kpi-value">-</span></div>'; }
 
+        // Encoding Faithfulness (EPR) — from Phase A continuous learning
+        var el7 = document.getElementById('kpiEPR');
+        var eq = data.encoding_quality;
+        if (eq && eq.sample_count > 0) {
+            var eprPct = eq.mean_epr * 100;
+            el7.innerHTML = '<div class="ra-kpi-label">Encoding EPR</div>' +
+                '<div class="ra-kpi-row"><span class="ra-kpi-value" style="color:' + _thresholdColor(eprPct, 85, 70) + '">' + eprPct.toFixed(0) + '%</span></div>' +
+                '<div class="ra-kpi-footer"><span class="ra-kpi-delta neutral">' + eq.sample_count + ' encodings</span><span class="ra-kpi-target">target &gt;85%</span></div>';
+        } else {
+            el7.innerHTML = '<div class="ra-kpi-label">Encoding EPR</div><div class="ra-kpi-row"><span class="ra-kpi-value">-</span></div><div class="ra-kpi-footer"><span class="ra-kpi-delta neutral">awaiting data</span></div>';
+        }
+
+        // Template Echo Rate (TED)
+        var el8 = document.getElementById('kpiTED');
+        if (eq && eq.sample_count > 0) {
+            var tedPct = eq.ted_rate * 100;
+            el8.innerHTML = '<div class="ra-kpi-label">Template Echo</div>' +
+                '<div class="ra-kpi-row"><span class="ra-kpi-value" style="color:' + _thresholdColor(100 - tedPct, 95, 85) + '">' + tedPct.toFixed(1) + '%</span></div>' +
+                '<div class="ra-kpi-footer"><span class="ra-kpi-delta neutral">' + (eq.flagged_rate * 100).toFixed(1) + '% flagged</span><span class="ra-kpi-target">target &lt;5%</span></div>';
+        } else {
+            el8.innerHTML = '<div class="ra-kpi-label">Template Echo</div><div class="ra-kpi-row"><span class="ra-kpi-value">-</span></div><div class="ra-kpi-footer"><span class="ra-kpi-delta neutral">awaiting data</span></div>';
+        }
+
+        // Experience Buffer
+        var el9 = document.getElementById('kpiExperience');
+        var eb = data.experience_buffer;
+        if (eb && eb.total > 0) {
+            el9.innerHTML = '<div class="ra-kpi-label">Experience Buffer</div>' +
+                '<div class="ra-kpi-row"><span class="ra-kpi-value">' + eb.total + '</span></div>' +
+                '<div class="ra-kpi-footer"><span class="ra-kpi-delta neutral">' + eb.gold + ' gold \u00b7 ' + eb.needs_improvement + ' needs work</span><span class="ra-kpi-target">' + eb.ambiguous + ' pending</span></div>';
+        } else {
+            el9.innerHTML = '<div class="ra-kpi-label">Experience Buffer</div><div class="ra-kpi-row"><span class="ra-kpi-value">0</span></div><div class="ra-kpi-footer"><span class="ra-kpi-delta neutral">collecting data</span></div>';
+        }
+
         // ── Cognitive Agents Panel ──
         try {
             var absResp = await fetchJSON('/abstractions?limit=500');
@@ -633,70 +675,86 @@ export async function loadAnalytics() {
             var sessResp = await fetchJSON('/sessions?days=' + days + '&limit=100');
             var sessCount = sessResp.count || 0;
             var avgAssoc = st.avg_associations_per_memory || 0;
+            var totalMem = st.total_memories || 0;
 
-            var lines = [];
+            // Build structured "working / needs attention" callouts
+            var working = [];
+            var attention = [];
 
-            // Overall health sentence
-            var healthIssues = 0;
-            if (encodingRate < 50) healthIssues++;
-            if (mcpSurv < 60) healthIssues++;
-            if (qualityPct < 50 && totalFb > 5) healthIssues++;
-            if (learningRatio < 1.0 && learningRatio > 0) healthIssues++;
-
-            if (healthIssues === 0) {
-                lines.push('Mnemonic is performing well. <strong>' + (st.total_memories || 0) + ' memories</strong> across <strong>' + sessCount + ' sessions</strong>, with a well-connected network (' + avgAssoc.toFixed(1) + ' associations per memory).');
-            } else if (healthIssues <= 2) {
-                lines.push('Mnemonic is running but has <span class="ra-warn">areas that need attention</span>. <strong>' + (st.total_memories || 0) + ' memories</strong> across <strong>' + sessCount + ' sessions</strong>.');
-            } else {
-                lines.push('Mnemonic has <span class="ra-bad">several metrics below target</span>. <strong>' + (st.total_memories || 0) + ' memories</strong> across <strong>' + sessCount + ' sessions</strong>. This is expected early on \u2014 the system improves with use.');
+            // Encoding faithfulness
+            if (eq && eq.sample_count >= 5) {
+                var eprPct = eq.mean_epr * 100;
+                var tedPct = eq.ted_rate * 100;
+                var nFlagged = Math.round(eq.flagged_rate * eq.sample_count);
+                if (eprPct >= 90) {
+                    working.push(eprPct.toFixed(0) + '% entity preservation across ' + eq.sample_count + ' encodings');
+                } else if (eprPct >= 70) {
+                    attention.push('EPR at ' + eprPct.toFixed(0) + '% \u2014 ' + nFlagged + ' encodings flagged');
+                } else {
+                    attention.push('<span class="ra-bad">EPR at ' + eprPct.toFixed(0) + '%</span> \u2014 ' + nFlagged + ' of ' + eq.sample_count + ' encodings losing entities');
+                }
+                if (tedPct < 2 && eq.sample_count >= 20) {
+                    working.push('No template echo in output');
+                } else if (tedPct >= 2) {
+                    attention.push(tedPct.toFixed(1) + '% template echo rate');
+                }
             }
 
-            // Encoding pipeline insight
-            if (encodingRate >= 80) {
-                lines.push('The encoding pipeline is converting ' + encodingRate.toFixed(0) + '% of observations into memories \u2014 minimal signal loss.');
-            } else if (encodingRate >= 50) {
-                lines.push('The encoding pipeline is at ' + encodingRate.toFixed(0) + '%. Some observations are being filtered or failing to encode.');
-            } else if (encodingRate > 0) {
-                lines.push('<span class="ra-bad">Encoding is struggling at ' + encodingRate.toFixed(0) + '%.</span> Check LLM availability \u2014 most observations are failing to encode.');
+            // Network health
+            if (avgAssoc >= 3.0) {
+                working.push(avgAssoc.toFixed(1) + ' associations per memory (' + (st.total_associations || 0).toLocaleString() + ' total)');
+            } else if (avgAssoc >= 2.0) {
+                working.push(avgAssoc.toFixed(1) + ' associations per memory');
             }
 
-            // MCP survival insight
-            if (mcpSurv > 0 && mcpSurv < 60) {
-                var mcpActive = (sn.mcp || {}).active || 0;
-                var mcpTotal = (sn.mcp || {}).total || 0;
-                lines.push('Only <span class="ra-warn">' + mcpSurv.toFixed(0) + '% of MCP memories survive</span> (' + mcpActive + '/' + mcpTotal + ' active). Older memories naturally decay over time \u2014 this ratio improves as you build fresh, high-quality memories through active use.');
-            } else if (mcpSurv >= 60 && mcpSurv < 80) {
-                lines.push('MCP survival is ' + mcpSurv.toFixed(0) + '% \u2014 some older memories have been pruned, which is healthy.');
-            }
-
-            // Recall quality insight
+            // Recall quality
             if (totalFb > 5) {
                 if (qualityPct >= 70) {
-                    lines.push('Recall quality is <span class="ra-good">strong at ' + qualityPct.toFixed(0) + '%</span> \u2014 the system is returning useful memories most of the time.');
-                } else if (qualityDelta.cls === 'positive') {
-                    lines.push('Recall quality is at ' + qualityPct.toFixed(0) + '% but <span class="ra-good">trending up (' + qualityDelta.text + ')</span>. The feedback loop is working \u2014 keep rating recalls.');
+                    working.push('Recall ' + qualityPct.toFixed(0) + '% helpful (' + totalFb + ' ratings)');
                 } else {
-                    lines.push('Recall quality is <span class="ra-warn">below target at ' + qualityPct.toFixed(0) + '%</span>. More feedback will help the system learn which memories matter.');
+                    attention.push('Recall at ' + qualityPct.toFixed(0) + '% helpful (' + totalFb + ' ratings)');
                 }
-            } else {
-                lines.push('Not enough recall feedback yet to assess quality. Rate your recalls (helpful/partial/irrelevant) to train the system.');
+            }
+
+            // Abstraction
+            if (principles >= 5 || axioms >= 3) {
+                working.push(principles + ' principles, ' + axioms + ' axioms distilled');
+            }
+
+            // Pipeline
+            if (encodingRate > 0 && encodingRate < 50) {
+                attention.push('Pipeline at ' + encodingRate.toFixed(0) + '% \u2014 most observations failing to encode');
             }
 
             // Learning signal
             if (learningRatio > 1.5) {
-                lines.push('Frequently recalled memories have <span class="ra-good">' + learningRatio.toFixed(1) + 'x higher salience</span> than unused ones \u2014 the system is learning what matters.');
-            } else if (learningRatio > 0 && learningRatio < 1.0) {
-                lines.push('Frequently recalled memories don\u2019t yet have higher salience than unused ones. This is normal early on \u2014 the recall learning signal strengthens over time with more feedback.');
+                working.push('Recalled memories have ' + learningRatio.toFixed(1) + 'x higher salience');
             }
 
-            // Abstraction formation
-            if (principles > 0) {
-                var axiomText = axioms > 0 ? ' and <strong>' + axioms + ' axiom' + (axioms !== 1 ? 's' : '') + '</strong>' : '';
-                lines.push('The abstraction agent has synthesized <strong>' + principles + ' principle' + (principles !== 1 ? 's' : '') + '</strong>' + axiomText + ' from your memory network \u2014 higher-order patterns that inform future recall.');
-            }
+            // Build HTML
+            var headline = '<div class="ra-brief-headline"><strong>' + totalMem + '</strong> memories \u00b7 <strong>' + sessCount + '</strong> sessions \u00b7 <strong>' + days + '</strong> day window</div>';
 
-            briefEl.innerHTML = lines.join(' ');
+            var colsHtml = '<div class="ra-brief-cols">';
+            if (working.length > 0) {
+                colsHtml += '<div class="ra-brief-col"><div class="ra-brief-col-label">\u2713 Working</div><ul>';
+                working.forEach(function(w) { colsHtml += '<li>' + w + '</li>'; });
+                colsHtml += '</ul></div>';
+            }
+            if (attention.length > 0) {
+                colsHtml += '<div class="ra-brief-col"><div class="ra-brief-col-label">\u26a0 Needs attention</div><ul>';
+                attention.forEach(function(a) { colsHtml += '<li>' + a + '</li>'; });
+                colsHtml += '</ul></div>';
+            }
+            if (working.length === 0 && attention.length === 0) {
+                colsHtml += '<div class="ra-brief-col" style="color:var(--text-dim)">Not enough data yet.</div>';
+            }
+            colsHtml += '</div>';
+
+            briefEl.innerHTML = headline + colsHtml;
         } catch(e) { /* analysis is optional, fail silently */ }
+
+        // ── Encoding Quality Detail ──
+        try { renderEncodingDetail(data.recent_encodings || []); } catch(e) { console.error('Encoding detail error:', e); }
 
         // ── Memory Lifecycle Chart (D3 stacked area) ──
         try { renderLifecycleChart(svData, fbData, chData); } catch(e) { console.error('Lifecycle chart error:', e); }
@@ -710,6 +768,164 @@ export async function loadAnalytics() {
     } catch(e) {
         console.error('Analytics load failed:', e);
     }
+}
+
+export function renderEncodingDetail(encodings) {
+    var panel = document.getElementById('encodingDetailPanel');
+    var chartEl = document.getElementById('encodingEprChart');
+    var tableEl = document.getElementById('encodingDetailTable');
+    var countEl = document.getElementById('encodingDetailCount');
+
+    if (!encodings || encodings.length === 0) {
+        panel.style.display = 'none';
+        return;
+    }
+    panel.style.display = '';
+    countEl.textContent = encodings.length + ' recent encodings';
+
+    // EPR time series chart (newest on right)
+    // Adaptive Y range: zoom into the data range with padding
+    var sorted = encodings.slice().reverse();
+    var minEpr = 1.0, maxEpr = 0.0;
+    for (var mi = 0; mi < sorted.length; mi++) {
+        if (sorted[mi].epr < minEpr) minEpr = sorted[mi].epr;
+        if (sorted[mi].epr > maxEpr) maxEpr = sorted[mi].epr;
+    }
+    // Floor/ceil to nice values with padding — show at least 60-100%
+    var yMin = Math.min(minEpr, 0.6);
+    yMin = Math.floor(yMin * 10) / 10; // round down to nearest 10%
+    var yMax = 1.0;
+    var yRange = yMax - yMin;
+
+    var width = chartEl.clientWidth || 600;
+    var height = 120;
+    var pad = { top: 10, right: 10, bottom: 25, left: 40 };
+    var plotW = width - pad.left - pad.right;
+    var plotH = height - pad.top - pad.bottom;
+
+    var svgNS = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('width', width);
+    svg.setAttribute('height', height);
+    svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+
+    // Y gridlines at even intervals within the range
+    var ySteps = 4;
+    var yStepSize = yRange / ySteps;
+    for (var yi = 0; yi <= ySteps; yi++) {
+        var yVal = yMin + (yi * yStepSize);
+        var yPos = pad.top + plotH - ((yVal - yMin) / yRange * plotH);
+        var line = document.createElementNS(svgNS, 'line');
+        line.setAttribute('x1', pad.left); line.setAttribute('x2', width - pad.right);
+        line.setAttribute('y1', yPos); line.setAttribute('y2', yPos);
+        line.setAttribute('stroke', yi === 0 ? 'var(--border)' : 'var(--bg-hover)');
+        line.setAttribute('stroke-width', '1');
+        svg.appendChild(line);
+        var label = document.createElementNS(svgNS, 'text');
+        label.setAttribute('x', pad.left - 5); label.setAttribute('y', yPos + 3);
+        label.setAttribute('text-anchor', 'end'); label.setAttribute('fill', 'var(--text-dim)');
+        label.setAttribute('font-size', '9');
+        label.textContent = (yVal * 100).toFixed(0) + '%';
+        svg.appendChild(label);
+    }
+
+    // Target line at 85% (if within visible range)
+    var targetY = pad.top + plotH - ((0.85 - yMin) / yRange * plotH);
+    var tLine = document.createElementNS(svgNS, 'line');
+    tLine.setAttribute('x1', pad.left); tLine.setAttribute('x2', width - pad.right);
+    tLine.setAttribute('y1', targetY); tLine.setAttribute('y2', targetY);
+    tLine.setAttribute('stroke', 'var(--accent)'); tLine.setAttribute('stroke-width', '1');
+    tLine.setAttribute('stroke-dasharray', '4,3'); tLine.setAttribute('opacity', '0.5');
+    svg.appendChild(tLine);
+    var tLabel = document.createElementNS(svgNS, 'text');
+    tLabel.setAttribute('x', width - pad.right - 2); tLabel.setAttribute('y', targetY - 3);
+    tLabel.setAttribute('text-anchor', 'end'); tLabel.setAttribute('fill', 'var(--accent)');
+    tLabel.setAttribute('font-size', '8'); tLabel.setAttribute('opacity', '0.7');
+    tLabel.textContent = 'target 85%';
+    svg.appendChild(tLabel);
+
+    // Data points (Y mapped to adaptive range)
+    var stepX = sorted.length > 1 ? plotW / (sorted.length - 1) : plotW / 2;
+    var points = [];
+    for (var i = 0; i < sorted.length; i++) {
+        var x = pad.left + (sorted.length === 1 ? plotW / 2 : i * stepX);
+        var y = pad.top + plotH - ((sorted[i].epr - yMin) / yRange * plotH);
+        points.push(x + ',' + y);
+
+        var dot = document.createElementNS(svgNS, 'circle');
+        dot.setAttribute('cx', x); dot.setAttribute('cy', y); dot.setAttribute('r', '5');
+        dot.setAttribute('fill', '#9ca3af');
+        dot.setAttribute('stroke', '#6b7280'); dot.setAttribute('stroke-width', '1');
+        if (sorted[i].flags && sorted[i].flags.length > 0) {
+            dot.setAttribute('fill', '#ef4444');
+            dot.setAttribute('stroke', '#dc2626'); dot.setAttribute('stroke-width', '2');
+            dot.setAttribute('r', '6');
+        }
+        svg.appendChild(dot);
+    }
+
+    // Line connecting points
+    if (points.length > 1) {
+        var polyline = document.createElementNS(svgNS, 'polyline');
+        polyline.setAttribute('points', points.join(' '));
+        polyline.setAttribute('fill', 'none'); polyline.setAttribute('stroke', 'var(--text-dim)');
+        polyline.setAttribute('stroke-width', '1.5'); polyline.setAttribute('opacity', '0.6');
+        svg.appendChild(polyline);
+    }
+
+    chartEl.innerHTML = '';
+    chartEl.appendChild(svg);
+
+    // Detail table
+    var html = '<table style="width:100%;border-collapse:collapse;font-size:0.7rem">' +
+        '<thead><tr style="border-bottom:1px solid var(--border);color:var(--text-dim)">' +
+        '<th style="text-align:left;padding:4px 8px">Summary</th>' +
+        '<th style="text-align:left;padding:4px">Source</th>' +
+        '<th style="text-align:right;padding:4px">EPR</th>' +
+        '<th style="text-align:right;padding:4px">FR</th>' +
+        '<th style="text-align:left;padding:4px">Flags</th>' +
+        '<th style="text-align:right;padding:4px">Salience</th>' +
+        '<th style="text-align:right;padding:4px">Time</th>' +
+        '</tr></thead><tbody>';
+
+    for (var j = 0; j < encodings.length; j++) {
+        var enc = encodings[j];
+        var eprStr = (enc.epr * 100).toFixed(0) + '%';
+        var frStr = (enc.fr * 100).toFixed(0) + '%';
+        var eprStyle = enc.epr >= 0.85 ? 'color:var(--good)' : enc.epr >= 0.7 ? 'color:var(--accent)' : 'color:var(--bad)';
+        var frStyle = enc.fr <= 0.05 ? '' : enc.fr <= 0.15 ? 'color:var(--accent)' : 'color:var(--bad)';
+        var flagsHtml = (enc.flags && enc.flags.length > 0)
+            ? enc.flags.map(function(f) { return '<span style="background:var(--bg-hover);padding:1px 4px;border-radius:3px;font-size:0.6rem">' + f + '</span>'; }).join(' ')
+            : '<span style="color:var(--text-dim)">\u2014</span>';
+        var summary = enc.summary || '(no summary)';
+        if (summary.length > 60) summary = summary.substring(0, 57) + '...';
+        var ago = _timeAgo(enc.created_at);
+
+        html += '<tr style="border-bottom:1px solid var(--bg-hover)">' +
+            '<td style="padding:4px 8px;max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + (enc.summary || '').replace(/"/g, '&quot;') + '">' + summary + '</td>' +
+            '<td style="padding:4px">' + enc.source + '</td>' +
+            '<td style="text-align:right;padding:4px;font-weight:600;' + eprStyle + '">' + eprStr + '</td>' +
+            '<td style="text-align:right;padding:4px;' + frStyle + '">' + frStr + '</td>' +
+            '<td style="padding:4px">' + flagsHtml + '</td>' +
+            '<td style="text-align:right;padding:4px">' + enc.salience.toFixed(2) + '</td>' +
+            '<td style="text-align:right;padding:4px;color:var(--text-dim)">' + ago + '</td>' +
+            '</tr>';
+    }
+    html += '</tbody></table>';
+    tableEl.innerHTML = html;
+}
+
+function _timeAgo(dateStr) {
+    var d = new Date(dateStr);
+    var now = new Date();
+    var diffMs = now - d;
+    var diffMin = Math.floor(diffMs / 60000);
+    if (diffMin < 1) return 'just now';
+    if (diffMin < 60) return diffMin + 'm ago';
+    var diffH = Math.floor(diffMin / 60);
+    if (diffH < 24) return diffH + 'h ago';
+    var diffD = Math.floor(diffH / 24);
+    return diffD + 'd ago';
 }
 
 export function renderLifecycleChart(svData, fbData, chData) {
@@ -733,17 +949,15 @@ export function renderLifecycleChart(svData, fbData, chData) {
     var g = svgEl('g', { transform: 'translate(' + margin.left + ',' + margin.top + ')' });
     svg.appendChild(g);
 
-    // Prepare stack data
-    var stackKeys = ['active', 'merged', 'fading', 'archived'];
-    var stackColors = { active: 'var(--accent-green)', merged: 'var(--accent-cyan)', fading: 'var(--accent-yellow)', archived: 'var(--text-dim)' };
+    // Prepare stack data — active on bottom (readable against baseline), then fading, archived
+    // "merged" excluded — it's a pipeline dedup metric, not a lifecycle state
+    var stackKeys = ['active', 'fading', 'archived'];
+    var stackColors = { active: 'var(--accent-green)', fading: 'var(--accent-yellow)', archived: 'var(--text-dim)' };
 
     var nd = svData.length;
     var bandStep = iw / nd;
-    var bandPad = 0.1;
-    var bandW = bandStep * (1 - bandPad);
-    var bandOff = bandStep * bandPad / 2;
 
-    var maxY = Math.max.apply(null, svData.map(function(d) { return (d.active || 0) + (d.merged || 0) + (d.fading || 0) + (d.archived || 0); })) || 1;
+    var maxY = Math.max.apply(null, svData.map(function(d) { return (d.active || 0) + (d.fading || 0) + (d.archived || 0); })) || 1;
 
     // Manual stack calculation
     var stackData = svData.map(function(d) {
@@ -773,38 +987,43 @@ export function renderLifecycleChart(svData, fbData, chData) {
         g.appendChild(svgEl('polygon', { points: pts.join(' '), fill: stackColors[key], opacity: key === 'archived' ? '0.3' : '0.6' }));
     });
 
-    // Feedback quality overlay line (secondary Y axis)
-    if (fbData && fbData.length > 0) {
-        var fbMap = {};
-        fbData.forEach(function(d) { var t = d.helpful + d.partial + d.irrelevant; fbMap[d.date] = t > 0 ? (d.helpful / t) * 100 : null; });
-        var fbPoints = [];
-        svData.forEach(function(d, i) {
-            var q = fbMap[d.date];
-            if (q !== null && q !== undefined) {
-                fbPoints.push({ idx: i, quality: q, date: d.date });
-            }
-        });
+    // Recall quality overlay removed — it was noisy with few ratings per day
+    // and confused two unrelated metrics on one chart. Recall quality has its own KPI card.
 
-        if (fbPoints.length > 1) {
-            var linePts = fbPoints.map(function(p) {
-                return (p.idx * bandStep + bandStep / 2) + ',' + linScale(p.quality, 0, 100, ih, 0);
-            });
-            g.appendChild(svgEl('polyline', { points: linePts.join(' '), fill: 'none', stroke: 'var(--accent-violet)', 'stroke-width': 2, 'stroke-dasharray': '4,2' }));
-
-            // Right axis label
-            g.appendChild(svgText(iw + 8, linScale(50, 0, 100, ih, 0), 'quality %', { fill: 'var(--text-dim)', 'font-size': '0.6rem', 'dominant-baseline': 'middle' }));
-        }
-    }
-
-    // Consolidation diamond markers
+    // Consolidation diamond markers — sized by processed count
     if (chData && chData.length > 0) {
         var chMap = {};
-        chData.forEach(function(d) { if (d.processed > 0) chMap[d.date] = d.processed; });
+        var maxProcessed = 1;
+        chData.forEach(function(d) {
+            if (d.processed > 0) {
+                chMap[d.date] = d;
+                if (d.processed > maxProcessed) maxProcessed = d.processed;
+            }
+        });
         svData.forEach(function(d, i) {
-            if (chMap[d.date]) {
+            var ch = chMap[d.date];
+            if (ch) {
                 var cx = i * bandStep + bandStep / 2;
-                var dy = linScale(maxY, 0, maxY, ih, 0) - 2;
-                g.appendChild(svgEl('path', { d: 'M' + cx + ',' + dy + ' l4,6 l-4,6 l-4,-6 z', fill: 'var(--accent-orange)', opacity: '0.7' }));
+                var dy = -2;
+                // Size: 4-8px based on processed count
+                var sz = 4 + Math.round((ch.processed / maxProcessed) * 4);
+                var diamond = svgEl('path', {
+                    d: 'M' + cx + ',' + dy + ' l' + sz + ',' + (sz * 1.2) + ' l-' + sz + ',' + (sz * 1.2) + ' l-' + sz + ',-' + (sz * 1.2) + ' z',
+                    fill: 'var(--accent-orange)', opacity: '0.7'
+                });
+                // Tooltip on hover
+                diamond.addEventListener('mouseenter', function(e) {
+                    var tooltipDiv = document.getElementById('lifecycleTooltip');
+                    tooltipDiv.style.display = 'block';
+                    tooltipDiv.style.left = (e.offsetX + 12) + 'px';
+                    tooltipDiv.style.top = '10px';
+                    tooltipDiv.innerHTML = '<strong>Consolidation ' + d.date + '</strong><br>' +
+                        'Processed: ' + ch.processed + ' \u00b7 Merged: ' + (ch.merged || 0) + ' \u00b7 Decayed: ' + (ch.decayed || 0);
+                });
+                diamond.addEventListener('mouseleave', function() {
+                    document.getElementById('lifecycleTooltip').style.display = 'none';
+                });
+                g.appendChild(diamond);
             }
         });
     }
@@ -846,13 +1065,11 @@ export function renderLifecycleChart(svData, fbData, chData) {
         tooltipLine.setAttribute('x1', cx);
         tooltipLine.setAttribute('x2', cx);
         tooltipLine.setAttribute('display', '');
-        var fb = fbData.find(function(f) { return f.date === d.date; });
-        var qStr = '';
-        if (fb) { var tt = fb.helpful + fb.partial + fb.irrelevant; qStr = tt > 0 ? ' \u00B7 quality: ' + ((fb.helpful / tt) * 100).toFixed(0) + '%' : ''; }
         tooltipDiv.style.display = 'block';
         tooltipDiv.style.left = (event.offsetX + 12) + 'px';
         tooltipDiv.style.top = (event.offsetY - 10) + 'px';
-        tooltipDiv.innerHTML = '<strong>' + d.date + '</strong><br>Active: ' + (d.active || 0) + ' \u00B7 Merged: ' + (d.merged || 0) + ' \u00B7 Fading: ' + (d.fading || 0) + ' \u00B7 Archived: ' + (d.archived || 0) + qStr;
+        var total = (d.active || 0) + (d.fading || 0) + (d.archived || 0);
+        tooltipDiv.innerHTML = '<strong>' + d.date + '</strong><br>Active: ' + (d.active || 0) + ' \u00B7 Fading: ' + (d.fading || 0) + ' \u00B7 Archived: ' + (d.archived || 0) + ' \u00B7 Total: ' + total;
     });
     hitRect.addEventListener('mouseleave', function() {
         tooltipLine.setAttribute('display', 'none');
@@ -863,7 +1080,7 @@ export function renderLifecycleChart(svData, fbData, chData) {
     // Legend
     legendEl.innerHTML = stackKeys.map(function(k) {
         return '<span style="display:flex;align-items:center;gap:3px"><span style="width:8px;height:8px;border-radius:2px;background:' + stackColors[k] + ';opacity:0.6"></span>' + k + '</span>';
-    }).join('') + '<span style="display:flex;align-items:center;gap:3px"><span style="width:12px;height:2px;background:var(--accent-violet);border-radius:1px"></span>quality</span>' +
+    }).join('') +
     '<span style="display:flex;align-items:center;gap:3px"><span style="width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-bottom:6px solid var(--accent-orange)"></span>consolidation</span>';
 }
 

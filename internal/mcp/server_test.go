@@ -61,7 +61,7 @@ func TestHandleInitialize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to marshal result: %v", err)
 	}
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal(data, &result); err != nil {
 		t.Fatalf("failed to unmarshal result: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestHandleInitialize(t *testing.T) {
 	if serverInfo, ok := result["serverInfo"]; !ok {
 		t.Fatal("serverInfo not in result")
 	} else {
-		serverInfoMap := serverInfo.(map[string]interface{})
+		serverInfoMap := serverInfo.(map[string]any)
 		if serverInfoMap["name"] != "mnemonic" {
 			t.Fatalf("expected server name 'mnemonic', got %v", serverInfoMap["name"])
 		}
@@ -112,7 +112,7 @@ func TestHandleToolsList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to marshal result: %v", err)
 	}
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal(data, &result); err != nil {
 		t.Fatalf("failed to unmarshal result: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestHandleToolsList(t *testing.T) {
 		t.Fatal("tools not in result")
 	}
 
-	toolsArray, ok := toolsInterface.([]interface{})
+	toolsArray, ok := toolsInterface.([]any)
 	if !ok {
 		t.Fatalf("tools is not an array, got %T", toolsInterface)
 	}
@@ -160,7 +160,7 @@ func TestHandleToolsList(t *testing.T) {
 	}
 
 	for _, toolInterface := range toolsArray {
-		toolMap := toolInterface.(map[string]interface{})
+		toolMap := toolInterface.(map[string]any)
 		toolName := toolMap["name"].(string)
 		if _, ok := expectedTools[toolName]; ok {
 			expectedTools[toolName] = true
@@ -216,7 +216,7 @@ func TestToolResult(t *testing.T) {
 		t.Fatal("content not in result")
 	}
 
-	contentArray, ok := contentInterface.([]map[string]interface{})
+	contentArray, ok := contentInterface.([]map[string]any)
 	if !ok {
 		t.Fatal("content is not an array of maps")
 	}
@@ -249,7 +249,7 @@ func TestToolError(t *testing.T) {
 		t.Fatal("content not in result")
 	}
 
-	contentArray, ok := contentInterface.([]map[string]interface{})
+	contentArray, ok := contentInterface.([]map[string]any)
 	if !ok {
 		t.Fatal("content is not an array of maps")
 	}
@@ -271,7 +271,7 @@ func TestToolError(t *testing.T) {
 
 // TestSuccessResponse tests successResponse helper function.
 func TestSuccessResponse(t *testing.T) {
-	testResult := map[string]interface{}{"key": "value"}
+	testResult := map[string]any{"key": "value"}
 	resp := successResponse(99, testResult)
 
 	if resp.JSONRPC != "2.0" {
@@ -287,7 +287,7 @@ func TestSuccessResponse(t *testing.T) {
 	}
 
 	// Verify result
-	resultMap, ok := resp.Result.(map[string]interface{})
+	resultMap, ok := resp.Result.(map[string]any)
 	if !ok {
 		t.Fatal("result is not a map")
 	}
@@ -355,7 +355,7 @@ func TestJSONRPCMarshal(t *testing.T) {
 	}
 
 	// Verify it's valid JSON
-	var unmarshalled map[string]interface{}
+	var unmarshalled map[string]any
 	if err := json.Unmarshal(data, &unmarshalled); err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
 	}
@@ -368,7 +368,7 @@ func TestJSONRPCMarshal(t *testing.T) {
 		t.Fatalf("id field mismatch")
 	}
 
-	errorObj, ok := unmarshalled["error"].(map[string]interface{})
+	errorObj, ok := unmarshalled["error"].(map[string]any)
 	if !ok {
 		t.Fatal("error field is not a map")
 	}
@@ -416,8 +416,8 @@ func TestCheckAcceptance(t *testing.T) {
 	srv.contextTotalOffered = 2
 
 	// Simulate a recall result containing one of the suggested IDs.
-	result := map[string]interface{}{
-		"content": []map[string]interface{}{
+	result := map[string]any{
+		"content": []map[string]any{
 			{"type": "text", "text": "Found memory abc-123: some relevant context"},
 		},
 	}
@@ -455,7 +455,7 @@ func TestContextMetricsJSON(t *testing.T) {
 		t.Fatalf("failed to marshal contextMetrics: %v", err)
 	}
 
-	var decoded map[string]interface{}
+	var decoded map[string]any
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}

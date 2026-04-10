@@ -158,6 +158,10 @@ func (ma *MetacognitionAgent) runCycle(ctx context.Context) (*CycleReport, error
 		observations = append(observations, *obs)
 	}
 
+	if obs := ma.auditEncodingQuality(ctx); obs != nil {
+		observations = append(observations, *obs)
+	}
+
 	for i := range observations {
 		observations[i].ID = uuid.New().String()
 		observations[i].CreatedAt = time.Now()
@@ -237,7 +241,7 @@ func (ma *MetacognitionAgent) auditMemoryQuality(ctx context.Context) *store.Met
 	return &store.MetaObservation{
 		ObservationType: "quality_audit",
 		Severity:        severity,
-		Details: map[string]interface{}{
+		Details: map[string]any{
 			"no_embedding":   noEmbedding,
 			"no_compression": noCompression,
 			"short_summary":  shortSummary,
@@ -279,7 +283,7 @@ func (ma *MetacognitionAgent) analyzeSourceDistribution(ctx context.Context) *st
 	return &store.MetaObservation{
 		ObservationType: "source_balance",
 		Severity:        "warning",
-		Details: map[string]interface{}{
+		Details: map[string]any{
 			"source_counts":   distribution,
 			"dominant_source": dominantSource,
 			"dominant_ratio":  dominantRatio,
@@ -318,7 +322,7 @@ func (ma *MetacognitionAgent) analyzeRecallEffectiveness(ctx context.Context) *s
 			return &store.MetaObservation{
 				ObservationType: "recall_effectiveness",
 				Severity:        "info",
-				Details: map[string]interface{}{
+				Details: map[string]any{
 					"dead_count":   len(deadMemories),
 					"dead_ratio":   deadRatio,
 					"total_active": stats.ActiveMemories,
@@ -337,7 +341,7 @@ func (ma *MetacognitionAgent) analyzeRecallEffectiveness(ctx context.Context) *s
 	return &store.MetaObservation{
 		ObservationType: "recall_effectiveness",
 		Severity:        severity,
-		Details: map[string]interface{}{
+		Details: map[string]any{
 			"dead_count":   len(deadMemories),
 			"dead_ratio":   deadRatio,
 			"total_active": stats.ActiveMemories,
@@ -351,7 +355,7 @@ func (ma *MetacognitionAgent) checkConsolidationHealth(ctx context.Context) *sto
 		return &store.MetaObservation{
 			ObservationType: "consolidation_health",
 			Severity:        "warning",
-			Details: map[string]interface{}{
+			Details: map[string]any{
 				"message": "consolidation never run",
 			},
 		}
@@ -371,7 +375,7 @@ func (ma *MetacognitionAgent) checkConsolidationHealth(ctx context.Context) *sto
 	return &store.MetaObservation{
 		ObservationType: "consolidation_health",
 		Severity:        severity,
-		Details: map[string]interface{}{
+		Details: map[string]any{
 			"hours_since_last_run": hoursSinceLastRun,
 			"last_run_time":        record.EndTime,
 		},
@@ -426,7 +430,7 @@ func (ma *MetacognitionAgent) analyzeRetrievalFeedback(ctx context.Context) *sto
 	return &store.MetaObservation{
 		ObservationType: "retrieval_quality",
 		Severity:        severity,
-		Details: map[string]interface{}{
+		Details: map[string]any{
 			"helpful_count":    helpful,
 			"partial_count":    partial,
 			"irrelevant_count": irrelevant,
@@ -533,7 +537,7 @@ func (ma *MetacognitionAgent) actOnQualityIssues(ctx context.Context, obs store.
 			ID:              uuid.New().String(),
 			ObservationType: "autonomous_action",
 			Severity:        "info",
-			Details: map[string]interface{}{
+			Details: map[string]any{
 				"action": "re_embedded_memories",
 				"count":  reembedded,
 			},
@@ -587,7 +591,7 @@ func (ma *MetacognitionAgent) actOnPoorRetrieval(ctx context.Context, obs store.
 			if q != "irrelevant" {
 				continue
 			}
-			if ids, ok := fb.Details["memory_ids"].([]interface{}); ok {
+			if ids, ok := fb.Details["memory_ids"].([]any); ok {
 				for _, id := range ids {
 					if s, ok := id.(string); ok {
 						demoteCounts[s]++
@@ -626,7 +630,7 @@ func (ma *MetacognitionAgent) actOnPoorRetrieval(ctx context.Context, obs store.
 		ID:              uuid.New().String(),
 		ObservationType: "autonomous_action",
 		Severity:        obs.Severity,
-		Details: map[string]interface{}{
+		Details: map[string]any{
 			"action":           "retrieval_quality_correction",
 			"irrelevant_ratio": irrelevantRatio,
 			"memories_demoted": actions,
@@ -659,7 +663,7 @@ func (ma *MetacognitionAgent) processFeedback(ctx context.Context) int {
 
 		// Extract memory IDs from the feedback
 		var memoryIDs []string
-		if ids, ok := fb.Details["memory_ids"].([]interface{}); ok {
+		if ids, ok := fb.Details["memory_ids"].([]any); ok {
 			for _, id := range ids {
 				if s, ok := id.(string); ok {
 					memoryIDs = append(memoryIDs, s)
@@ -768,4 +772,55 @@ func (ma *MetacognitionAgent) weakenMemories(ctx context.Context, memoryIDs []st
 	}
 
 	return adjusted
+}
+
+// auditEncodingQuality checks rolling encoding quality metrics for drift.
+func (ma *MetacognitionAgent) auditEncodingQuality(ctx context.Context) *store.MetaObservation {
+	window, err := ma.store.GetEncodingQualityWindow(ctx, 100)
+	if err != nil {
+		ma.log.Warn("failed to get encoding quality window", "error", err)
+		return nil
+	}
+
+	// Need at least 20 samples to make a meaningful assessment
+	if window.SampleCount < 20 {
+		return nil
+	}
+
+	details := map[string]any{
+		"window_size":  window.WindowSize,
+		"mean_epr":     window.MeanEPR,
+		"ted_rate":     window.TEDRate,
+		"flagged_rate": window.FlaggedRate,
+		"sample_count": window.SampleCount,
+	}
+
+	severity := "info"
+	trend := "stable"
+
+	if window.MeanEPR < 0.85 {
+		severity = "warning"
+		trend = "degrading"
+		details["issue"] = "mean EPR below 0.85"
+	}
+	if window.TEDRate > 0.05 {
+		severity = "warning"
+		trend = "degrading"
+		details["issue"] = "template echo rate above 5%"
+	}
+	if window.MeanEPR < 0.70 || window.TEDRate > 0.15 {
+		severity = "critical"
+		trend = "degrading"
+	}
+	if window.MeanEPR > 0.93 && window.TEDRate < 0.02 {
+		trend = "improving"
+	}
+
+	details["trend"] = trend
+
+	return &store.MetaObservation{
+		ObservationType: "encoding_quality_drift",
+		Severity:        severity,
+		Details:         details,
+	}
 }

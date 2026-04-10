@@ -38,7 +38,7 @@ func HandleGetRawMemory(s store.Store, log *slog.Logger) http.HandlerFunc {
 			return
 		}
 
-		writeJSON(w, http.StatusOK, map[string]interface{}{
+		writeJSON(w, http.StatusOK, map[string]any{
 			"raw_memory": raw,
 			"timestamp":  time.Now().Format(time.RFC3339),
 		})
@@ -98,7 +98,7 @@ func HandleCreateMemory(s store.Store, bus events.Bus, log *slog.Logger) http.Ha
 			Type:      req.Type,
 			Content:   req.Content,
 			Project:   req.Project,
-			Metadata: map[string]interface{}{
+			Metadata: map[string]any{
 				"memory_type": req.Type,
 				"project":     req.Project,
 			},

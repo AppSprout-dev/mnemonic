@@ -100,14 +100,14 @@ func (s *SQLiteStore) UpdateAbstraction(ctx context.Context, a store.Abstraction
 // Pass level=0 to list all levels.
 func (s *SQLiteStore) ListAbstractions(ctx context.Context, level int, limit int) ([]store.Abstraction, error) {
 	var query string
-	var args []interface{}
+	var args []any
 
 	if level == 0 {
 		query = `SELECT ` + abstractionColumns + ` FROM abstractions WHERE state = 'active' ORDER BY confidence DESC LIMIT ?`
-		args = []interface{}{limit}
+		args = []any{limit}
 	} else {
 		query = `SELECT ` + abstractionColumns + ` FROM abstractions WHERE state = 'active' AND level = ? ORDER BY confidence DESC LIMIT ?`
-		args = []interface{}{level, limit}
+		args = []any{level, limit}
 	}
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
