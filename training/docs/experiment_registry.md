@@ -1192,7 +1192,7 @@ Gemma E2B matches Qwen 4B on faithfulness while being 44% faster. The faithful p
 ### EXP-30: Gemma 4 E2B Spoke Training — Faithful Prompt + V7 Data
 
 - **Date:** 2026-04-10
-- **Status:** RUNNING (overfit probe passed, full training pending)
+- **Status:** RUNNING
 - **Hypothesis:** Gemma 4 E2B with trained Felix spokes on v7 data + faithful prompt will achieve 100% SC (schema compliance) while maintaining the 100% EPR and 100% NP demonstrated by the base model with the faithful prompt in EXP-29. The spokes learn the structural schema that the base model can't produce without grammar enforcement.
 - **Null hypothesis:** Spoke training on Gemma E2B degrades the faithfulness achieved by the faithful prompt alone (EPR drops below 90% or FR rises above 5%). The base model + prompt is sufficient and spokes add no value.
 - **Variable:** Spoke adapters trained on v7 encoding data with faithful prompt format. Base model, prompt, and quantization held constant.
@@ -1200,10 +1200,11 @@ Gemma E2B matches Qwen 4B on faithfulness while being 44% faster. The faithful p
 - **Prediction:** SC reaches >90% (spokes learn the exact field structure, enum values, and structured_concepts format). EPR stays >95%. FR stays <3%. NP stays >95%. If SC doesn't improve, the model needs GBNF grammar as a crutch and spoke training has limited value for this task.
 - **Config:** Gemma 4 E2B (google/gemma-4-E2B-it, NF4 quantization, PLE offloaded to CPU) + 4 spokes rank 64 on all 35 layers (~27.5M trainable params, ~1.2% overhead), batch 1, grad_accum 8, seq_len 2048, LR 3e-4, scalar_lr_scale 0.1, Muon + AdamW, gradient checkpointing. Faithful prompt format via updated build_production_prompt().
 - **Data:** V7 combined: 5,238 train / 581 eval. Retokenized with Gemma E2B tokenizer and faithful prompt format.
-- **Hardware:** Local RX 7800 XT, 16GB VRAM, ROCm. Estimated VRAM: ~1.6 GB (NF4 base + PLE offload + spokes + optimizer). Daemon stopped for training.
+- **Hardware:** Local RX 7800 XT, 16GB VRAM, ROCm. Measured VRAM: ~11.6 GB during training (NF4 base ~2.5GB + spokes + optimizer states + activation memory for gradient checkpointing; PLE offloaded to CPU saves ~4.7GB). Daemon stopped for training.
 - **Metrics:** Primary: SC (the gap), EPR, FR, NP (must not regress from EXP-29 baseline). Secondary: eval loss/PPL, stress_test_hallucination.py (7/7 target), inference throughput.
 - **Export plan:** Export spokes via Gemma-specific export script, quantize to RQ4 via rotorq pipeline, deploy in embedded llama.cpp backend.
 - **Tracking:** Branch feat/gemma-e2b-spokes
-- **Overfit probe (2026-04-10):** 10 train / 5 eval, 200 optimizer steps, batch 1 x accum 1, LR 3e-4. Online train loss 14.4→5.2, eval loss 1.80→1.61. Online train loss was misleading — diagnostic showed batch-1 oscillation noise. Evaluating the final checkpoint on training data in eval mode gave loss 1.56 (PPL 4.8), confirming the model learned. Train eval-mode loss (1.56) < eval loss (1.61) — pipeline is working. Gates barely moved (expected at 200 steps). Autocast asymmetry ruled out as cause. WandB: spokes_tmp_b1x1.
-- **Result:** (pending — full training run next)
+- **Overfit probe (2026-04-10):** 10 train / 5 eval, 200 optimizer steps, batch 1 x accum 1, LR 3e-4. Online train loss 14.4→5.2, eval loss 1.80→1.61. Online train loss was misleading — diagnostic showed batch-1 oscillation noise. Evaluating the final checkpoint on training data in eval mode gave loss 1.56 (PPL 4.8), confirming the model learned. Train eval-mode loss (1.56) < eval loss (1.61) — pipeline is working. Gates barely moved (expected at 200 steps). Autocast asymmetry ruled out as cause (NF4 outputs bf16 regardless). WandB: spokes_tmp_b1x1.
+- **Full training run (2026-04-10):** 15,714 micro-steps (1,964 optimizer steps, ~3 epochs), batch 1 x accum 8 = 8 effective. Warmup 20 optimizer steps. Initial eval loss 1.6830 (PPL 5.4). First eval checkpoint (opt step 200): eval loss 1.6823 — essentially flat, still in early warmup. Online train loss dropping steadily (14.4 → 12.8 by step 400, LR still ramping at 7.8e-5 of 3e-4 peak). WandB: exp30_gemma4_v7_faithful. Checkpoints: `checkpoints/exp30_gemma4_v7_faithful/`.
+- **Result:** (pending)
 - **Verdict:** (pending)
