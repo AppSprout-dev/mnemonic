@@ -1038,3 +1038,70 @@ Rotation parameter overhead per layer (rank=64):
 - **Go/no-go gate:** After Phase 2 pruning to 2B: if quality < EXP-26 on >2 faithfulness metrics, STOP. The 31B doesn't provide better subnetworks for this task than the native 2B.
 - **Result:** (pending)
 - **Verdict:** (pending)
+
+### EXP-29: Candidate Model Evaluation — Zero-Shot Encoding Faithfulness Bake-Off
+
+- **Date:** 2026-04-10
+- **Status:** REGISTERED
+- **Hypothesis:** Among 2026-released sub-4B models, at least one candidate will demonstrate meaningful zero-shot or few-shot encoding faithfulness (EPR >60%, SC >50%) on mnemonic's production encoding task, indicating its pretraining provides a stronger foundation for fine-tuning than the current Qwen 3.5 2B base.
+- **Null hypothesis:** No 2026 sub-4B model achieves usable encoding quality without task-specific fine-tuning. Pretraining differences are negligible for this narrow task — the training data (v7) is the dominant factor, and the base model choice is secondary.
+- **Variable:** Base model identity. Six candidates from three architecture families, tested under identical conditions.
+- **Control:** Qwen 3.5 2B (current base model, tested without spokes — raw baseline).
+- **Prediction:** Models with explicit structured output training (Nemotron 3 Nano 4B — RL-trained on JSON/XML) or larger parameter counts (4B class) will score higher on SC and EPR than 2B-class models. DeltaNet models (Qwen 3.5 family) may struggle with long structured output due to linear attention's limited precision on exact token reproduction. Exploratory — no strong directional prediction on which architecture family wins.
+
+#### Candidates
+
+| # | Model | Released | Params | Architecture | License | GGUF Source |
+|---|-------|----------|--------|-------------|---------|-------------|
+| 1 | Qwen 3.5 0.8B | 2026-03-02 | 0.8B | Hybrid DeltaNet (3:1 linear:full attn) | Apache 2.0 | unsloth/Qwen3.5-0.8B-GGUF |
+| 2 | Qwen 3.5 2B | 2026-03-02 | 2B | Hybrid DeltaNet (3:1 linear:full attn) | Apache 2.0 | unsloth/Qwen3.5-2B-GGUF |
+| 3 | Qwen 3.5 4B | 2026-03-02 | 4B | Hybrid DeltaNet (3:1 linear:full attn) | Apache 2.0 | unsloth/Qwen3.5-4B-GGUF |
+| 4 | Nemotron 3 Nano 4B | 2026-03-17 | 4B | Hybrid Mamba-2 + Transformer (21 SSM + 4 attn + 17 MLP) | NVIDIA Open | nvidia/NVIDIA-Nemotron-3-Nano-4B-GGUF |
+| 5 | Gemma 4 E2B | 2026-04-02 | ~2B eff | PLE (Per-Layer Embedding) | Apache 2.0 | unsloth/gemma-4-E2B-it-GGUF |
+| 6 | Gemma 4 E4B | 2026-04-02 | ~4B eff | PLE (Per-Layer Embedding) | Apache 2.0 | unsloth/gemma-4-E4B-it-GGUF |
+
+- **Candidate selection criteria:** Released 2026 (January or later), <5B total params, fits 16GB VRAM at Q8_0, permissive license (Apache 2.0 or commercial-OK), GGUF available for llama.cpp, dense or near-dense architecture.
+- **Exhaustive search performed:** MiniMax (no sub-4B), DeepSeek (no sub-4B), GLM-5 (744B MoE only), Cohere Tiny Aya (CC-BY-NC, non-commercial), Falcon 3 (Dec 2024), Falcon-E (Apr 2025), OLMo 2 (2025), Phi-4-mini (2025), SmolLM3 (Jul 2025), Ministral 3 (Dec 2025), Qwen3-Coder-Next (80B total, exceeds VRAM). None qualified.
+
+#### Evaluation Protocol
+
+- **Test set:** 25 gold-standard probe inputs from EXP-25 (`training/data/faithfulness_probe/gold_train.jsonl`). Covers: out-of-domain (recipe, legal, medical, sports), adversarial twins (3 pairs), minimal inputs (3), dense-number inputs (2), production-format (handoff notes, monitoring alerts, code reviews).
+- **Metrics:** All 7 from #381 faithfulness framework:
+  - EPR (Entity Preservation Rate) — target >90%
+  - FR (Fabrication Rate) — target <5%
+  - TED (Template Echo Detection) — target 0%
+  - CCS (Cross-Contamination Score) — target <0.7 for twin pairs
+  - MIH (Minimal Input Handling) — target 3/3
+  - NP (Number Preservation) — target >95%
+  - SC (Schema Compliance) — target 100%
+- **Evaluation tool:** `training/scripts/eval_faithfulness.py --gold gold_train.jsonl --server http://127.0.0.1:8080`
+- **Quantization:** Q8_0 for primary eval (quality ceiling), Q4_K_M for secondary (deployment-realistic). Both from Unsloth/NVIDIA GGUF repos.
+- **Conditions per model:**
+  1. **Zero-shot:** Production encoding prompt from `build_production_prompt()` only. No examples in context.
+  2. **3-shot:** Same prompt + 3 gold-standard input/output examples prepended (1 out-of-domain, 1 minimal, 1 production-format).
+- **Inference:** llama-server on RX 7800 XT, temperature 0.3, n_predict 2048, stop ["\n\n\n"]. One model at a time (full VRAM available).
+- **Prompt format:** Each model uses its native chat template. System message = production encoding prompt. User message = raw input. This matches how the daemon would invoke each model.
+- **Secondary metrics:** Inference throughput (tok/s), VRAM usage (rocm-smi), time-to-first-token, total encoding latency per input.
+
+#### Analysis Plan
+
+1. Rank candidates by composite score: SC weight 0.3, EPR weight 0.3, FR weight 0.2 (inverted), NP weight 0.1, TED/CCS/MIH pass/fail.
+2. For each architecture family, compare 2B-class vs 4B-class to measure scaling effect.
+3. Compare zero-shot vs 3-shot delta per model — large improvement from examples suggests the model is more responsive to in-context learning (good signal for fine-tuning).
+4. Report all metrics for all models — no cherry-picking.
+
+#### Decision Gate
+
+| Outcome | Action |
+|---------|--------|
+| A candidate scores SC >80% and EPR >70% zero-shot | Strong signal — prioritize this model for v7 fine-tuning (may replace Qwen as base) |
+| Best candidate scores SC 50-80%, EPR 40-70% | Moderate signal — fine-tune top 2-3 candidates on v7 data and re-evaluate |
+| All candidates score SC <50% zero-shot | Null hypothesis supported — pretraining doesn't help much. Proceed with EXP-26 (Qwen + v7 data) |
+| 4B-class consistently beats 2B-class by >15% on EPR | Size matters for this task — evaluate VRAM/speed tradeoff for 4B deployment |
+
+- **Config:** llama-server (llama.cpp, ROCm build), RX 7800 XT 16GB, Q8_0 and Q4_K_M GGUF.
+- **Hardware:** Local RX 7800 XT only. No MI300X needed.
+- **Estimated time:** ~4-6 hours (download GGUFs + 6 models x 2 conditions x 25 inputs x ~30-60s per encoding).
+- **Tracking:** GitHub issue #390 (informs #386 Project Bespoke and EXP-26)
+- **Result:** (pending)
+- **Verdict:** (pending)
