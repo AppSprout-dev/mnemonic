@@ -22,6 +22,7 @@ type AnalyticsResponse struct {
 	SalienceDistribution map[string]map[string]int         `json:"salience_distribution"`
 	EncodingQuality      *EncodingQualityMetrics           `json:"encoding_quality,omitempty"`
 	ExperienceBuffer     *ExperienceBufferMetrics          `json:"experience_buffer,omitempty"`
+	RecentEncodings      []store.EncodingQualityEntry      `json:"recent_encodings,omitempty"`
 	Timestamp            string                            `json:"timestamp"`
 }
 
@@ -141,6 +142,12 @@ func buildAnalytics(ctx context.Context, s store.Store, log *slog.Logger) Analyt
 			Ambiguous:        bufStats.Ambiguous,
 			Total:            bufStats.Total,
 		}
+	}
+
+	// Recent per-encoding quality (last 50 for detail view)
+	recent, err := s.ListRecentEncodingQuality(ctx, 50)
+	if err == nil && len(recent) > 0 {
+		resp.RecentEncodings = recent
 	}
 
 	return resp

@@ -643,6 +643,21 @@ type ContinuousLearningStore interface {
 
 	// Quality drift detection
 	GetEncodingQualityWindow(ctx context.Context, windowSize int) (EncodingQualityWindow, error)
+
+	// Recent encoding quality for dashboard detail view
+	ListRecentEncodingQuality(ctx context.Context, limit int) ([]EncodingQualityEntry, error)
+}
+
+// EncodingQualityEntry is a single encoding's quality metrics for display.
+type EncodingQualityEntry struct {
+	MemoryID  string    `json:"memory_id"`
+	Summary   string    `json:"summary"`
+	Source    string    `json:"source"`
+	EPR       float64   `json:"epr"`
+	FR        float64   `json:"fr"`
+	Flags     []string  `json:"flags"`
+	Salience  float32   `json:"salience"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // Store is the full abstraction for persistent memory.

@@ -564,11 +564,16 @@ export async function loadAnalytics() {
             '<div class="ra-kpi-footer"><span class="ra-kpi-delta ' + pipelineDelta.cls + '">' + pipelineDelta.text + '</span><span class="ra-kpi-target">target &gt;50%</span></div>';
         _renderSparkline(document.getElementById('sparkPipeline'), pipelineSpark, _thresholdColor(encodingRate, 50, 30));
 
-        // MCP Survival card
+        // Source Breakdown card (replaces MCP Survival — survival rate was misleading)
         var el2 = document.getElementById('kpiMcp');
-        el2.innerHTML = '<div class="ra-kpi-label">MCP Survival</div>' +
-            '<div class="ra-kpi-row"><span class="ra-kpi-value" style="color:' + _thresholdColor(mcpSurv, 80, 60) + '">' + mcpSurv.toFixed(0) + '%</span></div>' +
-            '<div class="ra-kpi-footer"><span class="ra-kpi-delta neutral">' + ((sn.mcp || {}).active || 0) + ' / ' + ((sn.mcp || {}).total || 0) + ' active</span><span class="ra-kpi-target">target &gt;80%</span></div>';
+        var mcpTotal = (sn.mcp || {}).total || 0;
+        var fsTotal = (sn.filesystem || {}).total || 0;
+        var termTotal = (sn.terminal || {}).total || 0;
+        var clipTotal = (sn.clipboard || {}).total || 0;
+        var mcpPct = (p.total_encoded || 0) > 0 ? (mcpTotal / (p.total_encoded || 1) * 100) : 0;
+        el2.innerHTML = '<div class="ra-kpi-label">MCP Signal</div>' +
+            '<div class="ra-kpi-row"><span class="ra-kpi-value" style="color:' + _thresholdColor(mcpPct, 40, 20) + '">' + mcpPct.toFixed(0) + '%</span></div>' +
+            '<div class="ra-kpi-footer"><span class="ra-kpi-delta neutral">' + mcpTotal + ' mcp \u00b7 ' + fsTotal + ' fs \u00b7 ' + termTotal + ' term</span><span class="ra-kpi-target">high-value source</span></div>';
 
         // Recall Learning card
         var el3 = document.getElementById('kpiLearning');
@@ -670,70 +675,66 @@ export async function loadAnalytics() {
             var sessResp = await fetchJSON('/sessions?days=' + days + '&limit=100');
             var sessCount = sessResp.count || 0;
             var avgAssoc = st.avg_associations_per_memory || 0;
+            var totalMem = st.total_memories || 0;
 
             var lines = [];
 
-            // Overall health sentence
-            var healthIssues = 0;
-            if (encodingRate < 50) healthIssues++;
-            if (mcpSurv < 60) healthIssues++;
-            if (qualityPct < 50 && totalFb > 5) healthIssues++;
-            if (learningRatio < 1.0 && learningRatio > 0) healthIssues++;
+            // Lead with the headline number and what it means
+            lines.push('<strong>' + totalMem + ' memories</strong> across <strong>' + sessCount + ' sessions</strong> (' + avgAssoc.toFixed(1) + ' associations/memory).');
 
-            if (healthIssues === 0) {
-                lines.push('Mnemonic is performing well. <strong>' + (st.total_memories || 0) + ' memories</strong> across <strong>' + sessCount + ' sessions</strong>, with a well-connected network (' + avgAssoc.toFixed(1) + ' associations per memory).');
-            } else if (healthIssues <= 2) {
-                lines.push('Mnemonic is running but has <span class="ra-warn">areas that need attention</span>. <strong>' + (st.total_memories || 0) + ' memories</strong> across <strong>' + sessCount + ' sessions</strong>.');
-            } else {
-                lines.push('Mnemonic has <span class="ra-bad">several metrics below target</span>. <strong>' + (st.total_memories || 0) + ' memories</strong> across <strong>' + sessCount + ' sessions</strong>. This is expected early on \u2014 the system improves with use.');
+            // Encoding faithfulness — the most important quality signal
+            if (eq && eq.sample_count >= 5) {
+                var eprPct = eq.mean_epr * 100;
+                var tedPct = eq.ted_rate * 100;
+                if (eprPct >= 90 && tedPct < 2) {
+                    lines.push('Encoding faithfulness is <span class="ra-good">excellent</span> \u2014 ' + eprPct.toFixed(0) + '% entity preservation across ' + eq.sample_count + ' encodings, with no template leakage.');
+                } else if (eprPct >= 70) {
+                    lines.push('Encoding faithfulness is at ' + eprPct.toFixed(0) + '% EPR' + (tedPct > 2 ? ' with <span class="ra-warn">' + tedPct.toFixed(1) + '% template echo</span>' : '') + '.');
+                } else {
+                    lines.push('<span class="ra-bad">Encoding faithfulness is low at ' + eprPct.toFixed(0) + '% EPR.</span> The model may be hallucinating or dropping entities.');
+                }
             }
 
-            // Encoding pipeline insight
-            if (encodingRate >= 80) {
-                lines.push('The encoding pipeline is converting ' + encodingRate.toFixed(0) + '% of observations into memories \u2014 minimal signal loss.');
-            } else if (encodingRate >= 50) {
-                lines.push('The encoding pipeline is at ' + encodingRate.toFixed(0) + '%. Some observations are being filtered or failing to encode.');
-            } else if (encodingRate > 0) {
-                lines.push('<span class="ra-bad">Encoding is struggling at ' + encodingRate.toFixed(0) + '%.</span> Check LLM availability \u2014 most observations are failing to encode.');
+            // Encoding pipeline throughput
+            if (encodingRate < 50 && encodingRate > 0) {
+                lines.push('<span class="ra-bad">Encoding pipeline is at ' + encodingRate.toFixed(0) + '%</span> \u2014 most observations are failing to encode. Check LLM availability.');
+            } else if (encodingRate >= 50 && encodingRate < 80) {
+                lines.push('Encoding pipeline is converting ' + encodingRate.toFixed(0) + '% of observations.');
             }
 
-            // MCP survival insight
-            if (mcpSurv > 0 && mcpSurv < 60) {
-                var mcpActive = (sn.mcp || {}).active || 0;
-                var mcpTotal = (sn.mcp || {}).total || 0;
-                lines.push('Only <span class="ra-warn">' + mcpSurv.toFixed(0) + '% of MCP memories survive</span> (' + mcpActive + '/' + mcpTotal + ' active). Older memories naturally decay over time \u2014 this ratio improves as you build fresh, high-quality memories through active use.');
-            } else if (mcpSurv >= 60 && mcpSurv < 80) {
-                lines.push('MCP survival is ' + mcpSurv.toFixed(0) + '% \u2014 some older memories have been pruned, which is healthy.');
-            }
-
-            // Recall quality insight
+            // Recall quality — only if enough data
             if (totalFb > 5) {
                 if (qualityPct >= 70) {
-                    lines.push('Recall quality is <span class="ra-good">strong at ' + qualityPct.toFixed(0) + '%</span> \u2014 the system is returning useful memories most of the time.');
-                } else if (qualityDelta.cls === 'positive') {
-                    lines.push('Recall quality is at ' + qualityPct.toFixed(0) + '% but <span class="ra-good">trending up (' + qualityDelta.text + ')</span>. The feedback loop is working \u2014 keep rating recalls.');
+                    lines.push('Recall quality is <span class="ra-good">' + qualityPct.toFixed(0) + '% helpful</span>' + (qualityDelta.cls === 'positive' ? ' and improving.' : '.'));
                 } else {
-                    lines.push('Recall quality is <span class="ra-warn">below target at ' + qualityPct.toFixed(0) + '%</span>. More feedback will help the system learn which memories matter.');
+                    lines.push('Recall quality at ' + qualityPct.toFixed(0) + '% \u2014 ' + (qualityDelta.cls === 'positive' ? '<span class="ra-good">trending up</span>.' : 'more feedback will help the retrieval system learn.'));
                 }
-            } else {
-                lines.push('Not enough recall feedback yet to assess quality. Rate your recalls (helpful/partial/irrelevant) to train the system.');
             }
 
-            // Learning signal
+            // Learning signal — only surface if it's interesting
             if (learningRatio > 1.5) {
-                lines.push('Frequently recalled memories have <span class="ra-good">' + learningRatio.toFixed(1) + 'x higher salience</span> than unused ones \u2014 the system is learning what matters.');
-            } else if (learningRatio > 0 && learningRatio < 1.0) {
-                lines.push('Frequently recalled memories don\u2019t yet have higher salience than unused ones. This is normal early on \u2014 the recall learning signal strengthens over time with more feedback.');
+                lines.push('Frequently recalled memories have <span class="ra-good">' + learningRatio.toFixed(1) + 'x higher salience</span> \u2014 the feedback loop is working.');
             }
 
-            // Abstraction formation
-            if (principles > 0) {
-                var axiomText = axioms > 0 ? ' and <strong>' + axioms + ' axiom' + (axioms !== 1 ? 's' : '') + '</strong>' : '';
-                lines.push('The abstraction agent has synthesized <strong>' + principles + ' principle' + (principles !== 1 ? 's' : '') + '</strong>' + axiomText + ' from your memory network \u2014 higher-order patterns that inform future recall.');
+            // Abstraction — the capstone insight
+            if (principles > 0 || axioms > 0) {
+                var parts = [];
+                if (principles > 0) parts.push('<strong>' + principles + ' principles</strong>');
+                if (axioms > 0) parts.push('<strong>' + axioms + ' axioms</strong>');
+                lines.push('Abstraction has synthesized ' + parts.join(' and ') + ' from the memory graph.');
+            }
+
+            // Experience buffer — only if non-trivial
+            if (eb && eb.total >= 10) {
+                var goldPct = (eb.gold / eb.total * 100).toFixed(0);
+                lines.push('Experience buffer: ' + eb.total + ' training candidates (' + goldPct + '% gold, ' + eb.needs_improvement + ' flagged for re-encoding).');
             }
 
             briefEl.innerHTML = lines.join(' ');
         } catch(e) { /* analysis is optional, fail silently */ }
+
+        // ── Encoding Quality Detail ──
+        try { renderEncodingDetail(data.recent_encodings || []); } catch(e) { console.error('Encoding detail error:', e); }
 
         // ── Memory Lifecycle Chart (D3 stacked area) ──
         try { renderLifecycleChart(svData, fbData, chData); } catch(e) { console.error('Lifecycle chart error:', e); }
@@ -747,6 +748,162 @@ export async function loadAnalytics() {
     } catch(e) {
         console.error('Analytics load failed:', e);
     }
+}
+
+export function renderEncodingDetail(encodings) {
+    var panel = document.getElementById('encodingDetailPanel');
+    var chartEl = document.getElementById('encodingEprChart');
+    var tableEl = document.getElementById('encodingDetailTable');
+    var countEl = document.getElementById('encodingDetailCount');
+
+    if (!encodings || encodings.length === 0) {
+        panel.style.display = 'none';
+        return;
+    }
+    panel.style.display = '';
+    countEl.textContent = encodings.length + ' recent encodings';
+
+    // EPR time series chart (newest on right)
+    // Adaptive Y range: zoom into the data range with padding
+    var sorted = encodings.slice().reverse();
+    var minEpr = 1.0, maxEpr = 0.0;
+    for (var mi = 0; mi < sorted.length; mi++) {
+        if (sorted[mi].epr < minEpr) minEpr = sorted[mi].epr;
+        if (sorted[mi].epr > maxEpr) maxEpr = sorted[mi].epr;
+    }
+    // Floor/ceil to nice values with padding — show at least 60-100%
+    var yMin = Math.min(minEpr, 0.6);
+    yMin = Math.floor(yMin * 10) / 10; // round down to nearest 10%
+    var yMax = 1.0;
+    var yRange = yMax - yMin;
+
+    var width = chartEl.clientWidth || 600;
+    var height = 120;
+    var pad = { top: 10, right: 10, bottom: 25, left: 40 };
+    var plotW = width - pad.left - pad.right;
+    var plotH = height - pad.top - pad.bottom;
+
+    var svgNS = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('width', width);
+    svg.setAttribute('height', height);
+    svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+
+    // Y gridlines at even intervals within the range
+    var ySteps = 4;
+    var yStepSize = yRange / ySteps;
+    for (var yi = 0; yi <= ySteps; yi++) {
+        var yVal = yMin + (yi * yStepSize);
+        var yPos = pad.top + plotH - ((yVal - yMin) / yRange * plotH);
+        var line = document.createElementNS(svgNS, 'line');
+        line.setAttribute('x1', pad.left); line.setAttribute('x2', width - pad.right);
+        line.setAttribute('y1', yPos); line.setAttribute('y2', yPos);
+        line.setAttribute('stroke', yi === 0 ? 'var(--border)' : 'var(--bg-hover)');
+        line.setAttribute('stroke-width', '1');
+        svg.appendChild(line);
+        var label = document.createElementNS(svgNS, 'text');
+        label.setAttribute('x', pad.left - 5); label.setAttribute('y', yPos + 3);
+        label.setAttribute('text-anchor', 'end'); label.setAttribute('fill', 'var(--text-dim)');
+        label.setAttribute('font-size', '9');
+        label.textContent = (yVal * 100).toFixed(0) + '%';
+        svg.appendChild(label);
+    }
+
+    // Target line at 85% (if within visible range)
+    var targetY = pad.top + plotH - ((0.85 - yMin) / yRange * plotH);
+    var tLine = document.createElementNS(svgNS, 'line');
+    tLine.setAttribute('x1', pad.left); tLine.setAttribute('x2', width - pad.right);
+    tLine.setAttribute('y1', targetY); tLine.setAttribute('y2', targetY);
+    tLine.setAttribute('stroke', 'var(--accent)'); tLine.setAttribute('stroke-width', '1');
+    tLine.setAttribute('stroke-dasharray', '4,3'); tLine.setAttribute('opacity', '0.5');
+    svg.appendChild(tLine);
+    var tLabel = document.createElementNS(svgNS, 'text');
+    tLabel.setAttribute('x', width - pad.right - 2); tLabel.setAttribute('y', targetY - 3);
+    tLabel.setAttribute('text-anchor', 'end'); tLabel.setAttribute('fill', 'var(--accent)');
+    tLabel.setAttribute('font-size', '8'); tLabel.setAttribute('opacity', '0.7');
+    tLabel.textContent = 'target 85%';
+    svg.appendChild(tLabel);
+
+    // Data points (Y mapped to adaptive range)
+    var stepX = sorted.length > 1 ? plotW / (sorted.length - 1) : plotW / 2;
+    var points = [];
+    for (var i = 0; i < sorted.length; i++) {
+        var x = pad.left + (sorted.length === 1 ? plotW / 2 : i * stepX);
+        var y = pad.top + plotH - ((sorted[i].epr - yMin) / yRange * plotH);
+        points.push(x + ',' + y);
+
+        var dot = document.createElementNS(svgNS, 'circle');
+        dot.setAttribute('cx', x); dot.setAttribute('cy', y); dot.setAttribute('r', '3');
+        var eprColor = sorted[i].epr >= 0.85 ? 'var(--good)' : sorted[i].epr >= 0.7 ? 'var(--accent)' : 'var(--bad)';
+        dot.setAttribute('fill', eprColor);
+        if (sorted[i].flags && sorted[i].flags.length > 0) {
+            dot.setAttribute('stroke', 'var(--bad)'); dot.setAttribute('stroke-width', '2');
+        }
+        svg.appendChild(dot);
+    }
+
+    // Line connecting points
+    if (points.length > 1) {
+        var polyline = document.createElementNS(svgNS, 'polyline');
+        polyline.setAttribute('points', points.join(' '));
+        polyline.setAttribute('fill', 'none'); polyline.setAttribute('stroke', 'var(--text-dim)');
+        polyline.setAttribute('stroke-width', '1.5'); polyline.setAttribute('opacity', '0.6');
+        svg.appendChild(polyline);
+    }
+
+    chartEl.innerHTML = '';
+    chartEl.appendChild(svg);
+
+    // Detail table
+    var html = '<table style="width:100%;border-collapse:collapse;font-size:0.7rem">' +
+        '<thead><tr style="border-bottom:1px solid var(--border);color:var(--text-dim)">' +
+        '<th style="text-align:left;padding:4px 8px">Summary</th>' +
+        '<th style="text-align:left;padding:4px">Source</th>' +
+        '<th style="text-align:right;padding:4px">EPR</th>' +
+        '<th style="text-align:right;padding:4px">FR</th>' +
+        '<th style="text-align:left;padding:4px">Flags</th>' +
+        '<th style="text-align:right;padding:4px">Salience</th>' +
+        '<th style="text-align:right;padding:4px">Time</th>' +
+        '</tr></thead><tbody>';
+
+    for (var j = 0; j < encodings.length; j++) {
+        var enc = encodings[j];
+        var eprStr = (enc.epr * 100).toFixed(0) + '%';
+        var frStr = (enc.fr * 100).toFixed(0) + '%';
+        var eprStyle = enc.epr >= 0.85 ? 'color:var(--good)' : enc.epr >= 0.7 ? 'color:var(--accent)' : 'color:var(--bad)';
+        var frStyle = enc.fr <= 0.05 ? '' : enc.fr <= 0.15 ? 'color:var(--accent)' : 'color:var(--bad)';
+        var flagsHtml = (enc.flags && enc.flags.length > 0)
+            ? enc.flags.map(function(f) { return '<span style="background:var(--bg-hover);padding:1px 4px;border-radius:3px;font-size:0.6rem">' + f + '</span>'; }).join(' ')
+            : '<span style="color:var(--text-dim)">\u2014</span>';
+        var summary = enc.summary || '(no summary)';
+        if (summary.length > 60) summary = summary.substring(0, 57) + '...';
+        var ago = _timeAgo(enc.created_at);
+
+        html += '<tr style="border-bottom:1px solid var(--bg-hover)">' +
+            '<td style="padding:4px 8px;max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + (enc.summary || '').replace(/"/g, '&quot;') + '">' + summary + '</td>' +
+            '<td style="padding:4px">' + enc.source + '</td>' +
+            '<td style="text-align:right;padding:4px;font-weight:600;' + eprStyle + '">' + eprStr + '</td>' +
+            '<td style="text-align:right;padding:4px;' + frStyle + '">' + frStr + '</td>' +
+            '<td style="padding:4px">' + flagsHtml + '</td>' +
+            '<td style="text-align:right;padding:4px">' + enc.salience.toFixed(2) + '</td>' +
+            '<td style="text-align:right;padding:4px;color:var(--text-dim)">' + ago + '</td>' +
+            '</tr>';
+    }
+    html += '</tbody></table>';
+    tableEl.innerHTML = html;
+}
+
+function _timeAgo(dateStr) {
+    var d = new Date(dateStr);
+    var now = new Date();
+    var diffMs = now - d;
+    var diffMin = Math.floor(diffMs / 60000);
+    if (diffMin < 1) return 'just now';
+    if (diffMin < 60) return diffMin + 'm ago';
+    var diffH = Math.floor(diffMin / 60);
+    if (diffH < 24) return diffH + 'h ago';
+    var diffD = Math.floor(diffH / 24);
+    return diffD + 'd ago';
 }
 
 export function renderLifecycleChart(svData, fbData, chData) {

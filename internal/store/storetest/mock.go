@@ -389,6 +389,9 @@ func (MockStore) GetRecallHistory(context.Context, string) ([]store.RecallFeedba
 func (MockStore) GetEncodingQualityWindow(context.Context, int) (store.EncodingQualityWindow, error) {
 	return store.EncodingQualityWindow{}, nil
 }
+func (MockStore) ListRecentEncodingQuality(context.Context, int) ([]store.EncodingQualityEntry, error) {
+	return nil, nil
+}
 
 // --- Lifecycle ---
 

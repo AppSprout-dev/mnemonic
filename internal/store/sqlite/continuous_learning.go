@@ -218,3 +218,34 @@ func (s *SQLiteStore) GetEncodingQualityWindow(ctx context.Context, windowSize i
 	}
 	return w, nil
 }
+
+func (s *SQLiteStore) ListRecentEncodingQuality(ctx context.Context, limit int) ([]store.EncodingQualityEntry, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT m.id, COALESCE(m.summary, ''), COALESCE(m.source, ''),
+		        COALESCE(m.encoding_epr, 0), COALESCE(m.encoding_fr, 0),
+		        COALESCE(m.encoding_flags, ''), COALESCE(m.salience, 0), m.created_at
+		 FROM memories m
+		 WHERE m.encoding_epr IS NOT NULL
+		 ORDER BY m.created_at DESC LIMIT ?`,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("listing recent encoding quality: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var entries []store.EncodingQualityEntry
+	for rows.Next() {
+		var e store.EncodingQualityEntry
+		var flagsStr string
+		if err := rows.Scan(&e.MemoryID, &e.Summary, &e.Source,
+			&e.EPR, &e.FR, &flagsStr, &e.Salience, &e.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scanning encoding quality entry: %w", err)
+		}
+		if flagsStr != "" && flagsStr != "null" {
+			_ = json.Unmarshal([]byte(flagsStr), &e.Flags)
+		}
+		entries = append(entries, e)
+	}
+	return entries, rows.Err()
+}
