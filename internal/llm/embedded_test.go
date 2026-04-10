@@ -284,7 +284,8 @@ func TestFormatPrompt(t *testing.T) {
 		{Role: "user", Content: "Hello"},
 	}
 	got := formatPrompt(messages)
-	expected := "<|system|>\nYou are helpful.\n<|user|>\nHello\n<|assistant|>\n"
+	// ChatML format with /no_think for Qwen 3.5 thinking mode suppression
+	expected := "<|im_start|>system\nYou are helpful. /no_think<|im_end|>\n<|im_start|>user\nHello<|im_end|>\n<|im_start|>assistant\n"
 	if got != expected {
 		t.Errorf("formatPrompt mismatch:\ngot:  %q\nwant: %q", got, expected)
 	}
