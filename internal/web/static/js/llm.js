@@ -833,12 +833,13 @@ export function renderEncodingDetail(encodings) {
         points.push(x + ',' + y);
 
         var dot = document.createElementNS(svgNS, 'circle');
-        dot.setAttribute('cx', x); dot.setAttribute('cy', y); dot.setAttribute('r', '6');
-        var eprColor = sorted[i].epr >= 0.85 ? 'var(--good)' : sorted[i].epr >= 0.7 ? 'var(--accent)' : 'var(--bad)';
-        dot.setAttribute('fill', eprColor);
+        dot.setAttribute('cx', x); dot.setAttribute('cy', y); dot.setAttribute('r', '5');
+        dot.setAttribute('fill', '#9ca3af');
+        dot.setAttribute('stroke', '#6b7280'); dot.setAttribute('stroke-width', '1');
         if (sorted[i].flags && sorted[i].flags.length > 0) {
-            dot.setAttribute('stroke', 'var(--bad)'); dot.setAttribute('stroke-width', '2.5');
-            dot.setAttribute('r', '7');
+            dot.setAttribute('fill', '#ef4444');
+            dot.setAttribute('stroke', '#dc2626'); dot.setAttribute('stroke-width', '2');
+            dot.setAttribute('r', '6');
         }
         svg.appendChild(dot);
     }
