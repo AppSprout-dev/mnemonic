@@ -1188,3 +1188,21 @@ Gemma E2B matches Qwen 4B on faithfulness while being 44% faster. The faithful p
 - **Status:** COMPLETED
 - **Verdict:** CONFIRMED with unexpected finding. Multiple candidates exceeded EPR >60% (confirming the hypothesis), and the null hypothesis is REFUTED (pretraining matters — Gemma E2B 25/25 vs Qwen 2B 4/25). **But the dominant finding is that prompting strategy matters more than model choice.** The faithful prompt on Gemma E2B (100% EPR) outperformed the production prompt on Qwen 4B + 3-shot (94.7% EPR). This confirms the LLMStructBench result (arXiv:2602.14743).
 - **Recommendation:** Deploy **Gemma 4 E2B + faithful prompt** as the production encoding model. Fine-tuning (EXP-26) should target SC enforcement and FR reduction, not EPR/NP (already at 100%). GBNF grammar for structural enforcement. Continuous learning (issue #391) for ongoing improvement. The faithful prompt has been deployed to the daemon (`buildCompressionPrompt()` rewritten on `feat/exp29-candidate-eval`).
+
+### EXP-30: Gemma 4 E2B Spoke Training — Faithful Prompt + V7 Data
+
+- **Date:** 2026-04-10
+- **Status:** REGISTERED
+- **Hypothesis:** Gemma 4 E2B with trained Felix spokes on v7 data + faithful prompt will achieve 100% SC (schema compliance) while maintaining the 100% EPR and 100% NP demonstrated by the base model with the faithful prompt in EXP-29. The spokes learn the structural schema that the base model can't produce without grammar enforcement.
+- **Null hypothesis:** Spoke training on Gemma E2B degrades the faithfulness achieved by the faithful prompt alone (EPR drops below 90% or FR rises above 5%). The base model + prompt is sufficient and spokes add no value.
+- **Variable:** Spoke adapters trained on v7 encoding data with faithful prompt format. Base model, prompt, and quantization held constant.
+- **Control:** Gemma 4 E2B + faithful prompt, zero-shot, no spokes (EXP-29 result: 100% EPR, 100% NP, 2.4% FR, 0% SC, 24/25 valid).
+- **Prediction:** SC reaches >90% (spokes learn the exact field structure, enum values, and structured_concepts format). EPR stays >95%. FR stays <3%. NP stays >95%. If SC doesn't improve, the model needs GBNF grammar as a crutch and spoke training has limited value for this task.
+- **Config:** Gemma 4 E2B (google/gemma-4-E2B-it, NF4 quantization, PLE offloaded to CPU) + 4 spokes rank 64 on all 35 layers (~27.5M trainable params, ~1.2% overhead), batch 1, grad_accum 8, seq_len 2048, LR 3e-4, scalar_lr_scale 0.1, Muon + AdamW, gradient checkpointing. Faithful prompt format via updated build_production_prompt().
+- **Data:** V7 combined: 5,292 train / 588 eval. Retokenized with Gemma E2B tokenizer and faithful prompt format.
+- **Hardware:** Local RX 7800 XT, 16GB VRAM, ROCm. Estimated VRAM: ~1.6 GB (NF4 base + PLE offload + spokes + optimizer). Daemon stopped for training.
+- **Metrics:** Primary: SC (the gap), EPR, FR, NP (must not regress from EXP-29 baseline). Secondary: eval loss/PPL, stress_test_hallucination.py (7/7 target), inference throughput.
+- **Export plan:** Export spokes via Gemma-specific export script, quantize to RQ4 via rotorq pipeline, deploy in embedded llama.cpp backend.
+- **Tracking:** Branch feat/gemma-e2b-spokes
+- **Result:** (pending)
+- **Verdict:** (pending)
