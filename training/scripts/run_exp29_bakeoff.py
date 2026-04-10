@@ -267,7 +267,10 @@ def generate_encoding(
 
     # Use /v1/chat/completions for all modes — grammar field is supported
     # (undocumented but confirmed in llama.cpp server-common.cpp line 918)
-    system_prompt = build_production_prompt("", source=source, mem_type=mem_type)
+    if prompt_variant == "production":
+        system_prompt = build_production_prompt("", source=source, mem_type=mem_type)
+    else:
+        system_prompt = build_prompt_variant("", variant=prompt_variant, source=source, mem_type=mem_type)
 
     messages = [{"role": "system", "content": system_prompt}]
 
@@ -407,6 +410,7 @@ def run_model_eval(
                 raw_input, source, mem_type, few_shot_examples,
                 use_grammar=use_grammar,
                 enable_thinking=enable_thinking,
+                prompt_variant=prompt_variant,
             )
 
             if output:
@@ -445,6 +449,8 @@ def run_model_eval(
             suffix_parts.append("grammar")
         if enable_thinking:
             suffix_parts.append("thinking")
+        if prompt_variant != "production":
+            suffix_parts.append(prompt_variant)
         suffix = "_" + "_".join(suffix_parts) if suffix_parts else ""
         result_file = RESULTS_DIR / f"{model_key}_{quant}_{condition}{suffix}.json"
         with open(result_file, "w") as f:
@@ -597,6 +603,7 @@ def main():
             model_key, args.quant, args.few_shot,
             use_grammar=args.grammar,
             enable_thinking=args.thinking,
+            prompt_variant=args.prompt_variant,
         )
         if result:
             all_results.append(result)
