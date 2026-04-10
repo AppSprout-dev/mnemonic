@@ -286,9 +286,12 @@ def generate_encoding(
     user_content = f"SOURCE: {source}\nTYPE: {mem_type}\nCONTENT:\n{raw_input}"
     messages.append({"role": "user", "content": user_content})
 
+    # Thinking mode needs more tokens for reasoning + JSON output
+    max_tokens = 4096 if enable_thinking else 2048
+
     payload = {
         "messages": messages,
-        "max_tokens": 2048,
+        "max_tokens": max_tokens,
         "temperature": 0.3,
         "stop": ["\n\n\n"],
         "chat_template_kwargs": {"enable_thinking": enable_thinking},
@@ -346,6 +349,7 @@ def run_model_eval(
     quant: str,
     few_shot: int = 0,
     use_grammar: bool = False,
+    enable_thinking: bool = False,
 ) -> dict | None:
     """Run evaluation for a single model. Returns results dict or None on failure."""
     model_info = CANDIDATES[model_key]
@@ -359,13 +363,20 @@ def run_model_eval(
         print(f"  GGUF not found: {model_path}")
         return None
 
-    grammar_tag = "+grammar" if use_grammar else ""
+    tags = []
+    if use_grammar:
+        tags.append("grammar")
+    if enable_thinking:
+        tags.append("thinking")
+    tag_str = "+" + "+".join(tags) if tags else ""
     print(f"\n{'='*70}")
-    print(f"Evaluating: {model_info['name']} ({quant}{grammar_tag})")
+    print(f"Evaluating: {model_info['name']} ({quant}{tag_str})")
     print(f"  File: {gguf_file}")
     print(f"  Few-shot: {few_shot}")
     if use_grammar:
         print(f"  Grammar: GBNF encoding schema (enum-constrained)")
+    if enable_thinking:
+        print(f"  Thinking: enabled (reasoning before output)")
     print(f"{'='*70}")
 
     # Load gold data
@@ -391,6 +402,7 @@ def run_model_eval(
             output, metadata = generate_encoding(
                 raw_input, source, mem_type, few_shot_examples,
                 use_grammar=use_grammar,
+                enable_thinking=enable_thinking,
             )
 
             if output:
@@ -424,8 +436,13 @@ def run_model_eval(
         # Save results
         RESULTS_DIR.mkdir(parents=True, exist_ok=True)
         condition = f"{few_shot}shot" if few_shot > 0 else "0shot"
-        grammar_suffix = "_grammar" if use_grammar else ""
-        result_file = RESULTS_DIR / f"{model_key}_{quant}_{condition}{grammar_suffix}.json"
+        suffix_parts = []
+        if use_grammar:
+            suffix_parts.append("grammar")
+        if enable_thinking:
+            suffix_parts.append("thinking")
+        suffix = "_" + "_".join(suffix_parts) if suffix_parts else ""
+        result_file = RESULTS_DIR / f"{model_key}_{quant}_{condition}{suffix}.json"
         with open(result_file, "w") as f:
             json.dump(evaluation, f, indent=2, default=str)
         print(f"\n  Results saved: {result_file}")
@@ -551,6 +568,11 @@ def main():
         action="store_true",
         help="Enable GBNF grammar constraint for schema enforcement",
     )
+    parser.add_argument(
+        "--thinking",
+        action="store_true",
+        help="Enable thinking/reasoning mode (model generates chain-of-thought before answer)",
+    )
     args = parser.parse_args()
 
     if args.report_only:
@@ -562,7 +584,9 @@ def main():
     all_results = []
     for model_key in models:
         result = run_model_eval(
-            model_key, args.quant, args.few_shot, use_grammar=args.grammar,
+            model_key, args.quant, args.few_shot,
+            use_grammar=args.grammar,
+            enable_thinking=args.thinking,
         )
         if result:
             all_results.append(result)
