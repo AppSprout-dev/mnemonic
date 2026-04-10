@@ -552,7 +552,10 @@ export async function loadAnalytics() {
             '<div class="ra-kpi" id="kpiLearning"></div>' +
             '<div class="ra-kpi" id="kpiQuality"></div>' +
             '<div class="ra-kpi" id="kpiDensity"></div>' +
-            '<div class="ra-kpi" id="kpiRetrieval"></div>';
+            '<div class="ra-kpi" id="kpiRetrieval"></div>' +
+            '<div class="ra-kpi" id="kpiEPR"></div>' +
+            '<div class="ra-kpi" id="kpiTED"></div>' +
+            '<div class="ra-kpi" id="kpiExperience"></div>';
 
         // Pipeline Health card
         var el1 = document.getElementById('kpiPipeline');
@@ -602,6 +605,40 @@ export async function loadAnalytics() {
                 '<div class="ra-kpi-row"><span class="ra-kpi-value" style="color:' + _thresholdColor(avgPerQuery, 3, 1) + '">' + (totalQ > 0 ? avgPerQuery.toFixed(1) : '-') + '</span></div>' +
                 '<div class="ra-kpi-footer"><span class="ra-kpi-delta neutral">' + totalQ + ' queries' + (avgMs > 0 ? ' \u00b7 ' + avgMs.toFixed(0) + 'ms avg' : '') + '</span><span class="ra-kpi-target">target &gt;3 per query</span></div>';
         } catch(e) { el6.innerHTML = '<div class="ra-kpi-label">Retrieval Perf</div><div class="ra-kpi-row"><span class="ra-kpi-value">-</span></div>'; }
+
+        // Encoding Faithfulness (EPR) — from Phase A continuous learning
+        var el7 = document.getElementById('kpiEPR');
+        var eq = data.encoding_quality;
+        if (eq && eq.sample_count > 0) {
+            var eprPct = eq.mean_epr * 100;
+            el7.innerHTML = '<div class="ra-kpi-label">Encoding EPR</div>' +
+                '<div class="ra-kpi-row"><span class="ra-kpi-value" style="color:' + _thresholdColor(eprPct, 85, 70) + '">' + eprPct.toFixed(0) + '%</span></div>' +
+                '<div class="ra-kpi-footer"><span class="ra-kpi-delta neutral">' + eq.sample_count + ' encodings</span><span class="ra-kpi-target">target &gt;85%</span></div>';
+        } else {
+            el7.innerHTML = '<div class="ra-kpi-label">Encoding EPR</div><div class="ra-kpi-row"><span class="ra-kpi-value">-</span></div><div class="ra-kpi-footer"><span class="ra-kpi-delta neutral">awaiting data</span></div>';
+        }
+
+        // Template Echo Rate (TED)
+        var el8 = document.getElementById('kpiTED');
+        if (eq && eq.sample_count > 0) {
+            var tedPct = eq.ted_rate * 100;
+            el8.innerHTML = '<div class="ra-kpi-label">Template Echo</div>' +
+                '<div class="ra-kpi-row"><span class="ra-kpi-value" style="color:' + _thresholdColor(100 - tedPct, 95, 85) + '">' + tedPct.toFixed(1) + '%</span></div>' +
+                '<div class="ra-kpi-footer"><span class="ra-kpi-delta neutral">' + (eq.flagged_rate * 100).toFixed(1) + '% flagged</span><span class="ra-kpi-target">target &lt;5%</span></div>';
+        } else {
+            el8.innerHTML = '<div class="ra-kpi-label">Template Echo</div><div class="ra-kpi-row"><span class="ra-kpi-value">-</span></div><div class="ra-kpi-footer"><span class="ra-kpi-delta neutral">awaiting data</span></div>';
+        }
+
+        // Experience Buffer
+        var el9 = document.getElementById('kpiExperience');
+        var eb = data.experience_buffer;
+        if (eb && eb.total > 0) {
+            el9.innerHTML = '<div class="ra-kpi-label">Experience Buffer</div>' +
+                '<div class="ra-kpi-row"><span class="ra-kpi-value">' + eb.total + '</span></div>' +
+                '<div class="ra-kpi-footer"><span class="ra-kpi-delta neutral">' + eb.gold + ' gold \u00b7 ' + eb.needs_improvement + ' needs work</span><span class="ra-kpi-target">' + eb.ambiguous + ' pending</span></div>';
+        } else {
+            el9.innerHTML = '<div class="ra-kpi-label">Experience Buffer</div><div class="ra-kpi-row"><span class="ra-kpi-value">0</span></div><div class="ra-kpi-footer"><span class="ra-kpi-delta neutral">collecting data</span></div>';
+        }
 
         // ── Cognitive Agents Panel ──
         try {

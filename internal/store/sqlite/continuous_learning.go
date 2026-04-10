@@ -11,14 +11,19 @@ import (
 )
 
 func (s *SQLiteStore) WriteVerificationResult(ctx context.Context, memoryID string, epr float64, fr float64, flags []string) error {
-	flagsJSON, err := json.Marshal(flags)
-	if err != nil {
-		return fmt.Errorf("marshaling flags: %w", err)
+	// Store SQL NULL for empty/nil flags, JSON array for non-empty
+	var flagsVal any
+	if len(flags) > 0 {
+		flagsJSON, err := json.Marshal(flags)
+		if err != nil {
+			return fmt.Errorf("marshaling flags: %w", err)
+		}
+		flagsVal = string(flagsJSON)
 	}
 
-	_, err = s.db.ExecContext(ctx,
+	_, err := s.db.ExecContext(ctx,
 		`UPDATE memories SET encoding_epr = ?, encoding_fr = ?, encoding_flags = ? WHERE id = ?`,
-		epr, fr, string(flagsJSON), memoryID,
+		epr, fr, flagsVal, memoryID,
 	)
 	if err != nil {
 		return fmt.Errorf("writing verification result for %s: %w", memoryID, err)
@@ -203,7 +208,7 @@ func (s *SQLiteStore) GetEncodingQualityWindow(ctx context.Context, windowSize i
 		`SELECT
 		    COALESCE(AVG(encoding_epr), 0),
 		    COALESCE(SUM(CASE WHEN encoding_flags LIKE '%template_echo%' THEN 1.0 ELSE 0.0 END) / MAX(COUNT(*), 1), 0),
-		    COALESCE(SUM(CASE WHEN encoding_flags IS NOT NULL AND encoding_flags != '[]' THEN 1.0 ELSE 0.0 END) / MAX(COUNT(*), 1), 0),
+		    COALESCE(SUM(CASE WHEN encoding_flags IS NOT NULL AND encoding_flags NOT IN ('[]', 'null') AND encoding_flags != '' THEN 1.0 ELSE 0.0 END) / MAX(COUNT(*), 1), 0),
 		    COUNT(*)
 		 FROM (SELECT encoding_epr, encoding_flags FROM memories WHERE encoding_epr IS NOT NULL ORDER BY created_at DESC LIMIT ?)`,
 		windowSize,

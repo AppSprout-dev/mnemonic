@@ -20,7 +20,25 @@ type AnalyticsResponse struct {
 	ConsolidationHistory []store.ConsolidationEntry        `json:"consolidation_history"`
 	MemorySurvival       []store.SurvivalEntry             `json:"memory_survival"`
 	SalienceDistribution map[string]map[string]int         `json:"salience_distribution"`
+	EncodingQuality      *EncodingQualityMetrics           `json:"encoding_quality,omitempty"`
+	ExperienceBuffer     *ExperienceBufferMetrics          `json:"experience_buffer,omitempty"`
 	Timestamp            string                            `json:"timestamp"`
+}
+
+// EncodingQualityMetrics summarizes the verification gate's rolling output.
+type EncodingQualityMetrics struct {
+	MeanEPR     float64 `json:"mean_epr"`
+	TEDRate     float64 `json:"ted_rate"`
+	FlaggedRate float64 `json:"flagged_rate"`
+	SampleCount int     `json:"sample_count"`
+}
+
+// ExperienceBufferMetrics summarizes the experience buffer for training readiness.
+type ExperienceBufferMetrics struct {
+	Gold             int `json:"gold"`
+	NeedsImprovement int `json:"needs_improvement"`
+	Ambiguous        int `json:"ambiguous"`
+	Total            int `json:"total"`
 }
 
 // PipelineMetrics shows encoding efficiency.
@@ -102,6 +120,28 @@ func buildAnalytics(ctx context.Context, s store.Store, log *slog.Logger) Analyt
 	resp.ConsolidationHistory = analytics.ConsolidationHistory
 	resp.MemorySurvival = analytics.MemorySurvival
 	resp.SalienceDistribution = analytics.SalienceDistribution
+
+	// Encoding quality (Phase A continuous learning)
+	window, err := s.GetEncodingQualityWindow(ctx, 100)
+	if err == nil && window.SampleCount > 0 {
+		resp.EncodingQuality = &EncodingQualityMetrics{
+			MeanEPR:     window.MeanEPR,
+			TEDRate:     window.TEDRate,
+			FlaggedRate: window.FlaggedRate,
+			SampleCount: window.SampleCount,
+		}
+	}
+
+	// Experience buffer stats
+	bufStats, err := s.GetExperienceBufferStats(ctx)
+	if err == nil && bufStats.Total > 0 {
+		resp.ExperienceBuffer = &ExperienceBufferMetrics{
+			Gold:             bufStats.Gold,
+			NeedsImprovement: bufStats.NeedsImprovement,
+			Ambiguous:        bufStats.Ambiguous,
+			Total:            bufStats.Total,
+		}
+	}
 
 	return resp
 }
