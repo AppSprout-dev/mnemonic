@@ -74,6 +74,7 @@ type EmbeddedLLMConfig struct {
 	ModelsDir      string `yaml:"models_dir"`       // directory for GGUF model files (default: ~/.mnemonic/models)
 	ChatModelFile  string `yaml:"chat_model_file"`  // filename of the chat GGUF model within ModelsDir
 	EmbedModelFile string `yaml:"embed_model_file"` // filename of the embedding GGUF model within ModelsDir
+	ChatTemplate   string `yaml:"chat_template"`    // "chatml" (default, Qwen 3.5) or "gemma" (Gemma 4 E2B)
 	ContextSize    int    `yaml:"context_size"`     // context window size in tokens (default: 2048)
 	GPULayers      int    `yaml:"gpu_layers"`       // number of layers to offload to GPU (-1 = all, 0 = none)
 	Threads        int    `yaml:"threads"`          // number of CPU threads for inference (0 = auto)

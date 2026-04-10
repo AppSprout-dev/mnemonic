@@ -83,6 +83,7 @@ type EmbeddedProvider struct {
 	modelsDir      string
 	chatModelFile  string
 	embedModelFile string
+	chatTemplate   string // "chatml" or "gemma"
 	opts           BackendOptions
 	maxTokens      int
 	temperature    float32
@@ -99,6 +100,7 @@ type EmbeddedProviderConfig struct {
 	ModelsDir      string
 	ChatModelFile  string
 	EmbedModelFile string
+	ChatTemplate   string // "chatml" (default, Qwen), "gemma" (Gemma 4 E2B)
 	ContextSize    int
 	GPULayers      int
 	Threads        int
@@ -120,10 +122,15 @@ func NewEmbeddedProvider(cfg EmbeddedProviderConfig) *EmbeddedProvider {
 	if cfg.BatchSize <= 0 {
 		cfg.BatchSize = 512
 	}
+	chatTemplate := cfg.ChatTemplate
+	if chatTemplate == "" {
+		chatTemplate = "chatml"
+	}
 	return &EmbeddedProvider{
 		modelsDir:      cfg.ModelsDir,
 		chatModelFile:  cfg.ChatModelFile,
 		embedModelFile: cfg.EmbedModelFile,
+		chatTemplate:   chatTemplate,
 		opts: BackendOptions{
 			ContextSize: cfg.ContextSize,
 			GPULayers:   cfg.GPULayers,
@@ -191,14 +198,23 @@ func (p *EmbeddedProvider) release() {
 	<-p.sem
 }
 
-// formatPrompt converts a slice of Messages into a prompt string.
-// Uses ChatML format (Qwen 3.5, Gemma-it, etc.):
+// formatPrompt converts a slice of Messages into a prompt string using the
+// specified chat template. Supported templates:
 //
-//	<|im_start|>system\n...<|im_end|>\n<|im_start|>user\n...<|im_end|>\n<|im_start|>assistant\n
-//
-// Appends /no_think to the system message to disable Qwen's thinking mode,
-// which interferes with GBNF grammar-constrained generation.
-func formatPrompt(messages []Message) string {
+//   - "chatml" (Qwen 3.5): <|im_start|>role\n...<|im_end|>\n
+//   - "gemma" (Gemma 4 E2B): <start_of_turn>role\n...<end_of_turn>\n
+func formatPrompt(messages []Message, template string) string {
+	switch template {
+	case "gemma":
+		return formatPromptGemma(messages)
+	default:
+		return formatPromptChatML(messages)
+	}
+}
+
+// formatPromptChatML formats messages using ChatML (Qwen 3.5).
+// Appends /no_think to the system message to disable Qwen's thinking mode.
+func formatPromptChatML(messages []Message) string {
 	var b strings.Builder
 	for _, msg := range messages {
 		b.WriteString("<|im_start|>")
@@ -212,6 +228,34 @@ func formatPrompt(messages []Message) string {
 	}
 	b.WriteString("<|im_start|>assistant\n")
 	return b.String()
+}
+
+// formatPromptGemma formats messages using Gemma's chat template.
+// Maps "system" role to user turn (Gemma doesn't have a system role — system
+// instructions go in the first user turn).
+func formatPromptGemma(messages []Message) string {
+	var b strings.Builder
+	for _, msg := range messages {
+		role := msg.Role
+		if role == "system" {
+			role = "user"
+		}
+		b.WriteString("<start_of_turn>")
+		b.WriteString(role)
+		b.WriteByte('\n')
+		b.WriteString(msg.Content)
+		b.WriteString("<end_of_turn>\n")
+	}
+	b.WriteString("<start_of_turn>model\n")
+	return b.String()
+}
+
+// stopSequenceForTemplate returns the EOS token for the given chat template.
+func stopSequenceForTemplate(template string) string {
+	if template == "gemma" {
+		return "<end_of_turn>"
+	}
+	return "<|im_end|>"
 }
 
 // Complete sends a completion request to the in-process backend.
@@ -256,7 +300,7 @@ func (p *EmbeddedProvider) Complete(ctx context.Context, req CompletionRequest) 
 	}
 
 	// Warn if prompt likely exceeds context window (bridge will hard-truncate)
-	prompt := formatPrompt(req.Messages)
+	prompt := formatPrompt(req.Messages, p.chatTemplate)
 	if estimatedTokens := len(prompt) / 4; estimatedTokens > p.opts.ContextSize-maxTokens {
 		slog.Warn("prompt likely exceeds context window, bridge will truncate",
 			"estimated_tokens", estimatedTokens,
@@ -265,17 +309,18 @@ func (p *EmbeddedProvider) Complete(ctx context.Context, req CompletionRequest) 
 			"prompt_chars", len(prompt))
 	}
 
-	// Ensure <|im_end|> is a stop sequence so the model stops at turn boundary.
+	// Ensure the template's EOS token is a stop sequence so the model stops at turn boundary.
+	eos := stopSequenceForTemplate(p.chatTemplate)
 	stop := req.Stop
-	hasIMEnd := false
+	hasEOS := false
 	for _, s := range stop {
-		if s == "<|im_end|>" {
-			hasIMEnd = true
+		if s == eos {
+			hasEOS = true
 			break
 		}
 	}
-	if !hasIMEnd {
-		stop = append(stop, "<|im_end|>")
+	if !hasEOS {
+		stop = append(stop, eos)
 	}
 
 	backendReq := BackendCompletionRequest{

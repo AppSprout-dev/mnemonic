@@ -214,6 +214,7 @@ func newLLMProvider(cfg *config.Config) llm.Provider {
 			ModelsDir:      cfg.LLM.Embedded.ModelsDir,
 			ChatModelFile:  cfg.LLM.Embedded.ChatModelFile,
 			EmbedModelFile: cfg.LLM.Embedded.EmbedModelFile,
+			ChatTemplate:   cfg.LLM.Embedded.ChatTemplate,
 			ContextSize:    cfg.LLM.Embedded.ContextSize,
 			GPULayers:      cfg.LLM.Embedded.GPULayers,
 			Threads:        cfg.LLM.Embedded.Threads,
