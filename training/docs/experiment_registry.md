@@ -1192,7 +1192,7 @@ Gemma E2B matches Qwen 4B on faithfulness while being 44% faster. The faithful p
 ### EXP-30: Gemma 4 E2B Spoke Training — Faithful Prompt + V7 Data
 
 - **Date:** 2026-04-10
-- **Status:** RUNNING
+- **Status:** COMPLETED (training), PENDING (evaluation)
 - **Hypothesis:** Gemma 4 E2B with trained Felix spokes on v7 data + faithful prompt will achieve 100% SC (schema compliance) while maintaining the 100% EPR and 100% NP demonstrated by the base model with the faithful prompt in EXP-29. The spokes learn the structural schema that the base model can't produce without grammar enforcement.
 - **Null hypothesis:** Spoke training on Gemma E2B degrades the faithfulness achieved by the faithful prompt alone (EPR drops below 90% or FR rises above 5%). The base model + prompt is sufficient and spokes add no value.
 - **Variable:** Spoke adapters trained on v7 encoding data with faithful prompt format. Base model, prompt, and quantization held constant.
@@ -1205,6 +1205,43 @@ Gemma E2B matches Qwen 4B on faithfulness while being 44% faster. The faithful p
 - **Export plan:** Export spokes via Gemma-specific export script, quantize to RQ4 via rotorq pipeline, deploy in embedded llama.cpp backend.
 - **Tracking:** Branch feat/gemma-e2b-spokes
 - **Overfit probe (2026-04-10):** 10 train / 5 eval, 200 optimizer steps, batch 1 x accum 1, LR 3e-4. Online train loss 14.4→5.2, eval loss 1.80→1.61. Online train loss was misleading — diagnostic showed batch-1 oscillation noise. Evaluating the final checkpoint on training data in eval mode gave loss 1.56 (PPL 4.8), confirming the model learned. Train eval-mode loss (1.56) < eval loss (1.61) — pipeline is working. Gates barely moved (expected at 200 steps). Autocast asymmetry ruled out as cause (NF4 outputs bf16 regardless). WandB: spokes_tmp_b1x1.
-- **Full training run (2026-04-10):** 15,714 micro-steps (1,964 optimizer steps, ~3 epochs), batch 1 x accum 8 = 8 effective. Warmup 20 optimizer steps. Eval loss trajectory: 1.6830 (init) → 1.6823 (step 200) → 1.6713 (step 400) → 1.6480 (step 600). Steady decline, LR still ramping. Gates frozen at initialization through step 600 (expected — scalar_lr_scale 0.1 is conservative). WandB: exp30_gemma4_v7_faithful. Checkpoints: `checkpoints/exp30_gemma4_v7_faithful/`.
-- **Result:** (pending)
-- **Verdict:** (pending)
+- **Full training run (2026-04-10):** Early stopped at step 5,800 (patience 5). Best checkpoint: step 4,800 (eval loss 1.2002, PPL 3.3). Config ran past the planned 1,964 optimizer steps (~3 epochs) because the cosine schedule wraps — training continued through ~7.4 epochs total. WandB: exp30_gemma4_v7_faithful. Checkpoints: `checkpoints/exp30_gemma4_v7_faithful/`.
+- **Eval loss trajectory:**
+
+| Step | Eval Loss | PPL | Delta | Phase |
+|------|-----------|-----|-------|-------|
+| init | 1.6830 | 5.4 | — | baseline |
+| 200 | 1.6823 | 5.4 | -0.001 | warmup |
+| 400 | 1.6713 | 5.3 | -0.011 | LR ramping |
+| 600 | 1.6480 | 5.2 | -0.023 | |
+| 800 | 1.6026 | 5.0 | -0.045 | peak LR |
+| 1000 | 1.5786 | 4.8 | -0.024 | phase 1 best |
+| 1200 | 1.6137 | 5.0 | +0.035 | regression |
+| 1400 | 1.6694 | 5.3 | +0.056 | |
+| 1600 | 1.6786 | 5.4 | +0.009 | near-init |
+| 1800 | 1.6153 | 5.0 | -0.063 | recovery |
+| 2000 | 1.5248 | 4.6 | -0.091 | phase 2 begins |
+| 2200 | 1.4991 | 4.5 | -0.026 | |
+| 2400 | 1.4657 | 4.3 | -0.033 | |
+| 2600 | 1.4438 | 4.2 | -0.022 | |
+| 2800 | 1.4145 | 4.1 | -0.029 | |
+| 3000 | 1.3913 | 4.0 | -0.023 | |
+| 3200 | 1.3113 | 3.7 | -0.080 | accelerating |
+| 3400 | 1.3026 | 3.7 | -0.009 | |
+| 3600 | 1.2493 | 3.5 | -0.053 | |
+| 3800 | 1.2284 | 3.4 | -0.021 | below MI300X init |
+| 4000 | 1.2110 | 3.4 | -0.017 | |
+| 4200 | 1.2256 | 3.4 | +0.015 | patience 1 |
+| 4400 | 1.2098 | 3.4 | -0.016 | recovered |
+| 4600 | 1.2017 | 3.3 | -0.008 | |
+| **4800** | **1.2002** | **3.3** | **-0.002** | **best** |
+| 5000 | 1.2160 | 3.4 | +0.016 | patience 1 |
+| 5200 | 1.2190 | 3.4 | +0.003 | patience 2 |
+| 5400 | 1.2296 | 3.4 | +0.011 | patience 3 |
+| 5600 | 1.2349 | 3.4 | +0.005 | patience 4 |
+| 5800 | 1.2688 | 3.6 | +0.034 | early stop |
+
+- **Training dynamics:** Two distinct phases. Phase 1 (steps 0-1000, peak cosine LR ~3e-4): fast improvement to 1.5786, then regression back to near-init as LR decayed — the spokes couldn't maintain learned behavior at intermediate LR with NF4 quantization noise. Phase 2 (steps 1800+, minimum cosine LR ~3e-5): stable second descent through 14 consecutive new bests. The minimum LR is the productive regime for NF4 spoke training. **Implication:** future NF4 runs should use lower peak LR or longer training at constant low LR.
+- **Gate movement:** 8 of 35 layers shifted from initialization — layers 0, 1, 2, 3, 4, 5 (early) and 32, 33, 34 (late). Movement was small (0.001-0.002 per layer) but consistent. Scalar_lr_scale=0.1 at peak LR 3e-4 = gate LR 3e-5 is too conservative for meaningful gate differentiation on NF4.
+- **Result:** Best eval loss 1.2002 (PPL 3.3), improvement of -0.483 from init (1.6830). Below MI300X init (1.2030). Evaluation of SC, EPR, FR, NP pending — requires spoke export + llama-server inference.
+- **Verdict:** (pending evaluation)
