@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/appsprout-dev/mnemonic/internal/agent/retrieval"
@@ -14,14 +15,105 @@ import (
 
 // QueryRequestBody is the JSON request body for a query.
 type QueryRequestBody struct {
-	Query            string `json:"query"`
-	Limit            int    `json:"limit,omitempty"`
-	Synthesize       bool   `json:"synthesize,omitempty"`
-	IncludeReasoning bool   `json:"include_reasoning,omitempty"`
+	Query               string   `json:"query"`
+	Limit               int      `json:"limit,omitempty"`
+	Synthesize          bool     `json:"synthesize,omitempty"`
+	IncludeReasoning    bool     `json:"include_reasoning,omitempty"`
+	Project             string   `json:"project,omitempty"`
+	Source              string   `json:"source,omitempty"`
+	Type                string   `json:"type,omitempty"`
+	Types               []string `json:"types,omitempty"`
+	State               string   `json:"state,omitempty"`
+	MinSalience         float32  `json:"min_salience,omitempty"`
+	IncludePatterns     *bool    `json:"include_patterns,omitempty"`
+	IncludeAbstractions *bool    `json:"include_abstractions,omitempty"`
+	TimeFrom            string   `json:"time_from,omitempty"`
+	TimeTo              string   `json:"time_to,omitempty"`
+}
+
+// validate checks optional filter fields and returns an error message if invalid.
+func (q *QueryRequestBody) validate() string {
+	if q.Source != "" {
+		switch q.Source {
+		case "mcp", "filesystem", "terminal", "clipboard":
+		default:
+			return "source must be one of: mcp, filesystem, terminal, clipboard"
+		}
+	}
+	if q.State != "" {
+		switch q.State {
+		case "active", "fading", "archived":
+		default:
+			return "state must be one of: active, fading, archived"
+		}
+	}
+	if q.MinSalience < 0 || q.MinSalience > 1 {
+		return "min_salience must be between 0.0 and 1.0"
+	}
+	return ""
+}
+
+// toQueryRequest converts the REST request body into a retrieval.QueryRequest.
+// Returns an error message if time fields are malformed.
+func (q *QueryRequestBody) toQueryRequest() (retrieval.QueryRequest, string) {
+	// Parse time fields
+	var timeFrom, timeTo time.Time
+	if q.TimeFrom != "" {
+		var err error
+		timeFrom, err = time.Parse(time.RFC3339, q.TimeFrom)
+		if err != nil {
+			return retrieval.QueryRequest{}, "invalid time_from format, use RFC3339"
+		}
+	}
+	if q.TimeTo != "" {
+		var err error
+		timeTo, err = time.Parse(time.RFC3339, q.TimeTo)
+		if err != nil {
+			return retrieval.QueryRequest{}, "invalid time_to format, use RFC3339"
+		}
+	}
+
+	// Merge type/types into comma-separated string
+	memType := q.Type
+	if len(q.Types) > 0 {
+		all := q.Types
+		if memType != "" {
+			all = append([]string{memType}, all...)
+		}
+		memType = strings.Join(all, ",")
+	}
+
+	// Determine pattern/abstraction inclusion defaults
+	includePatterns := true
+	if q.IncludePatterns != nil {
+		includePatterns = *q.IncludePatterns
+	}
+	includeAbstractions := true
+	if q.IncludeAbstractions != nil {
+		includeAbstractions = *q.IncludeAbstractions
+	}
+
+	return retrieval.QueryRequest{
+		Query:               q.Query,
+		MaxResults:          q.Limit,
+		Synthesize:          q.Synthesize,
+		IncludeReasoning:    q.IncludeReasoning,
+		IncludePatterns:     includePatterns,
+		IncludeAbstractions: includeAbstractions,
+		Project:             q.Project,
+		Source:              q.Source,
+		Type:                memType,
+		State:               q.State,
+		MinSalience:         q.MinSalience,
+		TimeFrom:            timeFrom,
+		TimeTo:              timeTo,
+	}, ""
 }
 
 // HandleQuery returns an HTTP handler that executes a memory retrieval query.
-// Expects JSON body: {"query": "text", "limit": 7, "synthesize": true}
+// Expects JSON body: {"query": "text", "limit": 7, "synthesize": true, ...}
+// Supports optional filters: project, source, type/types, state, min_salience,
+// include_patterns, include_abstractions, time_from, time_to.
 // Returns 200 with QueryResponse containing ranked memories and optional synthesis.
 func HandleQuery(retriever *retrieval.RetrievalAgent, bus events.Bus, s store.Store, log *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -49,21 +141,27 @@ func HandleQuery(retriever *retrieval.RetrievalAgent, bus events.Bus, s store.St
 			reqBody.Limit = 100
 		}
 
+		// Validate optional filter fields
+		if msg := reqBody.validate(); msg != "" {
+			writeError(w, http.StatusBadRequest, msg, "INVALID_PARAM")
+			return
+		}
+
+		// Build retrieval request
+		queryReq, msg := reqBody.toQueryRequest()
+		if msg != "" {
+			writeError(w, http.StatusBadRequest, msg, "INVALID_PARAM")
+			return
+		}
+
 		log.Debug("executing query",
 			"query", reqBody.Query,
 			"limit", reqBody.Limit,
 			"synthesize", reqBody.Synthesize,
-			"include_reasoning", reqBody.IncludeReasoning)
-
-		// Create retrieval request
-		queryReq := retrieval.QueryRequest{
-			Query:               reqBody.Query,
-			MaxResults:          reqBody.Limit,
-			Synthesize:          reqBody.Synthesize,
-			IncludeReasoning:    reqBody.IncludeReasoning,
-			IncludePatterns:     true,
-			IncludeAbstractions: true,
-		}
+			"project", reqBody.Project,
+			"type", queryReq.Type,
+			"source", reqBody.Source,
+			"state", reqBody.State)
 
 		// Execute query with timeout — must be >= LLM timeout (120s) to allow multi-turn tool-use synthesis
 		ctx, cancel := context.WithTimeout(r.Context(), 180*time.Second)
@@ -81,34 +179,35 @@ func HandleQuery(retriever *retrieval.RetrievalAgent, bus events.Bus, s store.St
 			"results", len(queryResp.Memories),
 			"took_ms", queryResp.TookMs)
 
-		// Save traversal data and access snapshot for feedback loop
+		// Save traversal data and publish events
 		SaveRetrievalFeedback(ctx, s, log, queryResp.QueryID, reqBody.Query, queryResp.Memories, queryResp.TraversedAssocs)
-
-		// Publish query executed event
-		queryEvt := events.QueryExecuted{
-			QueryID:         queryResp.QueryID,
-			QueryText:       reqBody.Query,
-			ResultsReturned: len(queryResp.Memories),
-			TookMs:          queryResp.TookMs,
-			Ts:              time.Now(),
-		}
-		if err := bus.Publish(ctx, queryEvt); err != nil {
-			log.Warn("failed to publish query executed event", "error", err, "query_id", queryResp.QueryID)
-			// Non-critical, don't fail the request
-		}
-
-		// Publish memory accessed events for each retrieved memory
-		for _, result := range queryResp.Memories {
-			accessEvt := events.MemoryAccessed{
-				MemoryIDs: []string{result.Memory.ID},
-				QueryID:   queryResp.QueryID,
-				Ts:        time.Now(),
-			}
-			if err := bus.Publish(ctx, accessEvt); err != nil {
-				log.Warn("failed to publish memory accessed event", "error", err, "memory_id", result.Memory.ID)
-			}
-		}
+		publishQueryEvents(ctx, bus, log, reqBody.Query, queryResp)
 
 		writeJSON(w, http.StatusOK, queryResp)
+	}
+}
+
+// publishQueryEvents publishes QueryExecuted and MemoryAccessed events for a completed query.
+func publishQueryEvents(ctx context.Context, bus events.Bus, log *slog.Logger, queryText string, resp retrieval.QueryResponse) {
+	queryEvt := events.QueryExecuted{
+		QueryID:         resp.QueryID,
+		QueryText:       queryText,
+		ResultsReturned: len(resp.Memories),
+		TookMs:          resp.TookMs,
+		Ts:              time.Now(),
+	}
+	if err := bus.Publish(ctx, queryEvt); err != nil {
+		log.Warn("failed to publish query executed event", "error", err, "query_id", resp.QueryID)
+	}
+
+	for _, result := range resp.Memories {
+		accessEvt := events.MemoryAccessed{
+			MemoryIDs: []string{result.Memory.ID},
+			QueryID:   resp.QueryID,
+			Ts:        time.Now(),
+		}
+		if err := bus.Publish(ctx, accessEvt); err != nil {
+			log.Warn("failed to publish memory accessed event", "error", err, "memory_id", result.Memory.ID)
+		}
 	}
 }

@@ -98,6 +98,9 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/memories/{id}", routes.HandleGetMemory(s.deps.Store, s.deps.Log))
 	s.mux.HandleFunc("GET /api/v1/memories/{id}/context", routes.HandleMemoryContext(s.deps.Store, s.deps.Log))
 
+	// File-based memory lookup
+	s.mux.HandleFunc("GET /api/v1/memories/by-file", routes.HandleMemoriesByFile(s.deps.Store, s.deps.Log))
+
 	// Raw memory access
 	s.mux.HandleFunc("GET /api/v1/raw/{id}", routes.HandleGetRawMemory(s.deps.Store, s.deps.Log))
 
@@ -107,6 +110,7 @@ func (s *Server) registerRoutes() {
 
 	// Query and retrieval
 	s.mux.HandleFunc("POST /api/v1/query", routes.HandleQuery(s.deps.Retriever, s.deps.Bus, s.deps.Store, s.deps.Log))
+	s.mux.HandleFunc("POST /api/v1/query/batch", routes.HandleBatchQuery(s.deps.Retriever, s.deps.Bus, s.deps.Store, s.deps.Log))
 
 	// Activity (watcher-derived concept tracker for MCP sync)
 	s.mux.HandleFunc("GET /api/v1/activity", routes.HandleActivity(s.deps.Retriever, s.deps.Log))

@@ -64,3 +64,7 @@ models/
 third_party/llama.cpp/build/
 *.o
 lifecycle-test
+
+# VS Code extension build artifacts
+vscode/node_modules/
+vscode/dist/

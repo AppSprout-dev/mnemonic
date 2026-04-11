@@ -1,0 +1,125 @@
+{
+  "name": "mnemonic",
+  "displayName": "Mnemonic - Semantic Memory",
+  "description": "Surface semantic memories from the Mnemonic daemon directly in VS Code",
+  "version": "0.1.0",
+  "publisher": "appsprout-dev",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/appsprout-dev/mnemonic"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "mnemonic",
+          "title": "Mnemonic",
+          "icon": "media/mnemonic-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "mnemonic": [
+        {
+          "id": "mnemonic.relatedMemories",
+          "name": "Related Memories"
+        },
+        {
+          "id": "mnemonic.projectContext",
+          "name": "Project Context"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "mnemonic.quickRecall",
+        "title": "Mnemonic: Quick Recall"
+      },
+      {
+        "command": "mnemonic.refreshMemories",
+        "title": "Mnemonic: Refresh Memories",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "mnemonic.openMemoryDetail",
+        "title": "Mnemonic: View Memory Detail"
+      },
+      {
+        "command": "mnemonic.showSidebar",
+        "title": "Mnemonic: Show Sidebar"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "mnemonic.quickRecall",
+        "key": "ctrl+shift+m",
+        "mac": "cmd+shift+m"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "mnemonic.refreshMemories",
+          "when": "view == mnemonic.relatedMemories",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Mnemonic",
+      "properties": {
+        "mnemonic.endpoint": {
+          "type": "string",
+          "default": "http://127.0.0.1:9999",
+          "description": "Mnemonic daemon REST API base URL"
+        },
+        "mnemonic.token": {
+          "type": "string",
+          "default": "",
+          "description": "Bearer token for API authentication (leave empty if auth is disabled)"
+        },
+        "mnemonic.healthPollIntervalMs": {
+          "type": "number",
+          "default": 30000,
+          "description": "Interval in milliseconds between health check polls"
+        },
+        "mnemonic.fileChangeDebounceMs": {
+          "type": "number",
+          "default": 400,
+          "description": "Debounce delay in milliseconds when switching files before querying related memories"
+        },
+        "mnemonic.maxRelatedMemories": {
+          "type": "number",
+          "default": 10,
+          "description": "Maximum number of related memories to show per file"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "node esbuild.js --production",
+    "build": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "lint": "eslint src/"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.39",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "esbuild": "^0.20.0",
+    "eslint": "^8.57.0",
+    "typescript": "^5.4.0"
+  }
+}
