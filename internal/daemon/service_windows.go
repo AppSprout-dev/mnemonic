@@ -28,6 +28,15 @@ func NewServiceManager() ServiceManager {
 }
 
 func (m *taskSchedulerManager) IsInstalled() bool {
+	// Always return false so startCommand/stopCommand use the PID-file
+	// daemon path. The Task Scheduler registration only handles auto-start
+	// at logon — it does not manage the process lifecycle like systemd or
+	// launchd do, so we don't want the CLI to delegate start/stop to it.
+	return false
+}
+
+// isTaskRegistered reports whether the Task Scheduler task exists.
+func isTaskRegistered() bool {
 	cmd := exec.Command("schtasks", "/Query", "/TN", taskName)
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NO_WINDOW}
 	return cmd.Run() == nil
@@ -60,7 +69,7 @@ func (m *taskSchedulerManager) Install(execPath, configPath string) error {
 	}
 
 	// Remove existing task if present (idempotent install)
-	if m.IsInstalled() {
+	if isTaskRegistered() {
 		if err := m.Uninstall(); err != nil {
 			return fmt.Errorf("removing existing task: %w", err)
 		}
@@ -100,7 +109,7 @@ func (m *taskSchedulerManager) Install(execPath, configPath string) error {
     <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
     <AllowStartOnDemand>true</AllowStartOnDemand>
     <Enabled>true</Enabled>
-    <Hidden>false</Hidden>
+    <Hidden>true</Hidden>
     <RunOnlyIfIdle>false</RunOnlyIfIdle>
     <WakeToRun>false</WakeToRun>
     <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
@@ -113,7 +122,7 @@ func (m *taskSchedulerManager) Install(execPath, configPath string) error {
   <Actions Context="Author">
     <Exec>
       <Command>%s</Command>
-      <Arguments>--config "%s" serve</Arguments>
+      <Arguments>--config "%s" start</Arguments>
       <WorkingDirectory>%s</WorkingDirectory>
     </Exec>
   </Actions>
@@ -177,12 +186,10 @@ func (m *taskSchedulerManager) Uninstall() error {
 }
 
 func (m *taskSchedulerManager) Start() error {
-	cmd := exec.Command("schtasks", "/Run", "/TN", taskName)
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NO_WINDOW}
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("running scheduled task: %w\n%s", err, strings.TrimSpace(string(output)))
-	}
-	return nil
+	// Not used — on Windows, manual start always goes through the PID-file
+	// daemon path (startCommand falls through when IsInstalled). The Task
+	// Scheduler registration only handles auto-start at logon.
+	return fmt.Errorf("use 'mnemonic start' (PID-file mode) for manual start")
 }
 
 func (m *taskSchedulerManager) Stop() error {
