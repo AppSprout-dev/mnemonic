@@ -84,6 +84,13 @@ func serveCommand(configPath string) {
 		log.Warn("failed to clean up old binary after update", "error", err)
 	}
 
+	// Write PID file so that stop/status commands can find this process,
+	// regardless of whether it was launched via daemon.Start() or Task Scheduler.
+	if err := daemon.WritePID(os.Getpid()); err != nil {
+		log.Warn("failed to write PID file", "error", err)
+	}
+	defer func() { _ = daemon.RemovePID() }()
+
 	// Create data directory if it doesn't exist
 	if err := cfg.EnsureDataDir(); err != nil {
 		die(exitPermission, fmt.Sprintf("creating data directory: %v", err), "check permissions on ~/.mnemonic/")

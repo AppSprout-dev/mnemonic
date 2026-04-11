@@ -4,66 +4,51 @@ package daemon
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
-	"time"
+	"strings"
+	"syscall"
 
-	"golang.org/x/sys/windows/svc"
-	"golang.org/x/sys/windows/svc/mgr"
+	"golang.org/x/sys/windows"
 )
 
-const winServiceName = "mnemonic"
-const winServiceDisplayName = "Mnemonic - Semantic Memory System"
-const winServiceDescription = "Local-first semantic memory system with cognitive agents."
+const taskName = `\Mnemonic`
+const taskDescription = "Local-first semantic memory system with cognitive agents."
 
-type windowsServiceManager struct{}
+type taskSchedulerManager struct{}
 
-// NewServiceManager returns the Windows service manager.
+// NewServiceManager returns the Windows Task Scheduler service manager.
+// Task Scheduler is used instead of Windows Services because mnemonic is a
+// user-level daemon that needs access to the user's home directory, environment
+// variables (LLM_API_KEY), and profile. Windows Services run as LocalSystem by
+// default and cannot access these without password-based logon configuration.
 func NewServiceManager() ServiceManager {
-	return &windowsServiceManager{}
+	return &taskSchedulerManager{}
 }
 
-func (m *windowsServiceManager) IsInstalled() bool {
-	scm, err := mgr.Connect()
-	if err != nil {
-		return false
-	}
-	defer scm.Disconnect()
-
-	s, err := scm.OpenService(winServiceName)
-	if err != nil {
-		return false
-	}
-	_ = s.Close()
-	return true
+func (m *taskSchedulerManager) IsInstalled() bool {
+	cmd := exec.Command("schtasks", "/Query", "/TN", taskName)
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NO_WINDOW}
+	return cmd.Run() == nil
 }
 
-func (m *windowsServiceManager) IsRunning() (bool, int) {
-	scm, err := mgr.Connect()
+func (m *taskSchedulerManager) IsRunning() (bool, int) {
+	// Task Scheduler doesn't directly expose the child PID.
+	// Fall back to the PID file written by the daemon.
+	pid, err := ReadPID()
 	if err != nil {
 		return false, 0
 	}
-	defer scm.Disconnect()
-
-	s, err := scm.OpenService(winServiceName)
+	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
 	if err != nil {
 		return false, 0
 	}
-	defer s.Close()
-
-	status, err := s.Query()
-	if err != nil {
-		return false, 0
-	}
-
-	if status.State == svc.Running {
-		return true, int(status.ProcessId)
-	}
-	return false, 0
+	_ = windows.CloseHandle(handle)
+	return true, pid
 }
 
-func (m *windowsServiceManager) Install(execPath, configPath string) error {
-	// Resolve to absolute paths
+func (m *taskSchedulerManager) Install(execPath, configPath string) error {
 	var err error
 	execPath, err = filepath.Abs(execPath)
 	if err != nil {
@@ -74,167 +59,170 @@ func (m *windowsServiceManager) Install(execPath, configPath string) error {
 		return fmt.Errorf("resolving config path: %w", err)
 	}
 
-	scm, err := mgr.Connect()
-	if err != nil {
-		return fmt.Errorf("connecting to service manager (run as Administrator): %w", err)
-	}
-	defer scm.Disconnect()
-
-	s, err := scm.CreateService(
-		winServiceName,
-		execPath,
-		mgr.Config{
-			DisplayName:  winServiceDisplayName,
-			Description:  winServiceDescription,
-			StartType:    mgr.StartAutomatic,
-			ErrorControl: mgr.ErrorNormal,
-		},
-		"--config", configPath, "serve",
-	)
-	if err != nil {
-		return fmt.Errorf("creating service: %w", err)
-	}
-	defer s.Close()
-
-	// Configure recovery: restart on failure after 5 seconds
-	recoveryActions := []mgr.RecoveryAction{
-		{Type: mgr.ServiceRestart, Delay: 5 * time.Second},
-		{Type: mgr.ServiceRestart, Delay: 10 * time.Second},
-		{Type: mgr.NoAction, Delay: 0},
-	}
-	// Best-effort: recovery config is optional, ignore errors.
-	_ = s.SetRecoveryActions(recoveryActions, 86400)
-
-	return nil
-}
-
-func (m *windowsServiceManager) Uninstall() error {
-	scm, err := mgr.Connect()
-	if err != nil {
-		return fmt.Errorf("connecting to service manager (run as Administrator): %w", err)
-	}
-	defer scm.Disconnect()
-
-	s, err := scm.OpenService(winServiceName)
-	if err != nil {
-		return fmt.Errorf("opening service: %w", err)
-	}
-	defer s.Close()
-
-	// Stop the service if running (ignore errors — may already be stopped)
-	_, _ = s.Control(svc.Stop)
-
-	if err := s.Delete(); err != nil {
-		return fmt.Errorf("deleting service: %w", err)
-	}
-
-	return nil
-}
-
-func (m *windowsServiceManager) Start() error {
-	scm, err := mgr.Connect()
-	if err != nil {
-		return fmt.Errorf("connecting to service manager: %w", err)
-	}
-	defer scm.Disconnect()
-
-	s, err := scm.OpenService(winServiceName)
-	if err != nil {
-		return fmt.Errorf("opening service: %w", err)
-	}
-	defer s.Close()
-
-	if err := s.Start(); err != nil {
-		return fmt.Errorf("starting service: %w", err)
-	}
-	return nil
-}
-
-func (m *windowsServiceManager) Stop() error {
-	scm, err := mgr.Connect()
-	if err != nil {
-		return fmt.Errorf("connecting to service manager: %w", err)
-	}
-	defer scm.Disconnect()
-
-	s, err := scm.OpenService(winServiceName)
-	if err != nil {
-		return fmt.Errorf("opening service: %w", err)
-	}
-	defer s.Close()
-
-	_, err = s.Control(svc.Stop)
-	if err != nil {
-		return fmt.Errorf("stopping service: %w", err)
-	}
-	return nil
-}
-
-func (m *windowsServiceManager) Restart() error {
-	// Use sc.exe to restart — spawned as a background process so it outlives the current binary.
-	return exec.Command("cmd", "/C", "net stop "+winServiceName+" && net start "+winServiceName).Start()
-}
-
-func (m *windowsServiceManager) ServiceName() string {
-	return "windows-service"
-}
-
-// IsWindowsService reports whether the current process is running as a
-// Windows Service (invoked by the Service Control Manager).
-func IsWindowsService() bool {
-	isSvc, err := svc.IsWindowsService()
-	if err != nil {
-		return false
-	}
-	return isSvc
-}
-
-// RunAsService runs the given command as a Windows Service handler.
-// execPath and configPath are used to build the serve command arguments.
-func RunAsService(execPath, configPath string) error {
-	return svc.Run(winServiceName, &mnemonicService{
-		execPath:   execPath,
-		configPath: configPath,
-	})
-}
-
-// mnemonicService implements svc.Handler.
-type mnemonicService struct {
-	execPath   string
-	configPath string
-}
-
-// Execute implements the Windows Service handler. It spawns a child "mnemonic serve"
-// process rather than running serve logic in-process. The child is not detected as a
-// Windows Service (SCM pipe detection fails for child processes), so it runs the full
-// daemon lifecycle normally. This keeps SCM management separate from application logic.
-// TODO: refactor to run serve logic directly in Execute() to avoid the two-process model.
-func (s *mnemonicService) Execute(args []string, r <-chan svc.ChangeRequest, changes chan<- svc.Status) (bool, uint32) {
-	const accepted = svc.AcceptStop | svc.AcceptShutdown
-	changes <- svc.Status{State: svc.StartPending}
-
-	// Start the serve process as a child (see comment above for rationale).
-	cmd := exec.Command(s.execPath, "--config", s.configPath, "serve")
-	if err := cmd.Start(); err != nil {
-		return true, 1
-	}
-
-	changes <- svc.Status{State: svc.Running, Accepts: accepted}
-
-	// Wait for stop/shutdown signal from SCM
-	for {
-		c := <-r
-		switch c.Cmd {
-		case svc.Interrogate:
-			changes <- c.CurrentStatus
-		case svc.Stop, svc.Shutdown:
-			changes <- svc.Status{State: svc.StopPending}
-			// Kill the child process
-			if cmd.Process != nil {
-				_ = cmd.Process.Kill()
-			}
-			_ = cmd.Wait()
-			return false, 0
+	// Remove existing task if present (idempotent install)
+	if m.IsInstalled() {
+		if err := m.Uninstall(); err != nil {
+			return fmt.Errorf("removing existing task: %w", err)
 		}
 	}
+
+	// Build the XML task definition.
+	// LogonType=InteractiveToken — runs under the current user session.
+	// RunLevel=LeastPrivilege — no admin needed at runtime.
+	// DisallowStartIfOnBatteries=false — always run.
+	// MultipleInstances=IgnoreNew — don't spawn duplicates.
+	// ExecutionTimeLimit=PT0S — no timeout (run indefinitely).
+	username := os.Getenv("USERDOMAIN") + `\` + os.Getenv("USERNAME")
+	taskXML := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>%s</Description>
+  </RegistrationInfo>
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+      <UserId>%s</UserId>
+    </LogonTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>%s</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+    <RestartOnFailure>
+      <Interval>PT1M</Interval>
+      <Count>3</Count>
+    </RestartOnFailure>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>%s</Command>
+      <Arguments>--config "%s" serve</Arguments>
+      <WorkingDirectory>%s</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>`, taskDescription, username, username, execPath, configPath, filepath.Dir(execPath))
+
+	// Write XML to a temp file (schtasks /XML requires a file path).
+	// UTF-16 LE with BOM as required by schtasks.
+	tmpFile, err := os.CreateTemp("", "mnemonic-task-*.xml")
+	if err != nil {
+		return fmt.Errorf("creating temp file: %w", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	bom := []byte{0xFF, 0xFE}
+	utf16Content := utf8ToUTF16LE(taskXML)
+	if _, err := tmpFile.Write(bom); err != nil {
+		_ = tmpFile.Close()
+		return fmt.Errorf("writing BOM: %w", err)
+	}
+	if _, err := tmpFile.Write(utf16Content); err != nil {
+		_ = tmpFile.Close()
+		return fmt.Errorf("writing task XML: %w", err)
+	}
+	_ = tmpFile.Close()
+
+	cmd := exec.Command("schtasks", "/Create", "/TN", taskName, "/XML", tmpFile.Name())
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NO_WINDOW}
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("creating scheduled task: %w\n%s", err, strings.TrimSpace(string(output)))
+	}
+
+	return nil
+}
+
+// utf8ToUTF16LE converts a UTF-8 string to a UTF-16 LE byte slice.
+func utf8ToUTF16LE(s string) []byte {
+	runes := []rune(s)
+	buf := make([]byte, 0, len(runes)*2)
+	for _, r := range runes {
+		if r <= 0xFFFF {
+			buf = append(buf, byte(r), byte(r>>8))
+		} else {
+			// Surrogate pair for characters above BMP
+			r -= 0x10000
+			high := 0xD800 + (r>>10)&0x3FF
+			low := 0xDC00 + r&0x3FF
+			buf = append(buf, byte(high), byte(high>>8))
+			buf = append(buf, byte(low), byte(low>>8))
+		}
+	}
+	return buf
+}
+
+func (m *taskSchedulerManager) Uninstall() error {
+	cmd := exec.Command("schtasks", "/Delete", "/TN", taskName, "/F")
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NO_WINDOW}
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("deleting scheduled task: %w\n%s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func (m *taskSchedulerManager) Start() error {
+	cmd := exec.Command("schtasks", "/Run", "/TN", taskName)
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NO_WINDOW}
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("running scheduled task: %w\n%s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func (m *taskSchedulerManager) Stop() error {
+	// Stop via PID file (direct process kill)
+	pid, err := ReadPID()
+	if err == nil {
+		handle, herr := windows.OpenProcess(windows.PROCESS_TERMINATE|windows.SYNCHRONIZE, false, uint32(pid))
+		if herr == nil {
+			_ = windows.TerminateProcess(handle, 1)
+			_, _ = windows.WaitForSingleObject(handle, 5000)
+			_ = windows.CloseHandle(handle)
+		}
+		_ = RemovePID()
+	}
+
+	// Also tell Task Scheduler to end the task
+	cmd := exec.Command("schtasks", "/End", "/TN", taskName)
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NO_WINDOW}
+	_ = cmd.Run() // Best-effort — process may already be gone
+	return nil
+}
+
+func (m *taskSchedulerManager) Restart() error {
+	_ = m.Stop()
+	return m.Start()
+}
+
+func (m *taskSchedulerManager) ServiceName() string {
+	return "task-scheduler"
+}
+
+// IsWindowsService always returns false with the Task Scheduler backend.
+// The daemon runs as a normal process under the user's logon session,
+// not as a Windows Service invoked by the Service Control Manager.
+func IsWindowsService() bool {
+	return false
+}
+
+// RunAsService is unused with the Task Scheduler backend.
+// Kept for interface compatibility with svc_other.go.
+func RunAsService(_, _ string) error {
+	return nil
 }
