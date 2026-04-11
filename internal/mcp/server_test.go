@@ -5,16 +5,29 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/appsprout-dev/mnemonic/internal/events"
+	"github.com/appsprout-dev/mnemonic/internal/store"
 	"github.com/appsprout-dev/mnemonic/internal/store/storetest"
 )
 
 // mockStore embeds the shared base mock and has no overrides.
 type mockStore struct {
 	storetest.MockStore
+}
+
+// checkMemoryStore overrides GetMemory to return a configurable memory.
+type checkMemoryStore struct {
+	storetest.MockStore
+	memory store.Memory
+	err    error
+}
+
+func (s *checkMemoryStore) GetMemory(_ context.Context, _ string) (store.Memory, error) {
+	return s.memory, s.err
 }
 
 // mockBus is a minimal mock of the Bus interface for testing.
@@ -470,5 +483,55 @@ func TestContextMetricsJSON(t *testing.T) {
 		if _, ok := decoded[key]; !ok {
 			t.Fatalf("missing key %q in JSON output", key)
 		}
+	}
+}
+
+// TestHandleCheckMemoryIncludesContent verifies that check_memory output
+// includes the full memory content, not just the summary.
+func TestHandleCheckMemoryIncludesContent(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	mem := store.Memory{
+		ID:        "mem-123",
+		RawID:     "raw-456",
+		Summary:   "short summary",
+		Content:   "This is the full memory content that must appear in check_memory output.",
+		Concepts:  []string{"test", "content"},
+		Salience:  0.85,
+		State:     "active",
+		Source:    "mcp",
+		Type:      "handoff",
+		CreatedAt: time.Now(),
+	}
+
+	s := &checkMemoryStore{memory: mem}
+	srv := NewMCPServer(s, nil, &mockBus{}, logger, "test", "", []string{}, 0, nil, "", DefaultMemoryDefaults())
+
+	result, err := srv.handleCheckMemory(context.Background(), map[string]any{
+		"memory_id": "mem-123",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Extract the text from the tool result
+	resultMap, ok := result.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map result, got %T", result)
+	}
+	contentArray, ok := resultMap["content"].([]map[string]any)
+	if !ok || len(contentArray) == 0 {
+		t.Fatal("expected content array in result")
+	}
+	text, _ := contentArray[0]["text"].(string)
+
+	// Verify content is present
+	if !strings.Contains(text, "Content: "+mem.Content) {
+		t.Errorf("check_memory output missing Content field.\nGot:\n%s", text)
+	}
+
+	// Verify summary is also present (regression check)
+	if !strings.Contains(text, "Summary: "+mem.Summary) {
+		t.Errorf("check_memory output missing Summary field.\nGot:\n%s", text)
 	}
 }

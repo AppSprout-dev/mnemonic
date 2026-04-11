@@ -51,6 +51,12 @@ type RetrievalConfig struct {
 	ActivityBonusMax    float32 // cap on Hebbian activity bonus (default: 0.2)
 	ActivityBonusScale  float32 // scale factor for activity bonus log curve (default: 0.02)
 
+	// Type-filtered query recency — when filtering by type, recency matters more
+	// than semantic match (the type already constrains relevance). These override
+	// RecencyBoostWeight/RecencyHalfLifeDays for type-filtered queries.
+	TypeFilterRecencyWeight   float32 // max recency bonus for type-filtered queries (default: 0.5)
+	TypeFilterRecencyHalfLife float32 // half-life in days for type-filtered recency (default: 7)
+
 	// Significance multipliers
 	CriticalBoost  float32 // multiplier for "critical" significance memories (default: 1.2)
 	ImportantBoost float32 // multiplier for "important" significance memories (default: 1.1)
@@ -102,6 +108,9 @@ func DefaultConfig() RetrievalConfig {
 		RecencyHalfLifeDays: 30,
 		ActivityBonusMax:    0.2,
 		ActivityBonusScale:  0.02,
+
+		TypeFilterRecencyWeight:   0.5,
+		TypeFilterRecencyHalfLife: 7,
 
 		CriticalBoost:  1.2,
 		ImportantBoost: 1.1,
@@ -701,9 +710,19 @@ func (ra *RetrievalAgent) rankResults(ctx context.Context, activated map[string]
 		// Using CreatedAt (not LastAccessed) prevents a feedback loop where
 		// frequently-recalled memories continually reset their recency bonus
 		// via IncrementAccess. The activity bonus already rewards frequent access.
+		//
+		// For type-filtered queries, recency is amplified: the type filter already
+		// constrains relevance, so WHEN matters more than semantic match. This
+		// ensures the most recent handoff/decision/error surfaces first.
 		daysSinceCreated := float32(time.Since(mem.CreatedAt).Hours() / 24)
-		recencyWt := agentutil.Float32Or(ra.config.RecencyBoostWeight, 0.2)
-		recencyHL := agentutil.Float32Or(ra.config.RecencyHalfLifeDays, 30)
+		var recencyWt, recencyHL float32
+		if typeFiltered {
+			recencyWt = agentutil.Float32Or(ra.config.TypeFilterRecencyWeight, 0.5)
+			recencyHL = agentutil.Float32Or(ra.config.TypeFilterRecencyHalfLife, 7)
+		} else {
+			recencyWt = agentutil.Float32Or(ra.config.RecencyBoostWeight, 0.2)
+			recencyHL = agentutil.Float32Or(ra.config.RecencyHalfLifeDays, 30)
+		}
 		recencyBonus := recencyWt * float32(math.Exp(float64(-daysSinceCreated/recencyHL)))
 
 		// Hebbian activity bonus — frequently traversed associations indicate relevance.

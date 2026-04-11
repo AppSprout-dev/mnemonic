@@ -357,6 +357,169 @@ func TestConfigSynthesisMaxTokensPassedToLLM(t *testing.T) {
 	}
 }
 
+func TestConfigTypeFilterRecencyBoostsRecent(t *testing.T) {
+	// Scenario: two handoff memories with identical salience.
+	// m_old was created 7 days ago and has more associations (higher base activation).
+	// m_new was created 30 minutes ago.
+	// With the type-filter recency boost (weight 0.5, half-life 7 days), the new
+	// handoff must rank above the old one despite the old one's association advantage.
+
+	now := time.Now()
+	mNew := store.Memory{
+		ID:        "m_new",
+		Summary:   "session handoff 2026-04-11",
+		Content:   "recent handoff content",
+		Salience:  0.95,
+		CreatedAt: now.Add(-30 * time.Minute),
+		Source:    "mcp",
+		Type:      "handoff",
+	}
+	mOld := store.Memory{
+		ID:        "m_old",
+		Summary:   "session handoff 2026-04-04",
+		Content:   "old handoff content",
+		Salience:  0.95,
+		CreatedAt: now.Add(-7 * 24 * time.Hour),
+		Source:    "mcp",
+		Type:      "handoff",
+	}
+
+	s := &mockStore{
+		searchByFullTextFunc: func(_ context.Context, _ string, _ int) ([]store.Memory, error) {
+			return nil, nil
+		},
+		searchByEmbeddingFunc: func(_ context.Context, _ []float32, _ int) ([]store.RetrievalResult, error) {
+			return nil, nil
+		},
+		searchByTypeFunc: func(_ context.Context, _ []string, _ int) ([]store.Memory, error) {
+			return []store.Memory{mNew, mOld}, nil
+		},
+		getAssociationsFunc: func(_ context.Context, memoryID string) ([]store.Association, error) {
+			// Old memory has more associations — simulates richer graph
+			if memoryID == "m_old" {
+				return []store.Association{
+					{SourceID: "m_old", TargetID: "m_other1", Strength: 0.8, RelationType: "temporal", ActivationCount: 5},
+					{SourceID: "m_old", TargetID: "m_other2", Strength: 0.7, RelationType: "similar", ActivationCount: 3},
+				}, nil
+			}
+			return nil, nil
+		},
+		getMemoryFunc: func(_ context.Context, id string) (store.Memory, error) {
+			switch id {
+			case "m_new":
+				return mNew, nil
+			case "m_old":
+				return mOld, nil
+			default:
+				return store.Memory{ID: id, Salience: 0.5, CreatedAt: now.Add(-14 * 24 * time.Hour)}, nil
+			}
+		},
+	}
+
+	cfg := DefaultConfig()
+	agent := NewRetrievalAgent(s, &mockLLMProvider{}, cfg, testLogger(), nil)
+
+	resp, err := agent.Query(context.Background(), QueryRequest{
+		Query: "session handoff",
+		Type:  "handoff",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(resp.Memories) < 2 {
+		t.Fatalf("expected at least 2 results, got %d", len(resp.Memories))
+	}
+
+	// The recent handoff must rank first
+	if resp.Memories[0].Memory.ID != "m_new" {
+		t.Errorf("expected m_new (recent) to rank first, but got %s (scores: %v)",
+			resp.Memories[0].Memory.ID,
+			func() []string {
+				var s []string
+				for _, m := range resp.Memories {
+					s = append(s, fmt.Sprintf("%s=%.4f", m.Memory.ID, m.Score))
+				}
+				return s
+			}())
+	}
+}
+
+func TestConfigTypeFilterRecencyParamsUsed(t *testing.T) {
+	// Verify that the type-filter recency params are actually applied (not the
+	// general ones) by using extreme values and checking the ranking effect.
+	now := time.Now()
+
+	mRecent := store.Memory{
+		ID:        "m_recent",
+		Summary:   "recent decision",
+		Salience:  0.5, // lower salience
+		CreatedAt: now.Add(-1 * time.Hour),
+		Source:    "mcp",
+		Type:      "decision",
+	}
+	mOld := store.Memory{
+		ID:        "m_old",
+		Summary:   "old decision",
+		Salience:  0.9, // higher salience
+		CreatedAt: now.Add(-30 * 24 * time.Hour),
+		Source:    "mcp",
+		Type:      "decision",
+	}
+
+	s := &mockStore{
+		searchByFullTextFunc: func(_ context.Context, _ string, _ int) ([]store.Memory, error) {
+			return nil, nil
+		},
+		searchByEmbeddingFunc: func(_ context.Context, _ []float32, _ int) ([]store.RetrievalResult, error) {
+			return nil, nil
+		},
+		searchByTypeFunc: func(_ context.Context, _ []string, _ int) ([]store.Memory, error) {
+			return []store.Memory{mRecent, mOld}, nil
+		},
+		getAssociationsFunc: func(_ context.Context, _ string) ([]store.Association, error) {
+			return nil, nil
+		},
+		getMemoryFunc: func(_ context.Context, id string) (store.Memory, error) {
+			switch id {
+			case "m_recent":
+				return mRecent, nil
+			case "m_old":
+				return mOld, nil
+			default:
+				return store.Memory{ID: id, Salience: 0.5, CreatedAt: now}, nil
+			}
+		},
+	}
+
+	// Use aggressive type-filter recency: weight=1.0, half-life=1 day
+	cfg := DefaultConfig()
+	cfg.TypeFilterRecencyWeight = 1.0
+	cfg.TypeFilterRecencyHalfLife = 1.0
+	agent := NewRetrievalAgent(s, &mockLLMProvider{}, cfg, testLogger(), nil)
+
+	resp, err := agent.Query(context.Background(), QueryRequest{
+		Query: "decision",
+		Type:  "decision",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(resp.Memories) < 2 {
+		t.Fatalf("expected at least 2 results, got %d", len(resp.Memories))
+	}
+
+	// With weight=1.0 and half-life=1 day:
+	//   m_recent (1 hour old): bonus = 1.0 * exp(-0.04/1) ≈ 0.96
+	//   m_old (30 days old):   bonus = 1.0 * exp(-30/1) ≈ 0.0
+	// Even though m_old has higher salience, the recency must dominate
+	if resp.Memories[0].Memory.ID != "m_recent" {
+		t.Errorf("expected m_recent to rank first with aggressive type-filter recency, got %s",
+			resp.Memories[0].Memory.ID)
+	}
+}
+
 func TestConfigMaxToolCallsLimitsSynthesisTools(t *testing.T) {
 	now := time.Now()
 
