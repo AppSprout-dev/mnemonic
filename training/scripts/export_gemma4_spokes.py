@@ -306,9 +306,10 @@ def main():
                 writer.add_float32(name, float(data_parts[-1][0]))
         elif ft == gguf.GGUFValueType.BOOL:
             if len(field.types) > 1 and field.types[0] == gguf.GGUFValueType.ARRAY:
-                # Bool arrays (e.g., sliding_window_pattern) — convert to uint32
-                # for compatibility with model loaders that expect u32
-                vals = [int(data_parts[idx][0]) for idx in field.data]
+                # Bool arrays (e.g., sliding_window_pattern) — must stay as bool
+                # Converting to int changes the GGUF type from BOOL to INT32,
+                # which breaks llama.cpp's sliding window pattern parsing
+                vals = [bool(data_parts[idx][0]) for idx in field.data]
                 writer.add_array(name, vals)
             else:
                 writer.add_bool(name, bool(data_parts[-1][0]))
