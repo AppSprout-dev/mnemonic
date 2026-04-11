@@ -302,6 +302,10 @@ type RetrievalConfig struct {
 	ActivityBonusMax    float64 `yaml:"activity_bonus_max"`
 	ActivityBonusScale  float64 `yaml:"activity_bonus_scale"`
 
+	// Type-filtered query recency (stronger recency for type-narrowed queries)
+	TypeFilterRecencyWeight   float64 `yaml:"type_filter_recency_weight"`
+	TypeFilterRecencyHalfLife float64 `yaml:"type_filter_recency_half_life"`
+
 	// Significance multipliers
 	CriticalBoost  float64 `yaml:"critical_boost"`
 	ImportantBoost float64 `yaml:"important_boost"`
@@ -762,6 +766,9 @@ func Default() *Config {
 			RecencyHalfLifeDays: 30,
 			ActivityBonusMax:    0.2,
 			ActivityBonusScale:  0.02,
+
+			TypeFilterRecencyWeight:   0.5,
+			TypeFilterRecencyHalfLife: 7,
 
 			CriticalBoost:  1.2,
 			ImportantBoost: 1.1,

@@ -2738,6 +2738,7 @@ func (srv *MCPServer) handleCheckMemory(ctx context.Context, args map[string]any
 	fmt.Fprintf(&sb, "Memory %s (encoded)\n", mem.ID)
 	fmt.Fprintf(&sb, "  Raw ID: %s\n", mem.RawID)
 	fmt.Fprintf(&sb, "  Summary: %s\n", mem.Summary)
+	fmt.Fprintf(&sb, "  Content: %s\n", mem.Content)
 	fmt.Fprintf(&sb, "  Concepts: %v\n", mem.Concepts)
 	fmt.Fprintf(&sb, "  Salience: %.2f\n", mem.Salience)
 	fmt.Fprintf(&sb, "  State: %s\n", mem.State)

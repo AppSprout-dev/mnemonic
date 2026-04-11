@@ -42,6 +42,9 @@ func buildRetrievalConfig(cfg *config.Config) retrieval.RetrievalConfig {
 		RecencyBoostWeight:  float32(cfg.Retrieval.RecencyBoostWeight),
 		RecencyHalfLifeDays: float32(cfg.Retrieval.RecencyHalfLifeDays),
 
+		TypeFilterRecencyWeight:   float32(cfg.Retrieval.TypeFilterRecencyWeight),
+		TypeFilterRecencyHalfLife: float32(cfg.Retrieval.TypeFilterRecencyHalfLife),
+
 		ActivityBonusMax:   float32(cfg.Retrieval.ActivityBonusMax),
 		ActivityBonusScale: float32(cfg.Retrieval.ActivityBonusScale),
 
