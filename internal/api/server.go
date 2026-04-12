@@ -98,6 +98,10 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/memories/{id}", routes.HandleGetMemory(s.deps.Store, s.deps.Log))
 	s.mux.HandleFunc("GET /api/v1/memories/{id}/context", routes.HandleMemoryContext(s.deps.Store, s.deps.Log))
 
+	// Memory operations
+	s.mux.HandleFunc("POST /api/v1/memories/{id}/amend", routes.HandleAmendMemory(s.deps.Store, s.deps.Bus, s.deps.Log))
+	s.mux.HandleFunc("POST /api/v1/memories/{id}/archive", routes.HandleArchiveMemory(s.deps.Store, s.deps.Log))
+
 	// File-based memory lookup
 	s.mux.HandleFunc("GET /api/v1/memories/by-file", routes.HandleMemoriesByFile(s.deps.Store, s.deps.Log))
 
@@ -152,6 +156,7 @@ func (s *Server) registerRoutes() {
 
 	// Sessions
 	s.mux.HandleFunc("GET /api/v1/sessions", routes.HandleSessions(s.deps.Store, s.deps.Log))
+	s.mux.HandleFunc("GET /api/v1/sessions/{id}/summary", routes.HandleSessionSummary(s.deps.Store, s.deps.Log))
 
 	// Research analytics
 	s.mux.HandleFunc("GET /api/v1/analytics", routes.HandleAnalytics(s.deps.Store, s.deps.Log))

@@ -166,3 +166,79 @@ export interface BatchQueryResultItem {
 export interface BatchQueryResponse {
   results: BatchQueryResultItem[];
 }
+
+// --- Phase 2 types ---
+
+// WebSocket event payloads
+export interface MemoryEncodedPayload {
+  memory_id: string;
+  raw_id: string;
+  concepts: string[];
+  associations_created: number;
+  timestamp: string;
+}
+
+export interface ConsolidationCompletedPayload {
+  duration_ms: number;
+  memories_processed: number;
+  memories_decayed: number;
+  patterns_extracted: number;
+  timestamp: string;
+}
+
+export interface PatternDiscoveredPayload {
+  pattern_id: string;
+  title: string;
+  pattern_type: string;
+  project?: string;
+  evidence_count: number;
+  timestamp: string;
+}
+
+export interface MemoryAmendedPayload {
+  memory_id: string;
+  new_summary: string;
+  timestamp: string;
+}
+
+export interface WebSocketMessage {
+  type: string;
+  timestamp: string;
+  payload: unknown;
+}
+
+// Session summary response
+export interface SessionSummaryResponse {
+  session_id: string;
+  episode?: {
+    id: string;
+    summary?: string;
+    event_count: number;
+  };
+  memory_count: number;
+  breakdown: {
+    decisions: number;
+    errors: number;
+    insights: number;
+    learnings: number;
+    general: number;
+  };
+  recent_items: Array<{
+    id: string;
+    summary: string;
+    type?: string;
+    timestamp: string;
+  }>;
+  timestamp: string;
+}
+
+// Amend / Archive responses
+export interface AmendResponse {
+  status: string;
+  memory_id: string;
+}
+
+export interface ArchiveResponse {
+  status: string;
+  memory_id: string;
+}

@@ -96,6 +96,14 @@ export class RelatedMemoriesProvider
     }
   }
 
+  /** Clear cache and re-fetch current file. Called by WebSocket events. */
+  invalidateAndRefresh(): void {
+    this.cache.clear();
+    if (this.currentPath) {
+      void this.updateForFile(this.currentPath);
+    }
+  }
+
   getTreeItem(element: TreeNode): vscode.TreeItem {
     return element;
   }
@@ -190,6 +198,11 @@ export class ProjectContextProvider
   }
 
   refresh(): void {
+    void this.fetchContext();
+  }
+
+  /** Called by WebSocket consolidation_completed events for live refresh. */
+  refreshFromEvent(): void {
     void this.fetchContext();
   }
 

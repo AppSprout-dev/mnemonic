@@ -58,6 +58,28 @@
       {
         "command": "mnemonic.showSidebar",
         "title": "Mnemonic: Show Sidebar"
+      },
+      {
+        "command": "mnemonic.rememberDecision",
+        "title": "Remember This Decision"
+      },
+      {
+        "command": "mnemonic.rememberError",
+        "title": "Remember This Error"
+      },
+      {
+        "command": "mnemonic.rememberInsight",
+        "title": "Remember This Insight"
+      },
+      {
+        "command": "mnemonic.whatDoIKnow",
+        "title": "What Do I Know About This?"
+      }
+    ],
+    "submenus": [
+      {
+        "id": "mnemonic.editorContext",
+        "label": "Mnemonic"
       }
     ],
     "keybindings": [
@@ -74,6 +96,19 @@
           "when": "view == mnemonic.relatedMemories",
           "group": "navigation"
         }
+      ],
+      "editor/context": [
+        {
+          "submenu": "mnemonic.editorContext",
+          "group": "mnemonic",
+          "when": "editorHasSelection"
+        }
+      ],
+      "mnemonic.editorContext": [
+        { "command": "mnemonic.rememberDecision", "group": "remember" },
+        { "command": "mnemonic.rememberError", "group": "remember" },
+        { "command": "mnemonic.rememberInsight", "group": "remember" },
+        { "command": "mnemonic.whatDoIKnow", "group": "query" }
       ]
     },
     "configuration": {
@@ -103,6 +138,16 @@
           "type": "number",
           "default": 10,
           "description": "Maximum number of related memories to show per file"
+        },
+        "mnemonic.websocketEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable WebSocket connection for real-time updates"
+        },
+        "mnemonic.terminalErrorMonitoring": {
+          "type": "boolean",
+          "default": true,
+          "description": "Monitor terminal output for errors and suggest related memories"
         }
       }
     }
@@ -121,5 +166,9 @@
     "esbuild": "^0.20.0",
     "eslint": "^8.57.0",
     "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "@types/ws": "^8.18.1",
+    "ws": "^8.20.0"
   }
 }

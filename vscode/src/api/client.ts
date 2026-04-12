@@ -11,6 +11,9 @@ import type {
   ActivityResponse,
   BatchQueryRequest,
   BatchQueryResponse,
+  AmendResponse,
+  ArchiveResponse,
+  SessionSummaryResponse,
 } from "./types";
 
 export class MnemonicApiError extends Error {
@@ -88,6 +91,24 @@ export class MnemonicClient {
 
   async getActivity(): Promise<ActivityResponse> {
     return this.get<ActivityResponse>("/api/v1/activity");
+  }
+
+  async amendMemory(id: string, correctedContent: string): Promise<AmendResponse> {
+    return this.post<AmendResponse>(`/api/v1/memories/${id}/amend`, {
+      corrected_content: correctedContent,
+    });
+  }
+
+  async archiveMemory(id: string): Promise<ArchiveResponse> {
+    return this.post<ArchiveResponse>(`/api/v1/memories/${id}/archive`, {});
+  }
+
+  async getSessionSummary(sessionId: string = "current"): Promise<SessionSummaryResponse> {
+    return this.get<SessionSummaryResponse>(`/api/v1/sessions/${sessionId}/summary`);
+  }
+
+  getEndpoint(): string {
+    return this.endpoint;
   }
 
   private async get<T>(path: string, timeoutMs: number = 10_000): Promise<T> {

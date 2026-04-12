@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import type { ConnectionMonitor } from "./connectionMonitor";
+import type { MnemonicWebSocket } from "./websocketClient";
 import type { HealthResponse } from "../api/types";
 
 /** Priority for the status bar item (lower = further right). */
@@ -7,12 +8,18 @@ const STATUS_BAR_PRIORITY = 50;
 
 /**
  * Manages the status bar item that shows Mnemonic connection state.
+ * Shows a live indicator when WebSocket is connected.
  */
 export class StatusBarManager implements vscode.Disposable {
   private readonly item: vscode.StatusBarItem;
   private readonly disposables: vscode.Disposable[] = [];
+  private wsConnected = false;
+  private lastHealth: HealthResponse | undefined;
 
-  constructor(monitor: ConnectionMonitor) {
+  constructor(
+    monitor: ConnectionMonitor,
+    ws?: MnemonicWebSocket
+  ) {
     this.item = vscode.window.createStatusBarItem(
       vscode.StatusBarAlignment.Left,
       STATUS_BAR_PRIORITY
@@ -23,8 +30,8 @@ export class StatusBarManager implements vscode.Disposable {
     this.disposables.push(
       monitor.onDidChangeState((state) => {
         if (state === "connected") {
-          const health = monitor.getLastHealth();
-          this.showConnected(health);
+          this.lastHealth = monitor.getLastHealth();
+          this.updateConnectedDisplay();
         } else if (state === "disconnected") {
           this.showDisconnected();
         } else {
@@ -36,22 +43,37 @@ export class StatusBarManager implements vscode.Disposable {
     this.disposables.push(
       monitor.onDidReceiveHealth((health) => {
         if (monitor.getState() === "connected") {
-          this.showConnected(health);
+          this.lastHealth = health;
+          this.updateConnectedDisplay();
         }
       })
     );
+
+    if (ws) {
+      this.disposables.push(
+        ws.onDidChangeState((wsState) => {
+          this.wsConnected = wsState === "connected";
+          if (this.lastHealth) {
+            this.updateConnectedDisplay();
+          }
+        })
+      );
+    }
 
     // Initial state
     this.showConnecting();
     this.item.show();
   }
 
-  private showConnected(health: HealthResponse | undefined): void {
-    const count = health?.memory_count ?? 0;
+  private updateConnectedDisplay(): void {
+    const count = this.lastHealth?.memory_count ?? 0;
     const formatted = count.toLocaleString();
-    this.item.text = `$(brain) ${formatted}`;
-    this.item.tooltip = health
-      ? `Mnemonic v${health.version}\n${formatted} memories\nUptime: ${formatUptime(health.uptime_seconds)}\nLLM: ${health.llm_available ? health.llm_model || "available" : "unavailable"}`
+    const liveIndicator = this.wsConnected ? " $(pulse)" : "";
+    this.item.text = `$(brain) ${formatted}${liveIndicator}`;
+
+    const wsStatus = this.wsConnected ? "Live (WebSocket)" : "Polling";
+    this.item.tooltip = this.lastHealth
+      ? `Mnemonic v${this.lastHealth.version}\n${formatted} memories\nUptime: ${formatUptime(this.lastHealth.uptime_seconds)}\nLLM: ${this.lastHealth.llm_available ? this.lastHealth.llm_model || "available" : "unavailable"}\nUpdates: ${wsStatus}`
       : "Mnemonic: Connected";
     this.item.backgroundColor = undefined;
   }
