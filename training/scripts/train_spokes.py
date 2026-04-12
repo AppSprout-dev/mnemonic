@@ -228,9 +228,9 @@ def train(args):
     extra_kwargs = {}
     if model_type == "qwen":
         extra_kwargs["attn_implementation"] = "sdpa"  # Memory-efficient attention (SpokeWrappedLayer is SDPA-compatible)
-    if model_type == "gemma" and not args.gradient_checkpointing:
-        # No gradient checkpointing implies high-VRAM hardware — skip NF4 and PLE offload
+    if model_type == "gemma" and (not args.gradient_checkpointing or args.no_quantize):
         extra_kwargs["no_quantize"] = True
+    if model_type == "gemma" and not args.gradient_checkpointing:
         extra_kwargs["offload_ple"] = False
     if model_type == "gemma":
         extra_kwargs["attn_implementation"] = "sdpa"  # Memory-efficient attention (no materialized scores)
@@ -267,10 +267,16 @@ def train(args):
         model._install_hooks()
         model._print_param_summary()
 
-    # Enable gradient checkpointing on base model
-    if args.gradient_checkpointing:
+    # Gradient checkpointing: use HF's implementation for bf16 models.
+    # HF wraps each layer (including our SpokeWrappedLayer) in checkpoint,
+    # correctly handling ISWA attention masks during recomputation.
+    # For NF4 models, checkpointing doesn't work (quantized layers can't recompute).
+    is_quantized = getattr(model.base_model.config, 'quantization_config', None) is not None
+    if args.gradient_checkpointing and not is_quantized:
         model.base_model.gradient_checkpointing_enable()
-        print("Gradient checkpointing: enabled")
+        print("Gradient checkpointing: enabled (HF, bf16)")
+    elif is_quantized:
+        print("Gradient checkpointing: disabled (NF4 — not compatible)")
 
     # Freeze base
     model.freeze_base()
@@ -678,6 +684,8 @@ def main():
     parser.add_argument("--no-gradient-checkpointing", dest="gradient_checkpointing", action="store_false")
     parser.add_argument("--autocast", action="store_true", default=False, help="Use bf16 autocast")
     parser.add_argument("--no-autocast", dest="autocast", action="store_false")
+    parser.add_argument("--no-quantize", action="store_true", default=False,
+                        help="Load base model in bf16 instead of NF4 (requires more VRAM)")
     parser.add_argument("--lora-rank", type=int, default=0, help="LoRA rank on Q/V (0=disabled)")
     parser.add_argument("--lora-alpha", type=int, default=32, help="LoRA alpha scaling")
 

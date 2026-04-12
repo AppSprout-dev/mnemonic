@@ -120,7 +120,7 @@ Custom llama.cpp fork (`third_party/llama.cpp/`) with Felix-LM spoke support in 
 
 ### Training
 
-Scripts in `training/scripts/`, require `source ~/Projects/felixlm/.venv/bin/activate`. Core: `train_qwen_spokes.py`, `qwen_spoke_adapter.py`, `export_qwen35_spokes.py`. Data gen: `batch_encode.py`, `validate.py`. Eval: `eval_qwen_encoding.py`, `stress_test_hallucination.py`, `compare_models.py`. Research: `turboquant.py` (KV cache compression).
+Scripts in `training/scripts/`, require `source ~/Projects/felixlm/.venv/bin/activate`. Core: `train_spokes.py` (supports both Qwen and Gemma via `--model-type`), `qwen_spoke_adapter.py`, `gemma_spoke_adapter.py`, `export_qwen35_spokes.py`. Serve: `serve_spokes.py` (Qwen), `serve_gemma_spokes.py` (Gemma). Data gen: `batch_encode.py`, `validate.py`. Eval: `eval_qwen_encoding.py`, `characterize_serve_output.py`, `stress_test_hallucination.py`, `compare_models.py`. Research: `turboquant.py` (KV cache compression).
 
 Current dataset: `training/data/finetune_qwen_v6/` (4,255 train / 472 eval). Design paper: `~/Projects/felixlm/docs/felix_lm_design.tex`.
 

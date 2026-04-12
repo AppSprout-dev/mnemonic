@@ -60,9 +60,6 @@ class SpokeWrappedLayer(nn.Module):
         self._use_checkpoint = True
 
     def forward(self, *args, **kwargs):
-        # No gradient checkpointing — NF4 quantized layers don't produce
-        # gradient-carrying outputs during checkpoint recomputation.
-        # Memory is managed by PLE offloading to CPU instead.
         output = self.original_layer(*args, **kwargs)
         if isinstance(output, tuple):
             h = output[0]
@@ -107,9 +104,9 @@ class GemmaWithSpokes(nn.Module):
         # Keep spokes in fp32 for optimizer stability
         self.spokes.float()
 
-        # Replace decoder layers with spoke-wrapped versions
+        # Replace decoder layers with spoke-wrapped versions.
         self._hooks = []
-        self._install_hooks(use_gradient_checkpointing=True)
+        self._install_hooks()
 
         self._print_param_summary()
 
