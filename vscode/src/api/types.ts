@@ -242,3 +242,84 @@ export interface ArchiveResponse {
   status: string;
   memory_id: string;
 }
+
+// Project recall response
+export interface RecallProjectResponse {
+  project: string;
+  summary?: Record<string, unknown>;
+  patterns?: Pattern[];
+  memories: Memory[];
+  timestamp: string;
+}
+
+// Proactive context response
+export interface ContextSuggestion {
+  id: string;
+  summary: string;
+  concepts: string[];
+  source: string;
+  type: string;
+  salience: number;
+  created_at: string;
+}
+
+export interface ContextResponse {
+  recent_events: number;
+  themes: string[];
+  suggestions: ContextSuggestion[];
+  timestamp: string;
+}
+
+// Analytics / encoding quality response
+export interface EncodingQualityWindow {
+  mean_epr: number;
+  ted_rate: number;
+  flagged_rate: number;
+  sample_count: number;
+}
+
+export interface EncodingQualityEntry {
+  memory_id: string;
+  summary: string;
+  source: string;
+  epr: number;
+  fr: number;
+  flags: string[];
+  salience: number;
+  created_at: string;
+}
+
+export interface AnalyticsResponse {
+  pipeline: {
+    total_raw: number;
+    total_encoded: number;
+    encoding_rate: number;
+  };
+  encoding_quality: EncodingQualityWindow;
+  recent_encodings: EncodingQualityEntry[];
+  timestamp: string;
+}
+
+// Episodes response
+export interface Episode {
+  id: string;
+  title: string;
+  summary: string;
+  state: string;
+  project: string;
+  concepts: string[];
+  duration_sec: number;
+}
+
+export interface EpisodesResponse {
+  episodes: Episode[];
+  count: number;
+  timestamp: string;
+}
+
+// Patterns response
+export interface PatternsResponse {
+  patterns: Pattern[];
+  count: number;
+  timestamp: string;
+}

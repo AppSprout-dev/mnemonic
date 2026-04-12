@@ -2,7 +2,7 @@
   "compilerOptions": {
     "module": "commonjs",
     "target": "ES2022",
-    "types": ["node", "vscode"],
+    "types": ["node", "vscode", "mocha"],
     "lib": ["ES2022"],
     "outDir": "dist",
     "rootDir": "src",

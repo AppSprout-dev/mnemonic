@@ -105,10 +105,22 @@
         }
       ],
       "mnemonic.editorContext": [
-        { "command": "mnemonic.rememberDecision", "group": "remember" },
-        { "command": "mnemonic.rememberError", "group": "remember" },
-        { "command": "mnemonic.rememberInsight", "group": "remember" },
-        { "command": "mnemonic.whatDoIKnow", "group": "query" }
+        {
+          "command": "mnemonic.rememberDecision",
+          "group": "remember"
+        },
+        {
+          "command": "mnemonic.rememberError",
+          "group": "remember"
+        },
+        {
+          "command": "mnemonic.rememberInsight",
+          "group": "remember"
+        },
+        {
+          "command": "mnemonic.whatDoIKnow",
+          "group": "query"
+        }
       ]
     },
     "configuration": {
@@ -156,15 +168,19 @@
     "vscode:prepublish": "node esbuild.js --production",
     "build": "node esbuild.js",
     "watch": "node esbuild.js --watch",
-    "lint": "eslint src/"
+    "lint": "eslint src/",
+    "test": "mocha --require ts-node/register --timeout 10000 src/test/**/*.test.ts"
   },
   "devDependencies": {
+    "@types/mocha": "^10.0.10",
     "@types/node": "^20.19.39",
     "@types/vscode": "^1.85.0",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
     "esbuild": "^0.20.0",
     "eslint": "^8.57.0",
+    "mocha": "^11.7.5",
+    "ts-node": "^10.9.2",
     "typescript": "^5.4.0"
   },
   "dependencies": {

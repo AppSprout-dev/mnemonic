@@ -14,6 +14,11 @@ import type {
   AmendResponse,
   ArchiveResponse,
   SessionSummaryResponse,
+  RecallProjectResponse,
+  ContextResponse,
+  AnalyticsResponse,
+  PatternsResponse,
+  EpisodesResponse,
 } from "./types";
 
 export class MnemonicApiError extends Error {
@@ -105,6 +110,57 @@ export class MnemonicClient {
 
   async getSessionSummary(sessionId: string = "current"): Promise<SessionSummaryResponse> {
     return this.get<SessionSummaryResponse>(`/api/v1/sessions/${sessionId}/summary`);
+  }
+
+  async recallProject(
+    project: string,
+    query?: string,
+    limit?: number
+  ): Promise<RecallProjectResponse> {
+    const params = new URLSearchParams({ project });
+    if (query) {
+      params.set("query", query);
+    }
+    if (limit) {
+      params.set("limit", String(limit));
+    }
+    return this.get<RecallProjectResponse>(
+      `/api/v1/recall/project?${params.toString()}`
+    );
+  }
+
+  async getContext(
+    sinceMinutes?: number,
+    limit?: number,
+    project?: string
+  ): Promise<ContextResponse> {
+    const params = new URLSearchParams();
+    if (sinceMinutes) {
+      params.set("since_minutes", String(sinceMinutes));
+    }
+    if (limit) {
+      params.set("limit", String(limit));
+    }
+    if (project) {
+      params.set("project", project);
+    }
+    return this.get<ContextResponse>(`/api/v1/context?${params.toString()}`);
+  }
+
+  async getAnalytics(): Promise<AnalyticsResponse> {
+    return this.get<AnalyticsResponse>("/api/v1/analytics");
+  }
+
+  async getPatterns(project?: string): Promise<PatternsResponse> {
+    const params = project
+      ? `?project=${encodeURIComponent(project)}`
+      : "";
+    return this.get<PatternsResponse>(`/api/v1/patterns${params}`);
+  }
+
+  async getEpisodes(state?: string): Promise<EpisodesResponse> {
+    const params = state ? `?state=${encodeURIComponent(state)}` : "";
+    return this.get<EpisodesResponse>(`/api/v1/episodes${params}`);
   }
 
   getEndpoint(): string {

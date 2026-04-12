@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import type { Memory, MemoryType } from "../api/types";
+import type { Memory, MemoryType, Pattern, Episode, EncodingQualityWindow } from "../api/types";
 
 const TYPE_ICONS: Record<MemoryType, vscode.ThemeIcon> = {
   decision: new vscode.ThemeIcon("milestone"),
@@ -68,6 +68,88 @@ export class MessageItem extends vscode.TreeItem {
       this.iconPath = new vscode.ThemeIcon(icon);
     }
     this.contextValue = "message";
+  }
+}
+
+/**
+ * Collapsible section for patterns in Project Context.
+ */
+export class PatternSectionItem extends vscode.TreeItem {
+  readonly patterns: Pattern[];
+
+  constructor(patterns: Pattern[]) {
+    super(
+      `Patterns (${patterns.length})`,
+      vscode.TreeItemCollapsibleState.Collapsed
+    );
+    this.patterns = patterns;
+    this.iconPath = new vscode.ThemeIcon("symbol-structure");
+    this.contextValue = "patternSection";
+  }
+}
+
+/**
+ * Leaf node representing a single pattern.
+ */
+export class PatternItem extends vscode.TreeItem {
+  constructor(pattern: Pattern) {
+    super(pattern.description || pattern.id, vscode.TreeItemCollapsibleState.None);
+    this.iconPath = new vscode.ThemeIcon("symbol-structure");
+    this.description = `strength: ${pattern.strength.toFixed(2)}`;
+    this.tooltip = `${pattern.description}\nOccurrences: ${pattern.occurrences}\nStrength: ${pattern.strength.toFixed(2)}`;
+    this.contextValue = "patternItem";
+  }
+}
+
+/**
+ * Collapsible section for episodes in Project Context.
+ */
+export class EpisodeSectionItem extends vscode.TreeItem {
+  readonly episodes: Episode[];
+
+  constructor(episodes: Episode[]) {
+    super(
+      `Episodes (${episodes.length})`,
+      vscode.TreeItemCollapsibleState.Collapsed
+    );
+    this.episodes = episodes;
+    this.iconPath = new vscode.ThemeIcon("timeline-open");
+    this.contextValue = "episodeSection";
+  }
+}
+
+/**
+ * Leaf node representing a single episode.
+ */
+export class EpisodeItem extends vscode.TreeItem {
+  constructor(episode: Episode) {
+    super(episode.title || episode.summary || episode.id, vscode.TreeItemCollapsibleState.None);
+    this.iconPath = new vscode.ThemeIcon("timeline-open");
+    this.description = episode.state;
+    this.tooltip = [
+      episode.title,
+      episode.summary,
+      `State: ${episode.state}`,
+      episode.concepts?.length ? `Concepts: ${episode.concepts.join(", ")}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+    this.contextValue = "episodeItem";
+  }
+}
+
+/**
+ * Encoding quality summary item shown at the top of Project Context.
+ */
+export class QualityItem extends vscode.TreeItem {
+  constructor(quality: EncodingQualityWindow) {
+    const epr = (quality.mean_epr * 100).toFixed(0);
+    const ted = (quality.ted_rate * 100).toFixed(0);
+    const flagged = (quality.flagged_rate * 100).toFixed(0);
+    super(`Encoding: ${epr}% EPR, ${ted}% TED, ${flagged}% flagged`, vscode.TreeItemCollapsibleState.None);
+    this.iconPath = new vscode.ThemeIcon("beaker");
+    this.tooltip = `Encoding Quality (${quality.sample_count} samples)\nEPR (embedding alignment): ${epr}%\nTED (divergence rate): ${ted}%\nFlagged for review: ${flagged}%`;
+    this.contextValue = "qualityItem";
   }
 }
 

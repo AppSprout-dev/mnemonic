@@ -116,6 +116,10 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/v1/query", routes.HandleQuery(s.deps.Retriever, s.deps.Bus, s.deps.Store, s.deps.Log))
 	s.mux.HandleFunc("POST /api/v1/query/batch", routes.HandleBatchQuery(s.deps.Retriever, s.deps.Bus, s.deps.Store, s.deps.Log))
 
+	// Project recall and proactive context
+	s.mux.HandleFunc("GET /api/v1/recall/project", routes.HandleRecallProject(s.deps.Retriever, s.deps.Store, s.deps.Log))
+	s.mux.HandleFunc("GET /api/v1/context", routes.HandleGetContext(s.deps.Store, s.deps.Log))
+
 	// Activity (watcher-derived concept tracker for MCP sync)
 	s.mux.HandleFunc("GET /api/v1/activity", routes.HandleActivity(s.deps.Retriever, s.deps.Log))
 

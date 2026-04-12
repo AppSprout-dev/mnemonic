@@ -3,7 +3,21 @@ import { MnemonicClient, MnemonicApiError } from "../api/client";
 import type { Memory, MemoryType } from "../api/types";
 import type { ConnectionMonitor } from "../components/connectionMonitor";
 import { LRUCache } from "../util/cache";
-import { MemorySectionItem, MemoryItem, MessageItem } from "./memoryTreeItems";
+import {
+  MemorySectionItem,
+  MemoryItem,
+  MessageItem,
+  PatternSectionItem,
+  PatternItem,
+  EpisodeSectionItem,
+  EpisodeItem,
+  QualityItem,
+} from "./memoryTreeItems";
+import type {
+  Pattern,
+  Episode,
+  EncodingQualityWindow,
+} from "../api/types";
 import * as logger from "../util/logger";
 
 const MEMORY_TYPE_ORDER: MemoryType[] = [
@@ -136,19 +150,24 @@ export class RelatedMemoriesProvider
   }
 }
 
+type ProjectTreeNode = TreeNode | PatternSectionItem | PatternItem | EpisodeSectionItem | EpisodeItem | QualityItem;
+
 /**
  * TreeDataProvider for the "Project Context" view.
- * Shows project-level patterns, recent activity, and top memories.
+ * Shows active patterns, current episodes, encoding quality, and top memories.
  */
 export class ProjectContextProvider
-  implements vscode.TreeDataProvider<TreeNode>
+  implements vscode.TreeDataProvider<ProjectTreeNode>
 {
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<
-    TreeNode | undefined
+    ProjectTreeNode | undefined
   >();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   private memories: Memory[] = [];
+  private patterns: Pattern[] = [];
+  private episodes: Episode[] = [];
+  private quality: EncodingQualityWindow | undefined;
   private errorMessage: string | undefined;
   private refreshTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -173,25 +192,62 @@ export class ProjectContextProvider
     }
 
     this.errorMessage = undefined;
-    try {
-      // Query recent project memories (decisions + insights, high salience)
-      const resp = await this.client.query({
-        query: "recent decisions and insights",
-        limit: 10,
-        include_patterns: false,
-        include_abstractions: false,
-        min_salience: 0.3,
-        types: ["decision", "insight"],
-      });
-      this.memories = resp.memories.map((r) => r.memory);
-    } catch (err) {
-      if (err instanceof MnemonicApiError) {
-        this.errorMessage = err.message;
-      } else {
-        this.errorMessage = "Failed to fetch project context";
-      }
+
+    // Fetch all data sources in parallel
+    const [memoriesResult, patternsResult, episodesResult, analyticsResult] =
+      await Promise.allSettled([
+        this.client.query({
+          query: "recent decisions and insights",
+          limit: 10,
+          include_patterns: false,
+          include_abstractions: false,
+          min_salience: 0.3,
+          types: ["decision", "insight"],
+        }),
+        this.client.getPatterns(),
+        this.client.getEpisodes("open"),
+        this.client.getAnalytics(),
+      ]);
+
+    // Process memories
+    if (memoriesResult.status === "fulfilled") {
+      this.memories = memoriesResult.value.memories.map((r) => r.memory);
+    } else {
       this.memories = [];
-      logger.warn("Project context fetch failed", err);
+      logger.warn("Project context memories fetch failed", memoriesResult.reason);
+    }
+
+    // Process patterns
+    if (patternsResult.status === "fulfilled") {
+      this.patterns = patternsResult.value.patterns ?? [];
+    } else {
+      this.patterns = [];
+    }
+
+    // Process episodes
+    if (episodesResult.status === "fulfilled") {
+      this.episodes = episodesResult.value.episodes ?? [];
+    } else {
+      this.episodes = [];
+    }
+
+    // Process analytics/quality
+    if (analyticsResult.status === "fulfilled") {
+      this.quality = analyticsResult.value.encoding_quality;
+    } else {
+      this.quality = undefined;
+    }
+
+    // Set error only if all fetches failed
+    if (
+      memoriesResult.status === "rejected" &&
+      patternsResult.status === "rejected"
+    ) {
+      const err = memoriesResult.reason;
+      this.errorMessage =
+        err instanceof MnemonicApiError
+          ? err.message
+          : "Failed to fetch project context";
     }
 
     this._onDidChangeTreeData.fire(undefined);
@@ -206,15 +262,23 @@ export class ProjectContextProvider
     void this.fetchContext();
   }
 
-  getTreeItem(element: TreeNode): vscode.TreeItem {
+  getTreeItem(element: ProjectTreeNode): vscode.TreeItem {
     return element;
   }
 
-  getChildren(element?: TreeNode): TreeNode[] {
+  getChildren(element?: ProjectTreeNode): ProjectTreeNode[] {
+    // Children of sections
     if (element instanceof MemorySectionItem) {
       return element.memories.map((m) => new MemoryItem(m));
     }
+    if (element instanceof PatternSectionItem) {
+      return element.patterns.map((p) => new PatternItem(p));
+    }
+    if (element instanceof EpisodeSectionItem) {
+      return element.episodes.map((e) => new EpisodeItem(e));
+    }
 
+    // Root level
     if (this.monitor.getState() === "disconnected") {
       return [new MessageItem("Mnemonic daemon is not running", "warning")];
     }
@@ -223,11 +287,33 @@ export class ProjectContextProvider
       return [new MessageItem(this.errorMessage, "error")];
     }
 
-    if (this.memories.length === 0) {
+    const items: ProjectTreeNode[] = [];
+
+    // Encoding quality summary (Gap 5)
+    if (this.quality && this.quality.sample_count > 0) {
+      items.push(new QualityItem(this.quality));
+    }
+
+    // Active patterns
+    if (this.patterns.length > 0) {
+      items.push(new PatternSectionItem(this.patterns));
+    }
+
+    // Open episodes
+    if (this.episodes.length > 0) {
+      items.push(new EpisodeSectionItem(this.episodes));
+    }
+
+    // Recent memories grouped by type
+    if (this.memories.length > 0) {
+      items.push(...groupByType(this.memories));
+    }
+
+    if (items.length === 0) {
       return [new MessageItem("No project context available", "info")];
     }
 
-    return groupByType(this.memories);
+    return items;
   }
 
   dispose(): void {
