@@ -38,34 +38,91 @@ from qwen_spoke_adapter import (
 )
 
 
+class TrainingCache:
+    """DynamicCache wrapper that's safe for gradient checkpointing.
+
+    Gemma 4 needs past_key_values != None for KV sharing between layers.
+    But checkpoint recomputation would double-append entries via update().
+    This wrapper makes update() idempotent — first write stores, subsequent
+    writes for the same layer_idx return the stored entry.
+    """
+
+    def __init__(self, inner_cache):
+        object.__setattr__(self, '_cache', inner_cache)
+        object.__setattr__(self, '_update_results', {})
+
+    def update(self, key_states, value_states, layer_idx, **kwargs):
+        results = object.__getattribute__(self, '_update_results')
+        cache = object.__getattribute__(self, '_cache')
+        if layer_idx in results:
+            # Recomputation — return the same result as the first forward pass
+            return results[layer_idx]
+        result = cache.update(key_states, value_states, layer_idx, **kwargs)
+        results[layer_idx] = result
+        return result
+
+    def __getattr__(self, name):
+        cache = object.__getattribute__(self, '_cache')
+        return getattr(cache, name)
+
+    def __setattr__(self, name, value):
+        cache = object.__getattribute__(self, '_cache')
+        setattr(cache, name, value)
+
+
 class SpokeWrappedLayer(nn.Module):
     """Wraps a decoder layer to apply spoke computation inline.
 
-    Instead of using forward hooks (which break gradient flow through quantized
-    layers), this module calls the original layer then applies the spoke
-    directly in the forward pass, keeping everything in the autograd graph.
+    Owns its own gradient checkpointing — does NOT use HF's
+    gradient_checkpointing_enable(). HF's implementation forces
+    use_cache=False which breaks Gemma 4's ISWA attention
+    (past_key_values=None produces garbage output).
 
-    Uses torch.utils.checkpoint on the spoke computation so gradient
-    checkpointing works correctly (the original layer handles its own
-    checkpointing via HF's implementation).
+    Instead, we wrap both the original layer AND the spoke in a single
+    torch.utils.checkpoint call, temporarily disabling the original
+    layer's GradientCheckpointingLayer flag so it doesn't touch kwargs.
+    The model sees a normal forward pass with KV cache intact.
     """
 
-    def __init__(self, original_layer: nn.Module, spoke: nn.Module):
+    def __init__(self, original_layer: nn.Module, spoke: nn.Module, cache_config=None):
         super().__init__()
         self.original_layer = original_layer
         self.spoke = spoke
         self._use_checkpoint = False
+        self._cache_config = cache_config  # For creating per-layer DynamicCache
 
     def enable_gradient_checkpointing(self):
         self._use_checkpoint = True
 
-    def forward(self, *args, **kwargs):
-        output = self.original_layer(*args, **kwargs)
+    def _forward_impl(self, *args, **kwargs):
+        """Run original layer + spoke without any HF checkpointing interference."""
+        # Temporarily disable the original layer's GradientCheckpointingLayer
+        # flag so its __call__ doesn't override use_cache or past_key_values.
+        orig_ckpt = getattr(self.original_layer, 'gradient_checkpointing', False)
+        if orig_ckpt:
+            self.original_layer.gradient_checkpointing = False
+
+        # Note: past_key_values must be a TrainingCache (not plain DynamicCache)
+        # when checkpointing is enabled. GemmaWithSpokes.forward handles this.
+
+        try:
+            output = self.original_layer(*args, **kwargs)
+        finally:
+            if orig_ckpt:
+                self.original_layer.gradient_checkpointing = orig_ckpt
+
         if isinstance(output, tuple):
             h = output[0]
             h = self.spoke(h)
             return (h,) + output[1:]
         return self.spoke(output)
+
+    def forward(self, *args, **kwargs):
+        if self._use_checkpoint and self.training:
+            return torch.utils.checkpoint.checkpoint(
+                self._forward_impl, *args, use_reentrant=False, **kwargs,
+            )
+        return self._forward_impl(*args, **kwargs)
 
 
 class GemmaWithSpokes(nn.Module):
@@ -118,11 +175,14 @@ class GemmaWithSpokes(nn.Module):
         original layer then applies the spoke inline. This keeps the spoke computation
         in the main autograd graph.
         """
+        text_config = self.config.text_config
         layers = self._get_transformer_layers()
         for i in range(len(layers)):
             if str(i) in self.spokes:
                 original_layer = layers[i]
-                wrapped = SpokeWrappedLayer(original_layer, self.spokes[str(i)])
+                wrapped = SpokeWrappedLayer(
+                    original_layer, self.spokes[str(i)], cache_config=text_config,
+                )
                 if use_gradient_checkpointing:
                     wrapped.enable_gradient_checkpointing()
                 layers[i] = wrapped
@@ -256,18 +316,16 @@ class GemmaWithSpokes(nn.Module):
             print(f"  Moved embed_tokens_per_layer to CPU ({ple_params/1e6:.0f}M params, saved {ple_params*2/1e9:.1f} GB VRAM)")
             torch.cuda.empty_cache()
 
-        # IMPORTANT: Do NOT use HF's gradient_checkpointing_enable() — it wraps
-        # decoder layers in a way that breaks our SpokeWrappedLayer gradient flow.
-        # Instead, our SpokeWrappedLayer handles checkpointing itself via
-        # torch.utils.checkpoint, which checkpoints both the original layer AND
-        # the spoke computation together.
+        # NEVER use HF's gradient_checkpointing_enable() — it forces
+        # use_cache=False which breaks Gemma 4's ISWA attention
+        # (past_key_values=None produces garbage output, PPL 2.7M).
+        # SpokeWrappedLayer owns gradient checkpointing instead.
         if hasattr(base_model, 'gradient_checkpointing_disable'):
             base_model.gradient_checkpointing_disable()
         # Cast layer norms to fp32 for stable gradient flow.
         for name, param in base_model.named_parameters():
             if 'layernorm' in name.lower() or 'norm' in name.lower():
                 param.data = param.data.to(torch.float32)
-        print("  Custom spoke-aware gradient checkpointing enabled (HF checkpointing disabled)")
 
         # Note: logits.float() OOM is avoided by passing labels=None in forward()
         # and computing loss externally in the training loop
@@ -383,7 +441,20 @@ class GemmaWithSpokes(nn.Module):
         loss computation does logits.float() which OOMs on 16GB VRAM with 262K
         vocab. Instead, we compute loss externally in the training loop.
         The model returns logits in bf16; F.cross_entropy handles the upcast.
+
+        For training with gradient checkpointing, we provide a TrainingCache
+        as past_key_values. Gemma 4's KV sharing layers need the cache to be
+        present (past_key_values=None produces garbage), and TrainingCache
+        handles idempotent updates during checkpoint recomputation.
         """
+        # Provide a TrainingCache so Gemma 4 KV sharing works correctly.
+        # The model won't create its own DynamicCache if we pass one.
+        if 'past_key_values' not in kwargs or kwargs.get('past_key_values') is None:
+            from transformers import DynamicCache
+            text_config = self.config.text_config
+            inner = DynamicCache(config=text_config)
+            kwargs['past_key_values'] = TrainingCache(inner)
+
         outputs = self.base_model(
             input_ids=input_ids,
             labels=None,  # Never pass labels — avoids logits.float() OOM

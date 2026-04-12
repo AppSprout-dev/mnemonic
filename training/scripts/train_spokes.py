@@ -267,12 +267,20 @@ def train(args):
         model._install_hooks()
         model._print_param_summary()
 
-    # Gradient checkpointing: use HF's implementation for bf16 models.
-    # HF wraps each layer (including our SpokeWrappedLayer) in checkpoint,
-    # correctly handling ISWA attention masks during recomputation.
-    # For NF4 models, checkpointing doesn't work (quantized layers can't recompute).
+    # Gradient checkpointing: use SpokeWrappedLayer's own implementation.
+    # NEVER use HF's gradient_checkpointing_enable() — it forces use_cache=False
+    # which breaks Gemma 4's ISWA attention (past_key_values=None = garbage output).
     is_quantized = getattr(model.base_model.config, 'quantization_config', None) is not None
-    if args.gradient_checkpointing and not is_quantized:
+    if args.gradient_checkpointing and not is_quantized and model_type == "gemma":
+        from gemma_spoke_adapter import SpokeWrappedLayer as GemmaSpokeWrappedLayer
+        layers = model.base_model.model.language_model.layers
+        n_enabled = 0
+        for layer in layers:
+            if isinstance(layer, GemmaSpokeWrappedLayer):
+                layer.enable_gradient_checkpointing()
+                n_enabled += 1
+        print(f"Gradient checkpointing: enabled (custom, {n_enabled} SpokeWrappedLayers)")
+    elif args.gradient_checkpointing and not is_quantized:
         model.base_model.gradient_checkpointing_enable()
         print("Gradient checkpointing: enabled (HF, bf16)")
     elif is_quantized:
