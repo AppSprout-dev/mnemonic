@@ -1310,6 +1310,15 @@ Gemma E2B matches Qwen 4B on faithfulness while being 44% faster. The faithful p
 
 - **Content quality assessment:** Structurally perfect. Content quality is serviceable — faithful entity preservation, no hallucinations, correct fact extraction. Narratives are more verbose/generic than Gemini but accurate. structured_concepts.topics uses flat strings rather than `{label, path}` objects. For a 2B model running on consumer GPU, this is production-viable for memory encoding.
 - **Comparison with Qwen 3.5 2B spokes:** Both achieve 100% schema compliance. Qwen runs at 95 tok/s (llama.cpp), Gemma at 17 tok/s (HF generate). Gemma has better base capabilities (68.6% base accuracy vs lower for Qwen) but needs an inference engine for production speed.
-- **Result:** CONFIRMED. Gemma 4 E2B spokes achieve 100% schema compliance (25/25 gold probes) when the forward pass is correct. Eval loss 0.5217 (PPL 1.7), well below the 0.5 prediction threshold. The entire multi-day investigation of Gemma spoke failures was caused by a single bug: `use_cache=False` in HF gradient checkpointing breaking ISWA KV sharing layers.
+- **llama.cpp inference benchmarks (2026-04-13):** Exported EXP-31 spokes to GGUF (required fresh base GGUF — stale Apr 6 base had bool→int metadata corruption). Tested on RX 7800 XT, ctx 4096, flash-attn on, parallel 1:
+
+| Quantization | File Size | VRAM | tok/s | JSON Valid | Notes |
+|-------------|-----------|------|-------|-----------|-------|
+| f16 (HF generate) | — | ~11GB | 17.0 | 25/25 | Python serve path, baseline |
+| Q4_K_M (llama.cpp) | 3.3GB | 3.5GB | 79.5 | yes | **Production ready** — PLE auto-offloaded to CPU |
+| BetaQ RQ4 (f16 PLE) | 6.3GB | 8.3GB | 98.6 | yes | PLE not quantized, too much VRAM |
+| BetaQ RQ4 (all quant) | 2.5GB | — | — | crash | get_rows doesn't support RQ4 dequant (CalebisGross/betaq#2) |
+
+- **Result:** CONFIRMED. Gemma 4 E2B spokes achieve 100% schema compliance (25/25 gold probes) when the forward pass is correct. Eval loss 0.5217 (PPL 1.7), well below the 0.5 prediction threshold. The entire multi-day investigation of Gemma spoke failures was caused by a single bug: `use_cache=False` in HF gradient checkpointing breaking ISWA KV sharing layers. llama.cpp inference at Q4_K_M achieves 79.5 tok/s at 3.5GB VRAM with valid JSON output — production viable.
 - **Verdict:** CONFIRMED — full schema compliance achieved. The `use_cache=False` bug was the sole cause of all prior Gemma spoke training failures.
-- **Remaining work:** (1) Inference speed — 17 tok/s is too slow for production. Need llama.cpp Gemma 4 fix or custom engine. (2) GGUF export for embedded deployment. (3) Stress test (hallucination probes, 7/7 target). (4) End-to-end daemon integration test.
+- **Remaining work:** (1) BetaQ hybrid quantization (RQ4 weights + Q8_0 embeddings) for 100+ tok/s at ~3GB — blocked by CalebisGross/betaq#2. (2) Wire Q4_K_M GGUF as embedded provider in daemon for production deployment. (3) Run 25 gold probes through llama-server to verify schema compliance matches HF path.
