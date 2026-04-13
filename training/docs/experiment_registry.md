@@ -1312,13 +1312,47 @@ Gemma E2B matches Qwen 4B on faithfulness while being 44% faster. The faithful p
 - **Comparison with Qwen 3.5 2B spokes:** Both achieve 100% schema compliance. Qwen runs at 95 tok/s (llama.cpp), Gemma at 17 tok/s (HF generate). Gemma has better base capabilities (68.6% base accuracy vs lower for Qwen) but needs an inference engine for production speed.
 - **llama.cpp inference benchmarks (2026-04-13):** Exported EXP-31 spokes to GGUF (required fresh base GGUF — stale Apr 6 base had bool→int metadata corruption). Tested on RX 7800 XT, ctx 4096, flash-attn on, parallel 1:
 
-| Quantization | File Size | VRAM | tok/s | JSON Valid | Notes |
-|-------------|-----------|------|-------|-----------|-------|
-| f16 (HF generate) | — | ~11GB | 17.0 | 25/25 | Python serve path, baseline |
-| Q4_K_M (llama.cpp) | 3.3GB | 3.5GB | 79.5 | yes | **Production ready** — PLE auto-offloaded to CPU |
-| BetaQ RQ4 (f16 PLE) | 6.3GB | 8.3GB | 98.6 | yes | PLE not quantized, too much VRAM |
-| BetaQ RQ4 (all quant) | 2.5GB | — | — | crash | get_rows doesn't support RQ4 dequant (CalebisGross/betaq#2) |
+| Quantization | File Size | VRAM | CPU Offload | tok/s | JSON Valid | Notes |
+|-------------|-----------|------|------------|-------|-----------|-------|
+| f16 (HF generate) | — | ~11GB | — | 17.0 | 25/25 | Python serve path, baseline |
+| Q4_K_M (llama.cpp) | 3.3GB | 3.5GB | 2,152 MB | 79.5 | 25/25 | **Production ready** — PLE auto-offloaded to CPU |
+| BetaQ hybrid (RQ4+Q8_0) | 3.8GB | 4.4GB | 408 MB | 79.9 | 22/25 (88%) | Quality regression — 3 JSON failures, concepts type errors |
+| BetaQ RQ4 (f16 PLE) | 6.3GB | 8.3GB | 0 | 98.6 | yes | PLE not quantized, too much VRAM |
+| BetaQ RQ4 (all quant) | 2.5GB | 3.0GB | 216 MB | 101.1 | yes | **Smallest + fastest** — get_rows dequant fixed in llama.cpp fork |
 
-- **Result:** CONFIRMED. Gemma 4 E2B spokes achieve 100% schema compliance (25/25 gold probes) when the forward pass is correct. Eval loss 0.5217 (PPL 1.7), well below the 0.5 prediction threshold. The entire multi-day investigation of Gemma spoke failures was caused by a single bug: `use_cache=False` in HF gradient checkpointing breaking ISWA KV sharing layers. llama.cpp inference at Q4_K_M achieves 79.5 tok/s at 3.5GB VRAM with valid JSON output — production viable.
-- **Verdict:** CONFIRMED — full schema compliance achieved. The `use_cache=False` bug was the sole cause of all prior Gemma spoke training failures.
-- **Remaining work:** (1) BetaQ hybrid quantization (RQ4 weights + Q8_0 embeddings) for 100+ tok/s at ~3GB — blocked by CalebisGross/betaq#2. (2) Wire Q4_K_M GGUF as embedded provider in daemon for production deployment. (3) Run 25 gold probes through llama-server to verify schema compliance matches HF path.
+- **Q4_K_M llama-server validation (2026-04-13):** Full 25 gold probes through llama-server `/v1/chat/completions` (native Gemma chat template, not ChatML). Validates that quantized inference matches HF serve path quality.
+
+| Metric | Q4_K_M llama-server | HF serve (baseline) |
+|--------|-------------------|-------------------|
+| JSON validity | 25/25 (100%) | 25/25 (100%) |
+| All fields present | 25/25 (100%) | 25/25 (100%) |
+| All types correct | 25/25 (100%) | 25/25 (100%) |
+| structured_concepts.topics | 25/25 (100%) | 25/25 (100%) |
+| structured_concepts.entities | 25/25 (100%) | 25/25 (100%) |
+| structured_concepts.actions | 25/25 (100%) | 25/25 (100%) |
+| structured_concepts.causality | 24/25 (96%) | 24/25 (96%) |
+| significance enum | 25/25 (100%) | 25/25 (100%) |
+| emotional_tone enum | 25/25 (100%) | 25/25 (100%) |
+| salience range | 25/25 (100%) | 25/25 (100%) |
+| Mean tok/s | 62.5* | 17.0 |
+| Mean latency | 12.1s | 45.1s |
+| Mean completion len | 760 tokens | — |
+
+  *62.5 tok/s measured with concurrent CPU load (BetaQ quantizer running). Clean-condition benchmark: 79.5 tok/s.
+
+  The single causality failure is probe 20 (edge:bilingual) — causality field missing entirely. Same probe fails on both HF and llama-server paths, confirming this is a model-level issue on that input, not an inference engine artifact. structured_concepts.topics produces proper `{label, path}` objects on the llama-server path — the "flat strings" noted in the HF serve assessment is specific to that inference path.
+
+  Command: `python3 training/scripts/characterize_serve_output.py --server http://localhost:8899/v1 --output training/data/faithfulness_probe/eval_q4km_llama.json`
+  Server: `llama-server -m models/gemma4-e2b-exp31-spokes-q4km.gguf --ctx-size 4096 --parallel 1 --flash-attn on --port 8899`
+
+- **Result:** CONFIRMED. Gemma 4 E2B spokes achieve 100% schema compliance (25/25 gold probes) when the forward pass is correct. Eval loss 0.5217 (PPL 1.7), well below the 0.5 prediction threshold. The entire multi-day investigation of Gemma spoke failures was caused by a single bug: `use_cache=False` in HF gradient checkpointing breaking ISWA KV sharing layers. Q4_K_M llama-server inference perfectly matches HF serve path quality (identical compliance profile including the same single causality miss) at 4.7x higher throughput and 3.7x lower latency — production deployment validated.
+- **Verdict:** CONFIRMED — full schema compliance achieved. The `use_cache=False` bug was the sole cause of all prior Gemma spoke training failures. Q4_K_M at 79.5 tok/s / 3.5GB VRAM is the production deployment target.
+- **BetaQ hybrid evaluation (2026-04-13):** Quantized F16 GGUF with patched BetaQ quantizer (CalebisGross/betaq PR #3). 385 RQ4 weight matrices + 2 Q8_0 embedding tensors (token_embd + per_layer_token_embd). Output: 3.8GB. Loaded with only 408MB CPU-offloaded (vs 2,152MB for Q4_K_M), but no speed gain: 79.9 tok/s vs 79.5. The RQ4 mmvq kernel overhead offsets the bandwidth savings from reduced CPU offload. Quality regressed: 22/25 JSON valid (88%) with 3 JSON truncation/malformation failures and concepts type errors. The RQ4 codebook quantization introduces enough weight distortion to occasionally corrupt structured output at this model size. **Conclusion: Q4_K_M remains the production deployment target.** BetaQ hybrid is not viable without (a) kernel-level speed improvements to the RQ4 mmvq path, and (b) quality recovery, possibly via calibration-aware quantization or mixed-precision (RQ4 for non-critical layers, higher precision for output-adjacent layers).
+- **BetaQ all-RQ4 breakthrough (2026-04-13):** Fixed RQ4 get_rows dequant (GPU + CPU) in llama.cpp fork, enabling the all-quant GGUF (2.5GB). Result: 101.1 tok/s (llama-bench: 103.5 ± 0.77) at only 3.0GB VRAM — 27% faster than Q4_K_M at 14% less VRAM. Also added RQ4 to the RDNA 3 nwarps=8 whitelist, achieving 127 tok/s with clock locking and nwarps tuning in earlier sessions.
+- **Kernel optimization investigation (2026-04-13):** Comprehensive profiling with rocprofv3 (dispatch trace + hardware counters). Key findings:
+  - GPU idle 69% of decode time due to HIP dispatch overhead (14us avg gap × 1,542 dispatches/token)
+  - Attempted kernel fusion (quantize_q8_1 → mmvq via shared-memory Q8_1): no improvement. HIP dispatch gaps are systemic — removing a kernel from the stream doesn't shrink gaps, the same gap appears before the next kernel.
+  - Attempted nwarps optimization for ncols_dst=2 (Gemma 4 decode path): nwarps=1,4,8 all give identical 101 tok/s — kernel compute is not the bottleneck.
+  - FETCH_SIZE hardware counters show: small matmuls (K/V proj) served from L2 at >1000 GB/s; large matmuls (FFN down) achieve 361 GB/s (58% of 624 GB/s theoretical).
+  - Token budget: ~4ms bandwidth-limited (hardware floor for 2.5GB model) + ~6ms fixed overhead (dispatch, non-matmul ops, CPU graph eval). Path to 200 tok/s requires architectural changes: HIP Graphs, persistent kernels, or AMD CK fused decoder.
+- **Embedded deployment (2026-04-13):** Wired BetaQ all-RQ4 GGUF as mnemonic's embedded LLM provider via in-process llama.cpp with ROCm GPU acceleration. Config: `provider: embedded`, `chat_template: gemma`, `chat_model_file: gemma4-e2b-exp31-spokes-rq4-allquant.gguf`. Encoding validated: produces valid summary, concepts, and associations from the local GPU with zero cloud dependency. 3.0GB VRAM, 737MB RAM — suitable for background daemon.
