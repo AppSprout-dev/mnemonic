@@ -524,7 +524,7 @@ def main():
         if Path(gemma_spoke_path).exists():
             data = torch.load(gemma_spoke_path, weights_only=True, map_location="cpu")
             gemma_model = GemmaWithSpokes.from_pretrained(
-                "google/gemma-4-E2B",
+                "google/gemma-4-E2B-it",
                 spoke_config=_SC(**data["spoke_config"]),
                 offload_ple=not cli_args.no_quantize,
                 no_quantize=cli_args.no_quantize,
