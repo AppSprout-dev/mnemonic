@@ -64,7 +64,10 @@ build-llamacpp-rocm:
 			-DCMAKE_BUILD_TYPE=Release \
 			-DBUILD_SHARED_LIBS=OFF \
 			-DGGML_NATIVE=ON \
-			-DGGML_HIP=ON; \
+			-DGGML_HIP=ON \
+			-DGGML_HIP_ROCWMMA_FATTN=ON \
+			-DGGML_HIP_GRAPHS=ON \
+			-DCMAKE_POSITION_INDEPENDENT_CODE=ON; \
 		cmake --build $(LLAMACPP_BUILD) --target llama -j$$(nproc); \
 	fi
 
