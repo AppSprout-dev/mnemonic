@@ -114,7 +114,7 @@ The architecture supports hot-swappable task-specific spoke sets: encoding spoke
 
 **Current state:** Qwen 3.5 2B is the production encoding model (100% schema, 7/7 stress test). Deployed via custom llama.cpp fork at 95 tok/s on RX 7800 XT. Gemma 4 E2B spoke training is active (EXP-31, branch `feat/gemma-e2b-spokes`). See `training/docs/experiment_registry.md` for EXP-1 through EXP-31.
 
-**Critical Gemma 4 training note:** NEVER use HF's `gradient_checkpointing_enable()` with Gemma 4. It forces `use_cache=False`, which breaks ISWA KV sharing layers (`value_states = key_states` when `past_key_values=None` → garbage output, PPL 2.7M). Use `SpokeWrappedLayer.enable_gradient_checkpointing()` instead — it owns checkpointing and preserves `use_cache=True` via `TrainingCache`.
+**Critical Gemma 4 training note:** On transformers <5.5.3, HF's `gradient_checkpointing_enable()` forces `use_cache=False`, which breaks ISWA KV sharing layers (garbage output, PPL 2.7M). Fixed upstream in transformers 5.5.3 (huggingface/transformers#45312). Our `SpokeWrappedLayer` has its own gradient checkpointing (`TrainingCache` + custom checkpoint) as a safety net regardless of transformers version.
 
 ### Inference
 

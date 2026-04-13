@@ -316,10 +316,10 @@ class GemmaWithSpokes(nn.Module):
             print(f"  Moved embed_tokens_per_layer to CPU ({ple_params/1e6:.0f}M params, saved {ple_params*2/1e9:.1f} GB VRAM)")
             torch.cuda.empty_cache()
 
-        # NEVER use HF's gradient_checkpointing_enable() — it forces
-        # use_cache=False which breaks Gemma 4's ISWA attention
-        # (past_key_values=None produces garbage output, PPL 2.7M).
-        # SpokeWrappedLayer owns gradient checkpointing instead.
+        # On transformers <5.5.3, HF's gradient_checkpointing_enable() forces
+        # use_cache=False which breaks Gemma 4's ISWA KV sharing layers.
+        # Fixed upstream in 5.5.3 (huggingface/transformers#45312), but we
+        # keep our own checkpointing in SpokeWrappedLayer as a safety net.
         if hasattr(base_model, 'gradient_checkpointing_disable'):
             base_model.gradient_checkpointing_disable()
         # Cast layer norms to fp32 for stable gradient flow.

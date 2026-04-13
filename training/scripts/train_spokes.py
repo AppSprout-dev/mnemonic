@@ -267,9 +267,10 @@ def train(args):
         model._install_hooks()
         model._print_param_summary()
 
-    # Gradient checkpointing: use SpokeWrappedLayer's own implementation.
-    # NEVER use HF's gradient_checkpointing_enable() — it forces use_cache=False
-    # which breaks Gemma 4's ISWA attention (past_key_values=None = garbage output).
+    # Gradient checkpointing: use SpokeWrappedLayer's own implementation for Gemma.
+    # On transformers <5.5.3, HF's gradient_checkpointing_enable() forces use_cache=False
+    # which breaks Gemma 4's ISWA KV sharing (fixed upstream in huggingface/transformers#45312).
+    # Our custom checkpointing works regardless of transformers version.
     is_quantized = getattr(model.base_model.config, 'quantization_config', None) is not None
     if args.gradient_checkpointing and not is_quantized and model_type == "gemma":
         from gemma_spoke_adapter import SpokeWrappedLayer as GemmaSpokeWrappedLayer
