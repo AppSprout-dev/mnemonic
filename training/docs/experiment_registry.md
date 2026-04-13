@@ -1260,7 +1260,7 @@ Gemma E2B matches Qwen 4B on faithfulness while being 44% faster. The faithful p
 ### EXP-31: Gemma 4 E2B Spoke Training — With Corrected Forward Pass
 
 - **Date:** 2026-04-12
-- **Status:** REGISTERED (overfit validation PASSED, ready for full run)
+- **Status:** RUNNING (started 2026-04-12, overfit validation PASSED)
 - **Hypothesis:** With the `use_cache=False` bug fixed (see EXP-30 addendum), Gemma 4 E2B spokes will achieve full schema compliance on the encoding task. EXP-30's failures were caused by corrupted forward pass output (PPL 2.7M due to broken KV sharing), not by LR, rank, or training duration. The base model already achieves 68.6% token accuracy on the encoding task — spokes only need to correct the remaining ~31%.
 - **Null hypothesis:** Even with correct forward pass, rank 64 spokes on Gemma 4 E2B cannot achieve >90% schema compliance on the full dataset. The model's softcap (30.0) or architectural complexity (ISWA + PLE + KV sharing) makes spoke-level adaptation insufficient.
 - **Variable:** Corrected gradient checkpointing (custom `SpokeWrappedLayer` checkpointing + `TrainingCache` wrapper, preserving `use_cache=True`). bf16 training (not NF4). WSD LR schedule.
