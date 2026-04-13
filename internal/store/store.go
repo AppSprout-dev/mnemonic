@@ -594,8 +594,30 @@ type ExperienceEntry struct {
 	RecallCount    int       `json:"recall_count"`
 	Category       string    `json:"category"` // gold, needs_improvement, ambiguous
 	UsedInTraining bool      `json:"used_in_training"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+
+	// Phase B: Curriculum generation — corrected output from teacher model
+	CorrectedOutput  string     `json:"corrected_output,omitempty"`
+	CorrectedEPR     float64    `json:"corrected_epr,omitempty"`
+	CorrectedFR      float64    `json:"corrected_fr,omitempty"`
+	CorrectionSource string     `json:"correction_source,omitempty"` // "gemini", "api"
+	CorrectedAt      *time.Time `json:"corrected_at,omitempty"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// CurriculumRun tracks a single curriculum generation cycle.
+type CurriculumRun struct {
+	ID                    string     `json:"id"`
+	StartedAt             time.Time  `json:"started_at"`
+	CompletedAt           *time.Time `json:"completed_at,omitempty"`
+	CorrectionsAttempted  int        `json:"corrections_attempted"`
+	CorrectionsPassed     int        `json:"corrections_passed"`
+	CorrectionsFailed     int        `json:"corrections_failed"`
+	EntriesReclassified   int        `json:"entries_reclassified"`
+	TrainingBatchPath     string     `json:"training_batch_path,omitempty"`
+	Status                string     `json:"status"` // pending, completed, failed
+	CreatedAt             time.Time  `json:"created_at"`
 }
 
 // ExperienceStats summarizes the experience buffer contents.
@@ -640,6 +662,13 @@ type ContinuousLearningStore interface {
 	// Recall-encoding linkage
 	WriteRecallFeedbackEntry(ctx context.Context, entry RecallFeedbackEntry) error
 	GetRecallHistory(ctx context.Context, memoryID string) ([]RecallFeedbackEntry, error)
+
+	// Curriculum generation (Phase B)
+	UpdateExperienceCorrectedOutput(ctx context.Context, entryID string, output string, epr float64, fr float64, source string) error
+	ListNeedsImprovement(ctx context.Context, limit int) ([]ExperienceEntry, error)
+	WriteCurriculumRun(ctx context.Context, run CurriculumRun) error
+	UpdateCurriculumRun(ctx context.Context, run CurriculumRun) error
+	GetLastCurriculumRunTime(ctx context.Context) (time.Time, error)
 
 	// Quality drift detection
 	GetEncodingQualityWindow(ctx context.Context, windowSize int) (EncodingQualityWindow, error)

@@ -392,6 +392,17 @@ func (MockStore) GetEncodingQualityWindow(context.Context, int) (store.EncodingQ
 func (MockStore) ListRecentEncodingQuality(context.Context, int) ([]store.EncodingQualityEntry, error) {
 	return nil, nil
 }
+func (MockStore) UpdateExperienceCorrectedOutput(context.Context, string, string, float64, float64, string) error {
+	return nil
+}
+func (MockStore) ListNeedsImprovement(context.Context, int) ([]store.ExperienceEntry, error) {
+	return nil, nil
+}
+func (MockStore) WriteCurriculumRun(context.Context, store.CurriculumRun) error   { return nil }
+func (MockStore) UpdateCurriculumRun(context.Context, store.CurriculumRun) error  { return nil }
+func (MockStore) GetLastCurriculumRunTime(context.Context) (time.Time, error) {
+	return time.Time{}, nil
+}
 
 // --- Lifecycle ---
 

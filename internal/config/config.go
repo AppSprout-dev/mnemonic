@@ -481,9 +481,18 @@ type CoachingConfig struct {
 
 // ContinuousLearningConfig holds settings for the continuous learning pipeline.
 type ContinuousLearningConfig struct {
-	Enabled  bool             `yaml:"enabled"`
-	Training CLTrainingConfig `yaml:"training"`
-	Trigger  CLTriggerConfig  `yaml:"trigger"`
+	Enabled    bool               `yaml:"enabled"`
+	Training   CLTrainingConfig   `yaml:"training"`
+	Curriculum CLCurriculumConfig `yaml:"curriculum"`
+	Trigger    CLTriggerConfig    `yaml:"trigger"`
+}
+
+// CLCurriculumConfig holds settings for Phase B curriculum generation.
+type CLCurriculumConfig struct {
+	Enabled                bool `yaml:"enabled"`                  // enable curriculum generation in dreaming (default: false)
+	MaxCorrectionsPerCycle int  `yaml:"max_corrections_per_cycle"` // max entries to re-encode per dream cycle (default: 20)
+	MinNeedsImprovement    int  `yaml:"min_needs_improvement"`     // min needs_improvement entries before running (default: 10)
+	CooldownHours          int  `yaml:"cooldown_hours"`            // hours between curriculum runs (default: 24)
 }
 
 // CLTrainingConfig holds training-specific settings for continuous learning.

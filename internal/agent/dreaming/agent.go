@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/appsprout-dev/mnemonic/internal/agent/agentutil"
+	"github.com/appsprout-dev/mnemonic/internal/config"
 	"github.com/appsprout-dev/mnemonic/internal/events"
 	"github.com/appsprout-dev/mnemonic/internal/llm"
 	"github.com/appsprout-dev/mnemonic/internal/store"
@@ -26,6 +27,7 @@ type DreamingConfig struct {
 	DeadMemoryWindow       time.Duration
 	InsightsBudget         int
 	DefaultConfidence      float32
+	Curriculum             config.CLCurriculumConfig
 }
 
 type DreamingAgent struct {
@@ -181,6 +183,16 @@ func (da *DreamingAgent) runCycle(ctx context.Context) (*DreamReport, error) {
 		da.log.Error("experience buffer reclassification failed", "error", err)
 	} else if reclassified > 0 {
 		da.log.Info("reclassified experience buffer entries", "count", reclassified)
+	}
+
+	// Phase 4.75: Curriculum generation — re-encode bad memories via teacher model
+	if currReport, err := da.curriculumGeneration(ctx, da.config.Curriculum); err != nil && ctx.Err() == nil {
+		da.log.Error("curriculum generation phase failed", "error", err)
+	} else if currReport != nil {
+		da.log.Info("curriculum generation completed",
+			"attempted", currReport.CorrectionsAttempted,
+			"passed", currReport.CorrectionsPassed,
+			"failed", currReport.CorrectionsFailed)
 	}
 
 	// Phase 5: Link replayed memories to matching patterns

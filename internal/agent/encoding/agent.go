@@ -1272,6 +1272,12 @@ func (ea *EncodingAgent) compressAndExtractConcepts(ctx context.Context, raw sto
 // The previous verbose prompt (field-by-field descriptions, concept vocabulary,
 // coaching instructions) actively hurt faithfulness by confusing the model with
 // noise. See training/docs/experiment_registry.md EXP-29 for full data.
+// BuildCompressionPrompt constructs the encoding prompt for a raw memory.
+// Exported for use by curriculum generation (dreaming agent Phase B).
+func BuildCompressionPrompt(content, source, memType, episodeCtx, coachingInstructions string, conceptVocabulary []string) string {
+	return buildCompressionPrompt(content, source, memType, episodeCtx, coachingInstructions, conceptVocabulary)
+}
+
 func buildCompressionPrompt(content, source, memType, episodeCtx, coachingInstructions string, conceptVocabulary []string) string {
 	var b strings.Builder
 

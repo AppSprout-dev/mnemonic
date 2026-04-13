@@ -517,6 +517,7 @@ func serveCommand(configPath string) {
 			DeadMemoryWindow:       cfg.Dreaming.DeadMemoryWindow,
 			InsightsBudget:         cfg.Dreaming.InsightsBudget,
 			DefaultConfidence:      cfg.Dreaming.DefaultConfidence,
+			Curriculum:             cfg.ContinuousLearning.Curriculum,
 		}, log)
 
 		if err := dreamer.Start(rootCtx, bus); err != nil {
