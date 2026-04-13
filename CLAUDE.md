@@ -112,7 +112,9 @@ Felix-LM is a hub-and-spoke architecture for language models. The "central post"
 
 The architecture supports hot-swappable task-specific spoke sets: encoding spokes, synthesis spokes, retrieval spokes, all sharing the same frozen post. This is the Felix-LM vision: one backbone, many specialized tools.
 
-**Current state:** Qwen 3.5 2B is the production encoding model (100% schema, 7/7 stress test). Deployed via custom llama.cpp fork at 95 tok/s on RX 7800 XT. Gemma 4 E2B explored but slower locally. See `training/docs/experiment_registry.md` for EXP-1 through EXP-21.
+**Current state:** Qwen 3.5 2B is the production encoding model (100% schema, 7/7 stress test). Deployed via custom llama.cpp fork at 95 tok/s on RX 7800 XT. Gemma 4 E2B spoke training is active (EXP-31, branch `feat/gemma-e2b-spokes`). See `training/docs/experiment_registry.md` for EXP-1 through EXP-31.
+
+**Critical Gemma 4 training note:** On transformers <5.5.3, HF's `gradient_checkpointing_enable()` forces `use_cache=False`, which breaks ISWA KV sharing layers (garbage output, PPL 2.7M). Fixed upstream in transformers 5.5.3 (huggingface/transformers#45312). Our `SpokeWrappedLayer` has its own gradient checkpointing (`TrainingCache` + custom checkpoint) as a safety net regardless of transformers version.
 
 ### Inference
 
@@ -120,9 +122,9 @@ Custom llama.cpp fork (`third_party/llama.cpp/`) with Felix-LM spoke support in 
 
 ### Training
 
-Scripts in `training/scripts/`, require `source ~/Projects/felixlm/.venv/bin/activate`. Core: `train_qwen_spokes.py`, `qwen_spoke_adapter.py`, `export_qwen35_spokes.py`. Data gen: `batch_encode.py`, `validate.py`. Eval: `eval_qwen_encoding.py`, `stress_test_hallucination.py`, `compare_models.py`. Research: `turboquant.py` (KV cache compression).
+Scripts in `training/scripts/`, require `source ~/Projects/felixlm/.venv/bin/activate`. Core: `train_spokes.py` (supports both Qwen and Gemma via `--model-type`), `qwen_spoke_adapter.py`, `gemma_spoke_adapter.py`, `export_qwen35_spokes.py`. Serve: `serve_spokes.py` (Qwen), `serve_gemma_spokes.py` (Gemma). Data gen: `batch_encode.py`, `validate.py`. Eval: `eval_qwen_encoding.py`, `characterize_serve_output.py`, `stress_test_hallucination.py`, `compare_models.py`. Research: `turboquant.py` (KV cache compression).
 
-Current dataset: `training/data/finetune_qwen_v6/` (4,255 train / 472 eval). Design paper: `~/Projects/felixlm/docs/felix_lm_design.tex`.
+Current datasets: Qwen `training/data/finetune_qwen_v6/` (4,255 train / 472 eval), Gemma `training/data/finetune_gemma4_v7_faithful/` (5,238 train / 581 eval). Design paper: `~/Projects/felixlm/docs/felix_lm_design.tex`.
 
 All experiments must be pre-registered in `training/docs/experiment_registry.md`. See `.claude/rules/scientific-method.md` and `.claude/rules/experiment-logging.md`.
 

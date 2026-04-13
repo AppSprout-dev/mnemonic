@@ -228,9 +228,9 @@ def train(args):
     extra_kwargs = {}
     if model_type == "qwen":
         extra_kwargs["attn_implementation"] = "sdpa"  # Memory-efficient attention (SpokeWrappedLayer is SDPA-compatible)
-    if model_type == "gemma" and not args.gradient_checkpointing:
-        # No gradient checkpointing implies high-VRAM hardware — skip NF4 and PLE offload
+    if model_type == "gemma" and (not args.gradient_checkpointing or args.no_quantize):
         extra_kwargs["no_quantize"] = True
+    if model_type == "gemma" and not args.gradient_checkpointing:
         extra_kwargs["offload_ple"] = False
     if model_type == "gemma":
         extra_kwargs["attn_implementation"] = "sdpa"  # Memory-efficient attention (no materialized scores)
@@ -267,10 +267,25 @@ def train(args):
         model._install_hooks()
         model._print_param_summary()
 
-    # Enable gradient checkpointing on base model
-    if args.gradient_checkpointing:
+    # Gradient checkpointing: use SpokeWrappedLayer's own implementation for Gemma.
+    # On transformers <5.5.3, HF's gradient_checkpointing_enable() forces use_cache=False
+    # which breaks Gemma 4's ISWA KV sharing (fixed upstream in huggingface/transformers#45312).
+    # Our custom checkpointing works regardless of transformers version.
+    is_quantized = getattr(model.base_model.config, 'quantization_config', None) is not None
+    if args.gradient_checkpointing and not is_quantized and model_type == "gemma":
+        from gemma_spoke_adapter import SpokeWrappedLayer as GemmaSpokeWrappedLayer
+        layers = model.base_model.model.language_model.layers
+        n_enabled = 0
+        for layer in layers:
+            if isinstance(layer, GemmaSpokeWrappedLayer):
+                layer.enable_gradient_checkpointing()
+                n_enabled += 1
+        print(f"Gradient checkpointing: enabled (custom, {n_enabled} SpokeWrappedLayers)")
+    elif args.gradient_checkpointing and not is_quantized:
         model.base_model.gradient_checkpointing_enable()
-        print("Gradient checkpointing: enabled")
+        print("Gradient checkpointing: enabled (HF, bf16)")
+    elif is_quantized:
+        print("Gradient checkpointing: disabled (NF4 — not compatible)")
 
     # Freeze base
     model.freeze_base()
@@ -678,6 +693,8 @@ def main():
     parser.add_argument("--no-gradient-checkpointing", dest="gradient_checkpointing", action="store_false")
     parser.add_argument("--autocast", action="store_true", default=False, help="Use bf16 autocast")
     parser.add_argument("--no-autocast", dest="autocast", action="store_false")
+    parser.add_argument("--no-quantize", action="store_true", default=False,
+                        help="Load base model in bf16 instead of NF4 (requires more VRAM)")
     parser.add_argument("--lora-rank", type=int, default=0, help="LoRA rank on Q/V (0=disabled)")
     parser.add_argument("--lora-alpha", type=int, default=32, help="LoRA alpha scaling")
 
