@@ -528,6 +528,12 @@ func parseEpisodeSynthesis(response string) episodeSynthesis {
 	var result episodeSynthesis
 	jsonStr := agentutil.ExtractJSON(response)
 	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		slog.Warn("episode synthesis parse failed",
+			"error", err,
+			"response_len", len(response),
+			"extracted_json_len", len(jsonStr),
+			"response_preview", agentutil.Truncate(response, 200),
+		)
 		return episodeSynthesis{
 			Title:         "Untitled session",
 			Summary:       "Episode synthesis failed — LLM returned unparseable response.",

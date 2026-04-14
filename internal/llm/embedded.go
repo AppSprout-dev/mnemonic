@@ -292,9 +292,12 @@ func (p *EmbeddedProvider) Complete(ctx context.Context, req CompletionRequest) 
 		grammar = GBNFJSONObject
 	}
 	if req.ResponseFormat != nil && req.ResponseFormat.Type == "json_schema" && req.ResponseFormat.JSONSchema != nil {
-		if req.ResponseFormat.JSONSchema.Name == "encoding_response" {
+		switch req.ResponseFormat.JSONSchema.Name {
+		case "encoding_response":
 			grammar = GBNFEncodingResponse
-		} else {
+		case "episode_synthesis":
+			grammar = GBNFEpisodeSynthesis
+		default:
 			grammar = GBNFJSONObject
 		}
 	}

@@ -259,6 +259,24 @@ func TestEmbeddedProviderGrammarRouting(t *testing.T) {
 		t.Errorf("expected encoding-specific GBNF grammar for encoding_response schema, got generic")
 	}
 
+	// json_schema with episode_synthesis name — should use episode-specific grammar
+	_, err = p.Complete(ctx, CompletionRequest{
+		Messages: []Message{{Role: "user", Content: "hello"}},
+		ResponseFormat: &ResponseFormat{
+			Type: "json_schema",
+			JSONSchema: &JSONSchema{
+				Name:   "episode_synthesis",
+				Strict: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Complete failed: %v", err)
+	}
+	if capturedGrammar != GBNFEpisodeSynthesis {
+		t.Errorf("expected episode-specific GBNF grammar for episode_synthesis schema, got generic")
+	}
+
 	// json_schema with other name — should fall back to generic JSON grammar
 	_, err = p.Complete(ctx, CompletionRequest{
 		Messages: []Message{{Role: "user", Content: "hello"}},
