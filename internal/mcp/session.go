@@ -21,17 +21,18 @@ type SessionManager struct {
 	sessions map[string]*httpSession
 
 	// Shared dependencies (from daemon)
-	store           store.Store
-	retriever       *retrieval.RetrievalAgent
-	bus             events.Bus
-	log             *slog.Logger
-	version         string
-	coachingFile    string
-	excludePatterns []string
-	maxContentBytes int
-	resolver        ProjectResolver
-	daemonURL       string
-	memDefaults     MemoryDefaults
+	store             store.Store
+	retriever         *retrieval.RetrievalAgent
+	bus               events.Bus
+	log               *slog.Logger
+	version           string
+	coachingFile      string
+	excludePatterns   []string
+	maxContentBytes   int
+	resolver          ProjectResolver
+	daemonURL         string
+	memDefaults       MemoryDefaults
+	trainingTriggerFn func(ctx context.Context) (map[string]any, error)
 
 	idleTimeout time.Duration // how long before an idle session is expired
 	stopCh      chan struct{} // signals the reaper goroutine to stop
@@ -44,18 +45,19 @@ type httpSession struct {
 
 // SessionManagerConfig holds configuration for the session manager.
 type SessionManagerConfig struct {
-	Store           store.Store
-	Retriever       *retrieval.RetrievalAgent
-	Bus             events.Bus
-	Log             *slog.Logger
-	Version         string
-	CoachingFile    string
-	ExcludePatterns []string
-	MaxContentBytes int
-	Resolver        *config.ProjectResolver
-	DaemonURL       string
-	MemDefaults     MemoryDefaults
-	IdleTimeout     time.Duration // default: 30 minutes
+	Store             store.Store
+	Retriever         *retrieval.RetrievalAgent
+	Bus               events.Bus
+	Log               *slog.Logger
+	Version           string
+	CoachingFile      string
+	ExcludePatterns   []string
+	MaxContentBytes   int
+	Resolver          *config.ProjectResolver
+	DaemonURL         string
+	MemDefaults       MemoryDefaults
+	TrainingTriggerFn func(ctx context.Context) (map[string]any, error)
+	IdleTimeout       time.Duration // default: 30 minutes
 }
 
 // NewSessionManager creates a session manager for HTTP MCP transport.
@@ -66,20 +68,21 @@ func NewSessionManager(cfg SessionManagerConfig) *SessionManager {
 	}
 
 	sm := &SessionManager{
-		sessions:        make(map[string]*httpSession),
-		store:           cfg.Store,
-		retriever:       cfg.Retriever,
-		bus:             cfg.Bus,
-		log:             cfg.Log,
-		version:         cfg.Version,
-		coachingFile:    cfg.CoachingFile,
-		excludePatterns: cfg.ExcludePatterns,
-		maxContentBytes: cfg.MaxContentBytes,
-		resolver:        cfg.Resolver,
-		daemonURL:       cfg.DaemonURL,
-		memDefaults:     cfg.MemDefaults,
-		idleTimeout:     timeout,
-		stopCh:          make(chan struct{}),
+		sessions:          make(map[string]*httpSession),
+		store:             cfg.Store,
+		retriever:         cfg.Retriever,
+		bus:               cfg.Bus,
+		log:               cfg.Log,
+		version:           cfg.Version,
+		coachingFile:      cfg.CoachingFile,
+		excludePatterns:   cfg.ExcludePatterns,
+		maxContentBytes:   cfg.MaxContentBytes,
+		resolver:          cfg.Resolver,
+		daemonURL:         cfg.DaemonURL,
+		memDefaults:       cfg.MemDefaults,
+		trainingTriggerFn: cfg.TrainingTriggerFn,
+		idleTimeout:       timeout,
+		stopCh:            make(chan struct{}),
 	}
 
 	// Start background reaper for idle sessions
@@ -110,6 +113,10 @@ func (sm *SessionManager) GetOrCreate(clientSessionID string) (*MCPServer, strin
 		sm.maxContentBytes, sm.resolver, sm.daemonURL,
 		sm.memDefaults,
 	)
+
+	if sm.trainingTriggerFn != nil {
+		srv.SetTrainingTrigger(sm.trainingTriggerFn)
+	}
 
 	// Use the MCPServer's generated session ID as the key
 	key := srv.SessionID()

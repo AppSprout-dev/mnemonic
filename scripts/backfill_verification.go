@@ -27,13 +27,13 @@ type verificationResult struct {
 }
 
 var (
-	numberRE        = regexp.MustCompile(`-?\d{1,3}(?:,\d{3})+(?:\.\d+)?|-?\d+\.\d+[eE][+-]?\d+|-?\d+\.\d+%|-?\d+%|-?\d+\.\d+|\d+/\d+|\d+`)
-	pathRE          = regexp.MustCompile(`[a-zA-Z_~/][\w/~.-]+\.(?:go|py|js|ts|html|css|yaml|yml|json|jsonl|toml|md|sh|sql|gguf|db|txt|log|patch|cuh|cpp|c|h)\b|/(?:home|usr|etc|var|tmp|opt|api|static)[\w./~-]+`)
-	versionRE       = regexp.MustCompile(`v\d+\.\d+(?:\.\d+)?`)
-	multiWordRE     = regexp.MustCompile(`\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b`)
-	singleProperRE  = regexp.MustCompile(`(?:[a-z,;]\s)([A-Z][a-z]{2,})\b`)
-	mentionRE       = regexp.MustCompile(`@(\w+)`)
-	camelCaseRE     = regexp.MustCompile(`\b([A-Z][a-z]+[A-Z]\w+)\b`)
+	numberRE       = regexp.MustCompile(`-?\d{1,3}(?:,\d{3})+(?:\.\d+)?|-?\d+\.\d+[eE][+-]?\d+|-?\d+\.\d+%|-?\d+%|-?\d+\.\d+|\d+/\d+|\d+`)
+	pathRE         = regexp.MustCompile(`[a-zA-Z_~/][\w/~.-]+\.(?:go|py|js|ts|html|css|yaml|yml|json|jsonl|toml|md|sh|sql|gguf|db|txt|log|patch|cuh|cpp|c|h)\b|/(?:home|usr|etc|var|tmp|opt|api|static)[\w./~-]+`)
+	versionRE      = regexp.MustCompile(`v\d+\.\d+(?:\.\d+)?`)
+	multiWordRE    = regexp.MustCompile(`\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b`)
+	singleProperRE = regexp.MustCompile(`(?:[a-z,;]\s)([A-Z][a-z]{2,})\b`)
+	mentionRE      = regexp.MustCompile(`@(\w+)`)
+	camelCaseRE    = regexp.MustCompile(`\b([A-Z][a-z]+[A-Z]\w+)\b`)
 )
 
 var commonWords = map[string]bool{

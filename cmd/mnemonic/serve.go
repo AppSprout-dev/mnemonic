@@ -134,6 +134,13 @@ func serveCommand(configPath string) {
 	}
 	intCancel()
 
+	// Pick up training results from a previous systemd training run
+	pickupCtx, pickupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := dreaming.PickUpTrainingResult(pickupCtx, memStore, log); err != nil {
+		log.Warn("failed to pick up training result", "error", err)
+	}
+	pickupCancel()
+
 	// Check available disk space
 	dbDir := filepath.Dir(cfg.Store.DBPath)
 	if availBytes, diskErr := diskAvailable(dbDir); diskErr == nil {
@@ -517,6 +524,8 @@ func serveCommand(configPath string) {
 			DeadMemoryWindow:       cfg.Dreaming.DeadMemoryWindow,
 			InsightsBudget:         cfg.Dreaming.InsightsBudget,
 			DefaultConfidence:      cfg.Dreaming.DefaultConfidence,
+			Curriculum:             cfg.ContinuousLearning.Curriculum,
+			ContinuousLearning:     cfg.ContinuousLearning,
 		}, log)
 
 		if err := dreamer.Start(rootCtx, bus); err != nil {
@@ -687,7 +696,7 @@ func serveCommand(configPath string) {
 
 		// Create MCP session manager for HTTP transport
 		mcpResolver := config.NewProjectResolver(cfg.Projects)
-		mcpSessions := mcp.NewSessionManager(mcp.SessionManagerConfig{
+		smCfg := mcp.SessionManagerConfig{
 			Store:           memStore,
 			Retriever:       retriever,
 			Bus:             bus,
@@ -708,7 +717,31 @@ func serveCommand(configPath string) {
 				FeedbackStrengthDelta: cfg.MemoryDefaults.FeedbackStrengthDelta,
 				FeedbackSalienceBoost: cfg.MemoryDefaults.FeedbackSalienceBoost,
 			},
-		})
+		}
+
+		// Wire up manual training trigger if dreaming agent is available
+		if dreamer != nil && cfg.ContinuousLearning.Trigger.Manual {
+			clCfg := cfg.ContinuousLearning
+			smCfg.TrainingTriggerFn = func(ctx context.Context) (map[string]any, error) {
+				result, err := dreamer.RunTrainingCycle(ctx, clCfg, "manual")
+				if err != nil {
+					return nil, err
+				}
+				if result == nil {
+					return nil, nil
+				}
+				return map[string]any{
+					"status":         result.Status,
+					"request_id":     result.RequestID,
+					"batch_id":       result.BatchID,
+					"total_examples": result.TotalExamples,
+					"request_path":   result.RequestPath,
+					"error":          result.ErrorMessage,
+				}, nil
+			}
+		}
+
+		mcpSessions := mcp.NewSessionManager(smCfg)
 		apiDeps.MCPSessions = mcpSessions
 		defer mcpSessions.Stop(rootCtx)
 

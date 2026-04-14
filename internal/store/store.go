@@ -584,18 +584,40 @@ type AnalyticsStore interface {
 
 // ExperienceEntry represents a training candidate in the experience buffer.
 type ExperienceEntry struct {
-	ID             string    `json:"id"`
-	RawID          string    `json:"raw_id"`
-	MemoryID       string    `json:"memory_id"`
-	EncodingEPR    float64   `json:"encoding_epr"`
-	EncodingFR     float64   `json:"encoding_fr"`
-	EncodingFlags  []string  `json:"encoding_flags"`
-	RecallScore    float64   `json:"recall_score"`
-	RecallCount    int       `json:"recall_count"`
-	Category       string    `json:"category"` // gold, needs_improvement, ambiguous
-	UsedInTraining bool      `json:"used_in_training"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID             string   `json:"id"`
+	RawID          string   `json:"raw_id"`
+	MemoryID       string   `json:"memory_id"`
+	EncodingEPR    float64  `json:"encoding_epr"`
+	EncodingFR     float64  `json:"encoding_fr"`
+	EncodingFlags  []string `json:"encoding_flags"`
+	RecallScore    float64  `json:"recall_score"`
+	RecallCount    int      `json:"recall_count"`
+	Category       string   `json:"category"` // gold, needs_improvement, ambiguous
+	UsedInTraining bool     `json:"used_in_training"`
+
+	// Phase B: Curriculum generation — corrected output from teacher model
+	CorrectedOutput  string     `json:"corrected_output,omitempty"`
+	CorrectedEPR     float64    `json:"corrected_epr,omitempty"`
+	CorrectedFR      float64    `json:"corrected_fr,omitempty"`
+	CorrectionSource string     `json:"correction_source,omitempty"` // "gemini", "api"
+	CorrectedAt      *time.Time `json:"corrected_at,omitempty"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// CurriculumRun tracks a single curriculum generation cycle.
+type CurriculumRun struct {
+	ID                   string     `json:"id"`
+	StartedAt            time.Time  `json:"started_at"`
+	CompletedAt          *time.Time `json:"completed_at,omitempty"`
+	CorrectionsAttempted int        `json:"corrections_attempted"`
+	CorrectionsPassed    int        `json:"corrections_passed"`
+	CorrectionsFailed    int        `json:"corrections_failed"`
+	EntriesReclassified  int        `json:"entries_reclassified"`
+	TrainingBatchPath    string     `json:"training_batch_path,omitempty"`
+	Status               string     `json:"status"` // pending, completed, failed
+	CreatedAt            time.Time  `json:"created_at"`
 }
 
 // ExperienceStats summarizes the experience buffer contents.
@@ -614,6 +636,26 @@ type RecallFeedbackEntry struct {
 	Feedback        string    `json:"feedback"` // helpful, partial, irrelevant
 	RecallSessionID string    `json:"recall_session_id"`
 	CreatedAt       time.Time `json:"created_at"`
+}
+
+// TrainingRun tracks a single spoke fine-tuning cycle.
+type TrainingRun struct {
+	ID             string     `json:"id"`
+	BatchID        string     `json:"batch_id"`   // links to TrainingBatchManifest
+	BatchPath      string     `json:"batch_path"` // JSONL file path
+	GoldCount      int        `json:"gold_count"`
+	CorrectedCount int        `json:"corrected_count"`
+	TotalExamples  int        `json:"total_examples"`
+	Status         string     `json:"status"` // pending, training, evaluating, deploying, completed, failed
+	CheckpointPath string     `json:"checkpoint_path,omitempty"`
+	ModelPath      string     `json:"model_path,omitempty"` // deployed GGUF path
+	EvalEPR        float64    `json:"eval_epr,omitempty"`
+	EvalFR         float64    `json:"eval_fr,omitempty"`
+	EvalSC         float64    `json:"eval_sc,omitempty"` // schema compliance
+	QualityPassed  bool       `json:"quality_passed"`
+	ErrorMessage   string     `json:"error_message,omitempty"`
+	StartedAt      time.Time  `json:"started_at"`
+	CompletedAt    *time.Time `json:"completed_at,omitempty"`
 }
 
 // EncodingQualityWindow holds rolling quality metrics for drift detection.
@@ -640,6 +682,20 @@ type ContinuousLearningStore interface {
 	// Recall-encoding linkage
 	WriteRecallFeedbackEntry(ctx context.Context, entry RecallFeedbackEntry) error
 	GetRecallHistory(ctx context.Context, memoryID string) ([]RecallFeedbackEntry, error)
+
+	// Curriculum generation (Phase B)
+	UpdateExperienceCorrectedOutput(ctx context.Context, entryID string, output string, epr float64, fr float64, source string) error
+	ListNeedsImprovement(ctx context.Context, limit int) ([]ExperienceEntry, error)
+	WriteCurriculumRun(ctx context.Context, run CurriculumRun) error
+	UpdateCurriculumRun(ctx context.Context, run CurriculumRun) error
+	GetLastCurriculumRunTime(ctx context.Context) (time.Time, error)
+
+	// Training runs (Phase C)
+	WriteTrainingRun(ctx context.Context, run TrainingRun) error
+	UpdateTrainingRun(ctx context.Context, run TrainingRun) error
+	GetLastTrainingRunTime(ctx context.Context) (time.Time, error)
+	CountUntrainedExperience(ctx context.Context) (int, error)
+	MarkExperienceUsedInTraining(ctx context.Context, batchID string, entryIDs []string) error
 
 	// Quality drift detection
 	GetEncodingQualityWindow(ctx context.Context, windowSize int) (EncodingQualityWindow, error)

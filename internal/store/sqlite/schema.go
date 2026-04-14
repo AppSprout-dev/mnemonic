@@ -10,7 +10,7 @@ import (
 // migration is added. It is written to PRAGMA user_version after InitSchema
 // completes, and read by the pre-migration backup logic to skip backups when
 // the schema is already current.
-const SchemaVersion = 16
+const SchemaVersion = 18
 
 const schema = `
 -- Raw observations before encoding
@@ -611,6 +611,60 @@ INSERT OR IGNORE INTO forum_categories (id, name, slug, description, icon, color
 	}
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_experience_buffer_category ON experience_buffer(category)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_experience_buffer_memory ON experience_buffer(memory_id)`)
+
+	// Migration 017: Curriculum generation — corrected output columns + run tracking (#391 Phase B)
+	for _, col := range []struct{ column, def string }{
+		{"corrected_output", "TEXT DEFAULT NULL"},
+		{"corrected_epr", "REAL DEFAULT NULL"},
+		{"corrected_fr", "REAL DEFAULT NULL"},
+		{"correction_source", "TEXT DEFAULT NULL"},
+		{"corrected_at", "DATETIME DEFAULT NULL"},
+	} {
+		_, err = db.Exec(fmt.Sprintf(`ALTER TABLE experience_buffer ADD COLUMN %s %s`, col.column, col.def))
+		if err != nil && !isAlterTableDuplicateColumn(err) {
+			return fmt.Errorf("failed to add experience_buffer.%s column: %w", col.column, err)
+		}
+	}
+
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS curriculum_runs (
+		id TEXT PRIMARY KEY,
+		started_at DATETIME NOT NULL,
+		completed_at DATETIME,
+		corrections_attempted INTEGER DEFAULT 0,
+		corrections_passed INTEGER DEFAULT 0,
+		corrections_failed INTEGER DEFAULT 0,
+		entries_reclassified INTEGER DEFAULT 0,
+		training_batch_path TEXT,
+		status TEXT DEFAULT 'pending',
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`); err != nil {
+		return fmt.Errorf("failed to create curriculum_runs table: %w", err)
+	}
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_curriculum_runs_status ON curriculum_runs(status)`)
+
+	// Migration 018: Training runs table (Phase C — automated spoke training)
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS training_runs (
+		id TEXT PRIMARY KEY,
+		batch_id TEXT NOT NULL,
+		batch_path TEXT NOT NULL,
+		gold_count INTEGER DEFAULT 0,
+		corrected_count INTEGER DEFAULT 0,
+		total_examples INTEGER DEFAULT 0,
+		status TEXT DEFAULT 'pending',
+		checkpoint_path TEXT,
+		model_path TEXT,
+		eval_epr REAL DEFAULT 0,
+		eval_fr REAL DEFAULT 0,
+		eval_sc REAL DEFAULT 0,
+		quality_passed BOOLEAN DEFAULT FALSE,
+		error_message TEXT,
+		started_at DATETIME NOT NULL,
+		completed_at DATETIME
+	)`); err != nil {
+		return fmt.Errorf("failed to create training_runs table: %w", err)
+	}
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_training_runs_status ON training_runs(status)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_training_runs_started_at ON training_runs(started_at)`)
 
 	// Record the schema version so pre-migration backups can skip when current.
 	if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", SchemaVersion)); err != nil {

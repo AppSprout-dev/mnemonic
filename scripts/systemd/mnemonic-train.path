@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for Mnemonic training requests
+
+[Path]
+PathExists=%h/.mnemonic/training_requests/pending.json
+Unit=mnemonic-train.service
+
+[Install]
+WantedBy=default.target

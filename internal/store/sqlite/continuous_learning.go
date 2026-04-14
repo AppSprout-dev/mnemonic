@@ -219,6 +219,221 @@ func (s *SQLiteStore) GetEncodingQualityWindow(ctx context.Context, windowSize i
 	return w, nil
 }
 
+// --- Phase B: Curriculum generation ---
+
+func (s *SQLiteStore) UpdateExperienceCorrectedOutput(ctx context.Context, entryID string, output string, epr float64, fr float64, source string) error {
+	now := time.Now()
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE experience_buffer
+		 SET corrected_output = ?, corrected_epr = ?, corrected_fr = ?,
+		     correction_source = ?, corrected_at = ?, updated_at = ?
+		 WHERE id = ?`,
+		output, epr, fr, source, now, now, entryID,
+	)
+	if err != nil {
+		return fmt.Errorf("updating corrected output for entry %s: %w", entryID, err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) ListNeedsImprovement(ctx context.Context, limit int) ([]store.ExperienceEntry, error) {
+	// Return needs_improvement entries that haven't been corrected yet
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, raw_id, memory_id, encoding_epr, encoding_fr, encoding_flags,
+		        recall_score, recall_count, category, used_in_training, created_at, updated_at
+		 FROM experience_buffer
+		 WHERE category = 'needs_improvement' AND corrected_output IS NULL
+		 ORDER BY encoding_epr ASC
+		 LIMIT ?`,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("listing needs_improvement entries: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var entries []store.ExperienceEntry
+	for rows.Next() {
+		var e store.ExperienceEntry
+		var flagsJSON string
+		var usedInt int
+		if err := rows.Scan(&e.ID, &e.RawID, &e.MemoryID, &e.EncodingEPR, &e.EncodingFR, &flagsJSON,
+			&e.RecallScore, &e.RecallCount, &e.Category, &usedInt, &e.CreatedAt, &e.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scanning experience entry: %w", err)
+		}
+		_ = json.Unmarshal([]byte(flagsJSON), &e.EncodingFlags)
+		e.UsedInTraining = usedInt != 0
+		entries = append(entries, e)
+	}
+	return entries, rows.Err()
+}
+
+func (s *SQLiteStore) WriteCurriculumRun(ctx context.Context, run store.CurriculumRun) error {
+	if run.ID == "" {
+		run.ID = uuid.New().String()
+	}
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO curriculum_runs (id, started_at, completed_at, corrections_attempted, corrections_passed,
+		     corrections_failed, entries_reclassified, training_batch_path, status, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		run.ID, run.StartedAt, run.CompletedAt,
+		run.CorrectionsAttempted, run.CorrectionsPassed, run.CorrectionsFailed,
+		run.EntriesReclassified, run.TrainingBatchPath, run.Status, time.Now(),
+	)
+	if err != nil {
+		return fmt.Errorf("writing curriculum run %s: %w", run.ID, err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) UpdateCurriculumRun(ctx context.Context, run store.CurriculumRun) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE curriculum_runs
+		 SET completed_at = ?, corrections_attempted = ?, corrections_passed = ?,
+		     corrections_failed = ?, entries_reclassified = ?, training_batch_path = ?, status = ?
+		 WHERE id = ?`,
+		run.CompletedAt, run.CorrectionsAttempted, run.CorrectionsPassed,
+		run.CorrectionsFailed, run.EntriesReclassified, run.TrainingBatchPath, run.Status, run.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("updating curriculum run %s: %w", run.ID, err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) GetLastCurriculumRunTime(ctx context.Context) (time.Time, error) {
+	var raw *string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT MAX(started_at) FROM curriculum_runs WHERE status = 'completed'`,
+	).Scan(&raw)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("getting last curriculum run time: %w", err)
+	}
+	if raw == nil || *raw == "" {
+		return time.Time{}, nil
+	}
+	// Try multiple time formats — SQLite + Go's time.Time.String() output
+	formats := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05-07:00",
+		"2006-01-02T15:04:05Z",
+		"2006-01-02 15:04:05 -0700 MST",
+	}
+	var t time.Time
+	var parseErr error
+	for _, f := range formats {
+		t, parseErr = time.Parse(f, *raw)
+		if parseErr == nil {
+			break
+		}
+	}
+	if parseErr != nil {
+		return time.Time{}, fmt.Errorf("parsing curriculum run time %q: %w", *raw, parseErr)
+	}
+	return t, nil
+}
+
+// --- Phase C: Training runs ---
+
+func (s *SQLiteStore) WriteTrainingRun(ctx context.Context, run store.TrainingRun) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO training_runs (id, batch_id, batch_path, gold_count, corrected_count,
+		     total_examples, status, checkpoint_path, model_path, eval_epr, eval_fr, eval_sc,
+		     quality_passed, error_message, started_at, completed_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		run.ID, run.BatchID, run.BatchPath, run.GoldCount, run.CorrectedCount,
+		run.TotalExamples, run.Status, run.CheckpointPath, run.ModelPath,
+		run.EvalEPR, run.EvalFR, run.EvalSC,
+		run.QualityPassed, run.ErrorMessage, run.StartedAt, run.CompletedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("writing training run %s: %w", run.ID, err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) UpdateTrainingRun(ctx context.Context, run store.TrainingRun) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE training_runs
+		 SET status = ?, checkpoint_path = ?, model_path = ?,
+		     eval_epr = ?, eval_fr = ?, eval_sc = ?,
+		     quality_passed = ?, error_message = ?, completed_at = ?
+		 WHERE id = ?`,
+		run.Status, run.CheckpointPath, run.ModelPath,
+		run.EvalEPR, run.EvalFR, run.EvalSC,
+		run.QualityPassed, run.ErrorMessage, run.CompletedAt, run.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("updating training run %s: %w", run.ID, err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) GetLastTrainingRunTime(ctx context.Context) (time.Time, error) {
+	var raw *string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT MAX(started_at) FROM training_runs WHERE status = 'completed'`,
+	).Scan(&raw)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("getting last training run time: %w", err)
+	}
+	if raw == nil || *raw == "" {
+		return time.Time{}, nil
+	}
+	formats := []string{
+		time.RFC3339Nano, time.RFC3339,
+		"2006-01-02 15:04:05-07:00", "2006-01-02T15:04:05Z",
+		"2006-01-02 15:04:05 -0700 MST",
+	}
+	var t time.Time
+	var parseErr error
+	for _, f := range formats {
+		t, parseErr = time.Parse(f, *raw)
+		if parseErr == nil {
+			break
+		}
+	}
+	if parseErr != nil {
+		return time.Time{}, fmt.Errorf("parsing training run time %q: %w", *raw, parseErr)
+	}
+	return t, nil
+}
+
+func (s *SQLiteStore) CountUntrainedExperience(ctx context.Context) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM experience_buffer
+		 WHERE used_in_training = 0
+		   AND (category = 'gold' OR (category = 'needs_improvement' AND corrected_output IS NOT NULL))`,
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("counting untrained experience: %w", err)
+	}
+	return count, nil
+}
+
+func (s *SQLiteStore) MarkExperienceUsedInTraining(ctx context.Context, batchID string, entryIDs []string) error {
+	if len(entryIDs) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	for _, id := range entryIDs {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE experience_buffer SET used_in_training = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+			id,
+		); err != nil {
+			return fmt.Errorf("marking entry %s as used: %w", id, err)
+		}
+	}
+	return tx.Commit()
+}
+
 func (s *SQLiteStore) ListRecentEncodingQuality(ctx context.Context, limit int) ([]store.EncodingQualityEntry, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT m.id, COALESCE(m.summary, ''), COALESCE(m.source, ''),

@@ -121,6 +121,9 @@ type MCPServer struct {
 
 	// Daemon activity sync (for context_boost in MCP processes)
 	daemonURL string // base URL of daemon API (e.g. "http://127.0.0.1:9999")
+
+	// Optional training trigger (set when dreaming agent is available)
+	trainingTriggerFn func(ctx context.Context) (map[string]any, error)
 }
 
 // NewMCPServer creates a new MCP server with the given dependencies.
@@ -158,6 +161,12 @@ func NewMCPServer(s store.Store, r *retrieval.RetrievalAgent, bus events.Bus, lo
 		sessionRecalledIDs:  make(map[string]bool),
 		contextSuggestedIDs: make(map[string]time.Time),
 	}
+}
+
+// SetTrainingTrigger sets the function used by the train_model MCP tool.
+// Called from serve.go when the dreaming agent is available.
+func (srv *MCPServer) SetTrainingTrigger(fn func(ctx context.Context) (map[string]any, error)) {
+	srv.trainingTriggerFn = fn
 }
 
 // detectProject determines the project name from the current working directory.
@@ -349,6 +358,8 @@ func (srv *MCPServer) handleToolCall(ctx context.Context, req *JSONRPCRequest) *
 		result, toolErr = srv.handleDismissAbstraction(ctx, params.Arguments)
 	case "create_handoff":
 		result, toolErr = srv.handleCreateHandoff(ctx, params.Arguments)
+	case "train_model":
+		result, toolErr = srv.handleTrainModel(ctx, params.Arguments)
 	default:
 		return errorResponse(req.ID, -32602, fmt.Sprintf("Unknown tool: %s", params.Name))
 	}
@@ -2882,4 +2893,21 @@ func (srv *MCPServer) handleCreateHandoff(ctx context.Context, args map[string]a
 
 	srv.log.Info("session handoff created", "id", raw.ID, "project", srv.project)
 	return toolResult(fmt.Sprintf("Handoff stored (id: %s, salience: 0.95)\nWill be surfaced by recall_project in the next session.", raw.ID)), nil
+}
+
+// handleTrainModel triggers a spoke training cycle manually.
+func (srv *MCPServer) handleTrainModel(ctx context.Context, _ map[string]any) (any, error) {
+	if srv.trainingTriggerFn == nil {
+		return nil, fmt.Errorf("training not available — daemon must be running with dreaming agent enabled")
+	}
+
+	result, err := srv.trainingTriggerFn(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("training cycle failed: %w", err)
+	}
+	if result == nil {
+		return toolResult("Training skipped — insufficient untrained data in experience buffer. Check `status` for details."), nil
+	}
+
+	return result, nil
 }

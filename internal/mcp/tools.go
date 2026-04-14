@@ -701,5 +701,17 @@ func allToolDefs() []ToolDefinition {
 		dismissPatternToolDef(),
 		dismissAbstractionToolDef(),
 		createHandoffToolDef(),
+		trainModelToolDef(),
+	}
+}
+
+func trainModelToolDef() ToolDefinition {
+	return ToolDefinition{
+		Name:        "train_model",
+		Description: "Request a spoke fine-tuning cycle using accumulated experience data. Assembles gold and corrected encoding pairs into a training batch and writes a training request for the systemd training service. Training runs asynchronously after the daemon stops to free VRAM. Results are picked up on the next daemon startup. Requires sufficient untrained data in the experience buffer (default: 50 entries).",
+		InputSchema: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{},
+		},
 	}
 }
