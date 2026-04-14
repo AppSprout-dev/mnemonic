@@ -2,8 +2,11 @@ package dreaming
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -128,7 +131,7 @@ func TestRunTrainingCycle_InsufficientData(t *testing.T) {
 	clCfg := baseCLConfig()
 	clCfg.Training.MinNewExamples = 50
 
-	result, err := agent.RunTrainingCycle(context.Background(), clCfg)
+	result, err := agent.RunTrainingCycle(context.Background(), clCfg, "manual")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -137,7 +140,11 @@ func TestRunTrainingCycle_InsufficientData(t *testing.T) {
 	}
 }
 
-func TestRunTrainingCycle_AssemblesAndRecords(t *testing.T) {
+func TestRunTrainingCycle_WritesRequestFile(t *testing.T) {
+	// Use a temp dir for training requests so we don't pollute the real one
+	tmpDir := t.TempDir()
+	t.Setenv("MNEMONIC_TRAINING_REQUESTS_DIR", tmpDir)
+
 	ms := &triggerMockStore{
 		untrainedCount: 10,
 		goldEntries: []store.ExperienceEntry{
@@ -155,46 +162,181 @@ func TestRunTrainingCycle_AssemblesAndRecords(t *testing.T) {
 
 	clCfg := baseCLConfig()
 
-	// Use a short timeout — we only test trigger logic and record-keeping.
-	// The subprocess will be killed quickly rather than loading a full model.
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	result, err := agent.RunTrainingCycle(ctx, clCfg)
+	result, err := agent.RunTrainingCycle(context.Background(), clCfg, "manual")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
 
-	// Should have assembled data and started a training run
+	// Should return training_requested status
+	if result.Status != "training_requested" {
+		t.Errorf("expected status 'training_requested', got %q", result.Status)
+	}
+	if result.RequestID == "" {
+		t.Error("expected non-empty request_id")
+	}
+	if result.TotalExamples != 1 {
+		t.Errorf("expected 1 total example, got %d", result.TotalExamples)
+	}
+
+	// Should have written a training run record
 	if len(ms.trainingRunsW) != 1 {
 		t.Fatalf("expected 1 training run written, got %d", len(ms.trainingRunsW))
 	}
 	run := ms.trainingRunsW[0]
-	if run.Status != "training" {
-		t.Errorf("expected initial status 'training', got %q", run.Status)
-	}
-	if run.TotalExamples != 1 {
-		t.Errorf("expected 1 total example, got %d", run.TotalExamples)
+	if run.Status != "requested" {
+		t.Errorf("expected initial status 'requested', got %q", run.Status)
 	}
 
-	// Training script will fail (not available in test env) — result should reflect that
-	if result == nil {
-		t.Fatal("expected non-nil result")
-	}
-	if result.Status != "failed" {
-		t.Errorf("expected status 'failed' (no training env), got %q", result.Status)
-	}
-	if result.ErrorMessage == "" {
-		t.Error("expected error message")
+	// Should have written a pending.json file
+	pendingPath := filepath.Join(tmpDir, "pending.json")
+	data, err := os.ReadFile(pendingPath)
+	if err != nil {
+		t.Fatalf("reading pending.json: %v", err)
 	}
 
-	// Should have updated the training run to failed
-	if len(ms.trainingRunsU) < 1 {
-		t.Fatal("expected at least 1 training run update")
+	var request TrainingRequest
+	if err := json.Unmarshal(data, &request); err != nil {
+		t.Fatalf("parsing pending.json: %v", err)
 	}
-	lastUpdate := ms.trainingRunsU[len(ms.trainingRunsU)-1]
-	if lastUpdate.Status != "failed" {
-		t.Errorf("expected updated status 'failed', got %q", lastUpdate.Status)
+	if request.Trigger != "manual" {
+		t.Errorf("expected trigger 'manual', got %q", request.Trigger)
+	}
+	if request.TotalExamples != 1 {
+		t.Errorf("expected 1 total example in request, got %d", request.TotalExamples)
+	}
+	if request.RunID == "" {
+		t.Error("expected non-empty run_id in request")
+	}
+}
+
+func TestRunTrainingCycle_SkipsWhenPendingExists(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("MNEMONIC_TRAINING_REQUESTS_DIR", tmpDir)
+
+	// Pre-create a pending.json
+	if err := os.WriteFile(filepath.Join(tmpDir, "pending.json"), []byte(`{}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ms := &triggerMockStore{untrainedCount: 100}
+	agent := NewDreamingAgent(ms, nil, DreamingConfig{Interval: time.Hour}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	result, err := agent.RunTrainingCycle(context.Background(), baseCLConfig(), "auto")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != nil {
+		t.Fatal("expected nil result when pending request exists")
+	}
+}
+
+func TestPickUpTrainingResult_NoFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("MNEMONIC_TRAINING_REQUESTS_DIR", tmpDir)
+
+	ms := &triggerMockStore{}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	err := PickUpTrainingResult(context.Background(), ms, log)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// No updates should have happened
+	if len(ms.trainingRunsU) != 0 {
+		t.Errorf("expected no training run updates, got %d", len(ms.trainingRunsU))
+	}
+}
+
+func TestPickUpTrainingResult_CompletedRun(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("MNEMONIC_TRAINING_REQUESTS_DIR", tmpDir)
+
+	// Write a result file
+	result := TrainingResultFile{
+		RequestID:      "tr-20260413-abc",
+		RunID:          "abc12345",
+		Status:         "completed",
+		CheckpointPath: "/tmp/checkpoint",
+		ModelPath:      "/tmp/model.gguf",
+		EvalEPR:        0.95,
+		EvalFR:         0.02,
+		EvalSC:         0.98,
+		QualityPassed:  true,
+		CompletedAt:    time.Now().UTC().Format(time.RFC3339),
+	}
+	data, _ := json.Marshal(result)
+	if err := os.WriteFile(filepath.Join(tmpDir, "result.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ms := &triggerMockStore{}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	err := PickUpTrainingResult(context.Background(), ms, log)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should have updated the training run
+	if len(ms.trainingRunsU) != 1 {
+		t.Fatalf("expected 1 training run update, got %d", len(ms.trainingRunsU))
+	}
+	update := ms.trainingRunsU[0]
+	if update.ID != "abc12345" {
+		t.Errorf("expected run ID 'abc12345', got %q", update.ID)
+	}
+	if update.Status != "completed" {
+		t.Errorf("expected status 'completed', got %q", update.Status)
+	}
+	if !update.QualityPassed {
+		t.Error("expected quality_passed to be true")
+	}
+	if update.EvalEPR != 0.95 {
+		t.Errorf("expected EPR 0.95, got %.2f", update.EvalEPR)
+	}
+
+	// Result file should be archived (renamed)
+	if _, err := os.Stat(filepath.Join(tmpDir, "result.json")); !os.IsNotExist(err) {
+		t.Error("expected result.json to be archived (renamed)")
+	}
+}
+
+func TestPickUpTrainingResult_FailedRun(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("MNEMONIC_TRAINING_REQUESTS_DIR", tmpDir)
+
+	result := TrainingResultFile{
+		RequestID:    "tr-20260413-def",
+		RunID:        "def12345",
+		Status:       "failed",
+		ErrorMessage: "quality gate failed: EPR=0.82",
+		CompletedAt:  time.Now().UTC().Format(time.RFC3339),
+	}
+	data, _ := json.Marshal(result)
+	if err := os.WriteFile(filepath.Join(tmpDir, "result.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ms := &triggerMockStore{}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	err := PickUpTrainingResult(context.Background(), ms, log)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(ms.trainingRunsU) != 1 {
+		t.Fatalf("expected 1 training run update, got %d", len(ms.trainingRunsU))
+	}
+	update := ms.trainingRunsU[0]
+	if update.Status != "failed" {
+		t.Errorf("expected status 'failed', got %q", update.Status)
+	}
+	if update.ErrorMessage != "quality gate failed: EPR=0.82" {
+		t.Errorf("unexpected error message: %q", update.ErrorMessage)
 	}
 }
 
@@ -215,54 +357,4 @@ func TestInTrainingWindow(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestParseEvalOutput(t *testing.T) {
-	t.Run("valid JSON metrics", func(t *testing.T) {
-		output := "Loading model...\nRunning evaluation...\n{\"epr\": 0.92, \"fr\": 0.03, \"sc\": 0.96}\nDone."
-		result, err := parseEvalOutput(output)
-		if err != nil {
-			t.Fatalf("parseEvalOutput: %v", err)
-		}
-		if result.EPR != 0.92 {
-			t.Errorf("expected EPR 0.92, got %.2f", result.EPR)
-		}
-		if result.FR != 0.03 {
-			t.Errorf("expected FR 0.03, got %.2f", result.FR)
-		}
-		if result.SC != 0.96 {
-			t.Errorf("expected SC 0.96, got %.2f", result.SC)
-		}
-	})
-
-	t.Run("no JSON in output", func(t *testing.T) {
-		_, err := parseEvalOutput("No metrics here\nJust text output")
-		if err == nil {
-			t.Fatal("expected error for missing JSON")
-		}
-	})
-
-	t.Run("quality gate pass", func(t *testing.T) {
-		output := `{"epr": 0.95, "fr": 0.02, "sc": 0.98}`
-		result, err := parseEvalOutput(output)
-		if err != nil {
-			t.Fatalf("parseEvalOutput: %v", err)
-		}
-		result.Passed = result.EPR >= 0.90 && result.FR <= 0.05 && result.SC >= 0.95
-		if !result.Passed {
-			t.Error("expected quality gate to pass")
-		}
-	})
-
-	t.Run("quality gate fail low EPR", func(t *testing.T) {
-		output := `{"epr": 0.85, "fr": 0.02, "sc": 0.98}`
-		result, err := parseEvalOutput(output)
-		if err != nil {
-			t.Fatalf("parseEvalOutput: %v", err)
-		}
-		result.Passed = result.EPR >= 0.90 && result.FR <= 0.05 && result.SC >= 0.95
-		if result.Passed {
-			t.Error("expected quality gate to fail for low EPR")
-		}
-	})
 }

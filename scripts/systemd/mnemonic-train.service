@@ -1,0 +1,14 @@
+[Unit]
+Description=Mnemonic continuous learning training cycle
+# Don't require mnemonic.service — the script stops it before training
+# and restarts it after, regardless of outcome.
+
+[Service]
+Type=oneshot
+ExecStart=%h/Projects/mem/scripts/continuous_train.sh
+# 30 minutes should be enough for 500 steps on RX 7800 XT.
+# If training takes longer, the timeout kills the process and the
+# EXIT trap in the script still restarts the daemon.
+TimeoutStartSec=1800
+Environment=PYTHONUNBUFFERED=1
+WorkingDirectory=%h/Projects/mem

@@ -134,6 +134,13 @@ func serveCommand(configPath string) {
 	}
 	intCancel()
 
+	// Pick up training results from a previous systemd training run
+	pickupCtx, pickupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := dreaming.PickUpTrainingResult(pickupCtx, memStore, log); err != nil {
+		log.Warn("failed to pick up training result", "error", err)
+	}
+	pickupCancel()
+
 	// Check available disk space
 	dbDir := filepath.Dir(cfg.Store.DBPath)
 	if availBytes, diskErr := diskAvailable(dbDir); diskErr == nil {
@@ -716,7 +723,7 @@ func serveCommand(configPath string) {
 		if dreamer != nil && cfg.ContinuousLearning.Trigger.Manual {
 			clCfg := cfg.ContinuousLearning
 			smCfg.TrainingTriggerFn = func(ctx context.Context) (map[string]any, error) {
-				result, err := dreamer.RunTrainingCycle(ctx, clCfg)
+				result, err := dreamer.RunTrainingCycle(ctx, clCfg, "manual")
 				if err != nil {
 					return nil, err
 				}
@@ -725,13 +732,10 @@ func serveCommand(configPath string) {
 				}
 				return map[string]any{
 					"status":         result.Status,
+					"request_id":     result.RequestID,
 					"batch_id":       result.BatchID,
 					"total_examples": result.TotalExamples,
-					"quality_passed": result.QualityPassed,
-					"checkpoint":     result.CheckpointPath,
-					"model":          result.ModelPath,
-					"eval_epr":       result.EvalEPR,
-					"eval_sc":        result.EvalSC,
+					"request_path":   result.RequestPath,
 					"error":          result.ErrorMessage,
 				}, nil
 			}

@@ -200,10 +200,10 @@ func (da *DreamingAgent) runCycle(ctx context.Context) (*DreamReport, error) {
 	if trainResult, err := da.trainingCheck(ctx, da.config.ContinuousLearning); err != nil && ctx.Err() == nil {
 		da.log.Error("training trigger phase failed", "error", err)
 	} else if trainResult != nil {
-		da.log.Info("training cycle result",
+		da.log.Info("training request result",
 			"status", trainResult.Status,
-			"examples", trainResult.TotalExamples,
-			"quality_passed", trainResult.QualityPassed)
+			"request_id", trainResult.RequestID,
+			"examples", trainResult.TotalExamples)
 	}
 
 	// Phase 5: Link replayed memories to matching patterns
