@@ -14,7 +14,7 @@ import (
 // dedupCommand scans active memories for near-duplicate clusters and archives duplicates.
 // With --apply it modifies the DB; without it, it's a dry-run that reports what would change.
 func dedupCommand(configPath string, dryRun bool) {
-	cfg, db, _, log := initRuntime(configPath)
+	cfg, db, log := initBase(configPath)
 	defer func() { _ = db.Close() }()
 
 	ctx := context.Background()
@@ -197,7 +197,7 @@ func dedupCommand(configPath string, dryRun bool) {
 // resetPatternsCommand recalculates pattern strengths using logarithmic scaling
 // and merges near-duplicate patterns. Dry-run by default; use --apply to execute.
 func resetPatternsCommand(configPath string, dryRun bool) {
-	_, db, _, log := initRuntime(configPath)
+	_, db, log := initBase(configPath)
 	defer func() { _ = db.Close() }()
 
 	ctx := context.Background()

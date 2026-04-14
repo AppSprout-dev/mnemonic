@@ -10,7 +10,7 @@ import (
 
 // insightsCommand displays recent metacognition observations.
 func insightsCommand(configPath string) {
-	_, db, _, _ := initRuntime(configPath)
+	_, db, _ := initBase(configPath)
 	defer func() { _ = db.Close() }()
 
 	ctx := context.Background()

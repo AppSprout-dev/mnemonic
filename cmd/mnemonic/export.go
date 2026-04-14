@@ -12,7 +12,7 @@ import (
 
 // exportCommand exports the memory store to a file.
 func exportCommand(configPath string, args []string) {
-	cfg, db, _, _ := initRuntime(configPath)
+	cfg, db, _ := initBase(configPath)
 	defer func() { _ = db.Close() }()
 
 	ctx := context.Background()
@@ -74,7 +74,7 @@ func exportCommand(configPath string, args []string) {
 
 // importCommand imports memories from a JSON export file.
 func importCommand(configPath, filePath string, args []string) {
-	_, db, _, _ := initRuntime(configPath)
+	_, db, _ := initBase(configPath)
 	defer func() { _ = db.Close() }()
 
 	ctx := context.Background()
@@ -116,7 +116,7 @@ func importCommand(configPath, filePath string, args []string) {
 
 // backupCommand creates a timestamped backup with retention.
 func backupCommand(configPath string) {
-	_, db, _, _ := initRuntime(configPath)
+	_, db, _ := initBase(configPath)
 	defer func() { _ = db.Close() }()
 
 	ctx := context.Background()
