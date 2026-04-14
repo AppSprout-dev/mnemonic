@@ -191,4 +191,3 @@ func computeSimpleEPR(rawContent, outputJSON string) float64 {
 	}
 	return float64(preserved) / float64(significant)
 }
-

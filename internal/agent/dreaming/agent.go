@@ -28,6 +28,7 @@ type DreamingConfig struct {
 	InsightsBudget         int
 	DefaultConfidence      float32
 	Curriculum             config.CLCurriculumConfig
+	ContinuousLearning     config.ContinuousLearningConfig
 }
 
 type DreamingAgent struct {
@@ -193,6 +194,16 @@ func (da *DreamingAgent) runCycle(ctx context.Context) (*DreamReport, error) {
 			"attempted", currReport.CorrectionsAttempted,
 			"passed", currReport.CorrectionsPassed,
 			"failed", currReport.CorrectionsFailed)
+	}
+
+	// Phase 4.85: Training trigger — check if enough data for spoke fine-tuning
+	if trainResult, err := da.trainingCheck(ctx, da.config.ContinuousLearning); err != nil && ctx.Err() == nil {
+		da.log.Error("training trigger phase failed", "error", err)
+	} else if trainResult != nil {
+		da.log.Info("training cycle result",
+			"status", trainResult.Status,
+			"examples", trainResult.TotalExamples,
+			"quality_passed", trainResult.QualityPassed)
 	}
 
 	// Phase 5: Link replayed memories to matching patterns

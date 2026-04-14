@@ -518,6 +518,7 @@ func serveCommand(configPath string) {
 			InsightsBudget:         cfg.Dreaming.InsightsBudget,
 			DefaultConfidence:      cfg.Dreaming.DefaultConfidence,
 			Curriculum:             cfg.ContinuousLearning.Curriculum,
+			ContinuousLearning:     cfg.ContinuousLearning,
 		}, log)
 
 		if err := dreamer.Start(rootCtx, bus); err != nil {
@@ -688,7 +689,7 @@ func serveCommand(configPath string) {
 
 		// Create MCP session manager for HTTP transport
 		mcpResolver := config.NewProjectResolver(cfg.Projects)
-		mcpSessions := mcp.NewSessionManager(mcp.SessionManagerConfig{
+		smCfg := mcp.SessionManagerConfig{
 			Store:           memStore,
 			Retriever:       retriever,
 			Bus:             bus,
@@ -709,7 +710,34 @@ func serveCommand(configPath string) {
 				FeedbackStrengthDelta: cfg.MemoryDefaults.FeedbackStrengthDelta,
 				FeedbackSalienceBoost: cfg.MemoryDefaults.FeedbackSalienceBoost,
 			},
-		})
+		}
+
+		// Wire up manual training trigger if dreaming agent is available
+		if dreamer != nil && cfg.ContinuousLearning.Trigger.Manual {
+			clCfg := cfg.ContinuousLearning
+			smCfg.TrainingTriggerFn = func(ctx context.Context) (map[string]any, error) {
+				result, err := dreamer.RunTrainingCycle(ctx, clCfg)
+				if err != nil {
+					return nil, err
+				}
+				if result == nil {
+					return nil, nil
+				}
+				return map[string]any{
+					"status":         result.Status,
+					"batch_id":       result.BatchID,
+					"total_examples": result.TotalExamples,
+					"quality_passed": result.QualityPassed,
+					"checkpoint":     result.CheckpointPath,
+					"model":          result.ModelPath,
+					"eval_epr":       result.EvalEPR,
+					"eval_sc":        result.EvalSC,
+					"error":          result.ErrorMessage,
+				}, nil
+			}
+		}
+
+		mcpSessions := mcp.NewSessionManager(smCfg)
 		apiDeps.MCPSessions = mcpSessions
 		defer mcpSessions.Stop(rootCtx)
 

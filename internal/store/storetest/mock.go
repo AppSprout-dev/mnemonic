@@ -398,10 +398,19 @@ func (MockStore) UpdateExperienceCorrectedOutput(context.Context, string, string
 func (MockStore) ListNeedsImprovement(context.Context, int) ([]store.ExperienceEntry, error) {
 	return nil, nil
 }
-func (MockStore) WriteCurriculumRun(context.Context, store.CurriculumRun) error   { return nil }
-func (MockStore) UpdateCurriculumRun(context.Context, store.CurriculumRun) error  { return nil }
+func (MockStore) WriteCurriculumRun(context.Context, store.CurriculumRun) error  { return nil }
+func (MockStore) UpdateCurriculumRun(context.Context, store.CurriculumRun) error { return nil }
 func (MockStore) GetLastCurriculumRunTime(context.Context) (time.Time, error) {
 	return time.Time{}, nil
+}
+func (MockStore) WriteTrainingRun(context.Context, store.TrainingRun) error  { return nil }
+func (MockStore) UpdateTrainingRun(context.Context, store.TrainingRun) error { return nil }
+func (MockStore) GetLastTrainingRunTime(context.Context) (time.Time, error) {
+	return time.Time{}, nil
+}
+func (MockStore) CountUntrainedExperience(context.Context) (int, error) { return 0, nil }
+func (MockStore) MarkExperienceUsedInTraining(context.Context, string, []string) error {
+	return nil
 }
 
 // --- Lifecycle ---

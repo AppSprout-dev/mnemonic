@@ -334,6 +334,106 @@ func (s *SQLiteStore) GetLastCurriculumRunTime(ctx context.Context) (time.Time, 
 	return t, nil
 }
 
+// --- Phase C: Training runs ---
+
+func (s *SQLiteStore) WriteTrainingRun(ctx context.Context, run store.TrainingRun) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO training_runs (id, batch_id, batch_path, gold_count, corrected_count,
+		     total_examples, status, checkpoint_path, model_path, eval_epr, eval_fr, eval_sc,
+		     quality_passed, error_message, started_at, completed_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		run.ID, run.BatchID, run.BatchPath, run.GoldCount, run.CorrectedCount,
+		run.TotalExamples, run.Status, run.CheckpointPath, run.ModelPath,
+		run.EvalEPR, run.EvalFR, run.EvalSC,
+		run.QualityPassed, run.ErrorMessage, run.StartedAt, run.CompletedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("writing training run %s: %w", run.ID, err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) UpdateTrainingRun(ctx context.Context, run store.TrainingRun) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE training_runs
+		 SET status = ?, checkpoint_path = ?, model_path = ?,
+		     eval_epr = ?, eval_fr = ?, eval_sc = ?,
+		     quality_passed = ?, error_message = ?, completed_at = ?
+		 WHERE id = ?`,
+		run.Status, run.CheckpointPath, run.ModelPath,
+		run.EvalEPR, run.EvalFR, run.EvalSC,
+		run.QualityPassed, run.ErrorMessage, run.CompletedAt, run.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("updating training run %s: %w", run.ID, err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) GetLastTrainingRunTime(ctx context.Context) (time.Time, error) {
+	var raw *string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT MAX(started_at) FROM training_runs WHERE status = 'completed'`,
+	).Scan(&raw)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("getting last training run time: %w", err)
+	}
+	if raw == nil || *raw == "" {
+		return time.Time{}, nil
+	}
+	formats := []string{
+		time.RFC3339Nano, time.RFC3339,
+		"2006-01-02 15:04:05-07:00", "2006-01-02T15:04:05Z",
+		"2006-01-02 15:04:05 -0700 MST",
+	}
+	var t time.Time
+	var parseErr error
+	for _, f := range formats {
+		t, parseErr = time.Parse(f, *raw)
+		if parseErr == nil {
+			break
+		}
+	}
+	if parseErr != nil {
+		return time.Time{}, fmt.Errorf("parsing training run time %q: %w", *raw, parseErr)
+	}
+	return t, nil
+}
+
+func (s *SQLiteStore) CountUntrainedExperience(ctx context.Context) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM experience_buffer
+		 WHERE used_in_training = 0
+		   AND (category = 'gold' OR (category = 'needs_improvement' AND corrected_output IS NOT NULL))`,
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("counting untrained experience: %w", err)
+	}
+	return count, nil
+}
+
+func (s *SQLiteStore) MarkExperienceUsedInTraining(ctx context.Context, batchID string, entryIDs []string) error {
+	if len(entryIDs) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	for _, id := range entryIDs {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE experience_buffer SET used_in_training = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+			id,
+		); err != nil {
+			return fmt.Errorf("marking entry %s as used: %w", id, err)
+		}
+	}
+	return tx.Commit()
+}
+
 func (s *SQLiteStore) ListRecentEncodingQuality(ctx context.Context, limit int) ([]store.EncodingQualityEntry, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT m.id, COALESCE(m.summary, ''), COALESCE(m.source, ''),

@@ -57,6 +57,32 @@ number ::= "-"? ("0" | [1-9] [0-9]*) ("." [0-9]+)? ([eE] [-+]? [0-9]+)?
 ws     ::= ([ \t\n] ws)?
 `
 
+// GBNFEpisodeSynthesis constrains output to the episode synthesis schema.
+// Fixed key order and typed values prevent the embedded model from producing
+// type mismatches (e.g. salience as string) that break json.Unmarshal.
+const GBNFEpisodeSynthesis = `root ::= "{" ws title-kv "," ws summary-kv "," ws narrative-kv "," ws emotional-tone-kv "," ws outcome-kv "," ws concepts-kv "," ws salience-kv ws "}"
+
+title-kv          ::= "\"title\"" ws ":" ws string
+summary-kv        ::= "\"summary\"" ws ":" ws string
+narrative-kv      ::= "\"narrative\"" ws ":" ws string
+emotional-tone-kv ::= "\"emotional_tone\"" ws ":" ws string
+outcome-kv        ::= "\"outcome\"" ws ":" ws string
+concepts-kv       ::= "\"concepts\"" ws ":" ws string-array
+salience-kv       ::= "\"salience\"" ws ":" ws number
+
+string-array ::= "[" ws "]" | "[" ws string ("," ws string)* ws "]"
+
+string ::=
+  "\"" (
+    [^\\"\x00-\x1f] |
+    "\\" (["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F])
+  )* "\""
+
+number ::= "-"? ("0" | [1-9] [0-9]*) ("." [0-9]+)? ([eE] [-+]? [0-9]+)?
+
+ws     ::= ([ \t\n] ws)?
+`
+
 // GBNFEncodingResponse constrains output to the mnemonic encoding response schema.
 // Fixed key order eliminates ambiguity for small models and enforces all required fields.
 const GBNFEncodingResponse = `root ::= "{" ws gist-kv "," ws summary-kv "," ws content-kv "," ws narrative-kv "," ws concepts-kv "," ws structured-concepts-kv "," ws significance-kv "," ws emotional-tone-kv "," ws outcome-kv "," ws salience-kv ws "}"

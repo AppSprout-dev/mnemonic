@@ -10,7 +10,7 @@ import (
 // migration is added. It is written to PRAGMA user_version after InitSchema
 // completes, and read by the pre-migration backup logic to skip backups when
 // the schema is already current.
-const SchemaVersion = 17
+const SchemaVersion = 18
 
 const schema = `
 -- Raw observations before encoding
@@ -641,6 +641,30 @@ INSERT OR IGNORE INTO forum_categories (id, name, slug, description, icon, color
 		return fmt.Errorf("failed to create curriculum_runs table: %w", err)
 	}
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_curriculum_runs_status ON curriculum_runs(status)`)
+
+	// Migration 018: Training runs table (Phase C — automated spoke training)
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS training_runs (
+		id TEXT PRIMARY KEY,
+		batch_id TEXT NOT NULL,
+		batch_path TEXT NOT NULL,
+		gold_count INTEGER DEFAULT 0,
+		corrected_count INTEGER DEFAULT 0,
+		total_examples INTEGER DEFAULT 0,
+		status TEXT DEFAULT 'pending',
+		checkpoint_path TEXT,
+		model_path TEXT,
+		eval_epr REAL DEFAULT 0,
+		eval_fr REAL DEFAULT 0,
+		eval_sc REAL DEFAULT 0,
+		quality_passed BOOLEAN DEFAULT FALSE,
+		error_message TEXT,
+		started_at DATETIME NOT NULL,
+		completed_at DATETIME
+	)`); err != nil {
+		return fmt.Errorf("failed to create training_runs table: %w", err)
+	}
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_training_runs_status ON training_runs(status)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_training_runs_started_at ON training_runs(started_at)`)
 
 	// Record the schema version so pre-migration backups can skip when current.
 	if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", SchemaVersion)); err != nil {

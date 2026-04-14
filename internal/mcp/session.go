@@ -30,8 +30,9 @@ type SessionManager struct {
 	excludePatterns []string
 	maxContentBytes int
 	resolver        ProjectResolver
-	daemonURL       string
-	memDefaults     MemoryDefaults
+	daemonURL          string
+	memDefaults        MemoryDefaults
+	trainingTriggerFn  func(ctx context.Context) (map[string]any, error)
 
 	idleTimeout time.Duration // how long before an idle session is expired
 	stopCh      chan struct{} // signals the reaper goroutine to stop
@@ -53,9 +54,10 @@ type SessionManagerConfig struct {
 	ExcludePatterns []string
 	MaxContentBytes int
 	Resolver        *config.ProjectResolver
-	DaemonURL       string
-	MemDefaults     MemoryDefaults
-	IdleTimeout     time.Duration // default: 30 minutes
+	DaemonURL          string
+	MemDefaults        MemoryDefaults
+	TrainingTriggerFn  func(ctx context.Context) (map[string]any, error)
+	IdleTimeout        time.Duration // default: 30 minutes
 }
 
 // NewSessionManager creates a session manager for HTTP MCP transport.
@@ -76,9 +78,10 @@ func NewSessionManager(cfg SessionManagerConfig) *SessionManager {
 		excludePatterns: cfg.ExcludePatterns,
 		maxContentBytes: cfg.MaxContentBytes,
 		resolver:        cfg.Resolver,
-		daemonURL:       cfg.DaemonURL,
-		memDefaults:     cfg.MemDefaults,
-		idleTimeout:     timeout,
+		daemonURL:          cfg.DaemonURL,
+		memDefaults:        cfg.MemDefaults,
+		trainingTriggerFn:  cfg.TrainingTriggerFn,
+		idleTimeout:        timeout,
 		stopCh:          make(chan struct{}),
 	}
 
@@ -110,6 +113,10 @@ func (sm *SessionManager) GetOrCreate(clientSessionID string) (*MCPServer, strin
 		sm.maxContentBytes, sm.resolver, sm.daemonURL,
 		sm.memDefaults,
 	)
+
+	if sm.trainingTriggerFn != nil {
+		srv.SetTrainingTrigger(sm.trainingTriggerFn)
+	}
 
 	// Use the MCPServer's generated session ID as the key
 	key := srv.SessionID()

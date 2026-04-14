@@ -701,5 +701,17 @@ func allToolDefs() []ToolDefinition {
 		dismissPatternToolDef(),
 		dismissAbstractionToolDef(),
 		createHandoffToolDef(),
+		trainModelToolDef(),
+	}
+}
+
+func trainModelToolDef() ToolDefinition {
+	return ToolDefinition{
+		Name:        "train_model",
+		Description: "Trigger a spoke fine-tuning cycle using accumulated experience data. Assembles gold and corrected encoding pairs into a training batch, runs spoke training, evaluates quality against probes, and deploys if the quality gate passes. Requires sufficient untrained data in the experience buffer (default: 50 entries).",
+		InputSchema: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{},
+		},
 	}
 }

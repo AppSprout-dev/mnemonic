@@ -17,21 +17,21 @@ import (
 // TrainingExample is a single training pair written to JSONL.
 // The Python training script tokenizes and mixes with replay data.
 type TrainingExample struct {
-	Type     string `json:"type"`      // "gold" or "corrective"
-	Prompt   string `json:"prompt"`    // system + user prompt (identical to what the model saw)
-	Output   string `json:"output"`    // the target completion (gold encoding or corrected encoding)
-	MemoryID string `json:"memory_id"` // provenance
-	EPR      float64 `json:"epr"`      // EPR score of the output
+	Type     string  `json:"type"`      // "gold" or "corrective"
+	Prompt   string  `json:"prompt"`    // system + user prompt (identical to what the model saw)
+	Output   string  `json:"output"`    // the target completion (gold encoding or corrected encoding)
+	MemoryID string  `json:"memory_id"` // provenance
+	EPR      float64 `json:"epr"`       // EPR score of the output
 }
 
 // TrainingBatchManifest describes a training batch for reproducibility.
 type TrainingBatchManifest struct {
-	ID            string    `json:"id"`
-	CreatedAt     time.Time `json:"created_at"`
-	GoldCount     int       `json:"gold_count"`
-	CorrectedCount int     `json:"corrected_count"`
-	TotalExamples int       `json:"total_examples"`
-	DataPath      string    `json:"data_path"`
+	ID             string    `json:"id"`
+	CreatedAt      time.Time `json:"created_at"`
+	GoldCount      int       `json:"gold_count"`
+	CorrectedCount int       `json:"corrected_count"`
+	TotalExamples  int       `json:"total_examples"`
+	DataPath       string    `json:"data_path"`
 }
 
 // AssembleTrainingBatch writes gold and corrected encoding pairs to a JSONL file.
@@ -177,10 +177,10 @@ func (da *DreamingAgent) buildTrainingExample(ctx context.Context, entry store.E
 
 	// Reconstruct the encoding output as JSON
 	output, err := json.Marshal(map[string]any{
-		"summary":   mem.Summary,
-		"content":   mem.Content,
-		"concepts":  mem.Concepts,
-		"salience":  mem.Salience,
+		"summary":  mem.Summary,
+		"content":  mem.Content,
+		"concepts": mem.Concepts,
+		"salience": mem.Salience,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("marshaling memory output: %w", err)
