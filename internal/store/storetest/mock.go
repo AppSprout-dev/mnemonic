@@ -412,6 +412,10 @@ func (MockStore) CountUntrainedExperience(context.Context) (int, error) { return
 func (MockStore) MarkExperienceUsedInTraining(context.Context, string, []string) error {
 	return nil
 }
+func (MockStore) CountConsecutiveFailedTrainingRuns(context.Context) (int, error) { return 0, nil }
+func (MockStore) GetLastTrainingRunEndTime(context.Context) (time.Time, error) {
+	return time.Time{}, nil
+}
 
 // --- Lifecycle ---
 

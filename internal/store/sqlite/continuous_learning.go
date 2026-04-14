@@ -400,6 +400,51 @@ func (s *SQLiteStore) GetLastTrainingRunTime(ctx context.Context) (time.Time, er
 	return t, nil
 }
 
+func (s *SQLiteStore) CountConsecutiveFailedTrainingRuns(ctx context.Context) (int, error) {
+	var count int
+	// Count failed or stale "requested" runs since the last successful one.
+	// Stale "requested" = daemon crashed mid-training, result never written.
+	// Grace period: don't count runs started within 10 minutes (may be in-progress).
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM training_runs
+		 WHERE status IN ('failed', 'requested')
+		   AND started_at > COALESCE(
+		       (SELECT MAX(started_at) FROM training_runs WHERE status = 'completed'),
+		       '1970-01-01T00:00:00Z'
+		   )
+		   AND started_at < datetime('now', '-10 minutes')`,
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("counting consecutive failed training runs: %w", err)
+	}
+	return count, nil
+}
+
+func (s *SQLiteStore) GetLastTrainingRunEndTime(ctx context.Context) (time.Time, error) {
+	var raw *string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT MAX(COALESCE(completed_at, started_at)) FROM training_runs`,
+	).Scan(&raw)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("getting last training run end time: %w", err)
+	}
+	if raw == nil || *raw == "" {
+		return time.Time{}, nil
+	}
+	formats := []string{
+		time.RFC3339Nano, time.RFC3339,
+		"2006-01-02 15:04:05-07:00", "2006-01-02T15:04:05Z",
+		"2006-01-02 15:04:05 -0700 MST",
+	}
+	for _, f := range formats {
+		t, parseErr := time.Parse(f, *raw)
+		if parseErr == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("parsing training run time %q", *raw)
+}
+
 func (s *SQLiteStore) CountUntrainedExperience(ctx context.Context) (int, error) {
 	var count int
 	err := s.db.QueryRowContext(ctx,

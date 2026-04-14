@@ -91,6 +91,13 @@ write_failure() {
     exit 1
 }
 
+# Check for e-stop file — training is disabled
+ESTOP_FILE="${HOME}/.mnemonic/training.disabled"
+if [ -f "$ESTOP_FILE" ]; then
+    echo "[continuous_train] Training disabled by e-stop file: $ESTOP_FILE"
+    write_failure "training disabled by e-stop file ($ESTOP_FILE)"
+fi
+
 # Stop the daemon to free VRAM
 echo "[continuous_train] Stopping mnemonic daemon to free VRAM..."
 systemctl --user stop mnemonic || true
@@ -100,6 +107,17 @@ sleep 2  # Give GPU time to release memory
 if command -v rocm-smi &>/dev/null; then
     VRAM_USED=$(rocm-smi --showmeminfo vram 2>/dev/null | grep "Used" | awk '{print $NF}' | head -1)
     echo "[continuous_train] VRAM used after daemon stop: ${VRAM_USED:-unknown}"
+fi
+
+# Gate: abort if VRAM wasn't properly released (daemon still holding memory)
+if command -v rocm-smi &>/dev/null; then
+    VRAM_USED_BYTES=$(rocm-smi --showmeminfo vram 2>/dev/null | grep "Used" | awk '{print $NF}' | head -1)
+    VRAM_USED_MB=$((VRAM_USED_BYTES / 1048576))
+    MAX_USED_MB=1000
+    if [ "$VRAM_USED_MB" -gt "$MAX_USED_MB" ] 2>/dev/null; then
+        write_failure "VRAM still in use after daemon stop: ${VRAM_USED_MB}MB (max: ${MAX_USED_MB}MB). GPU not released."
+    fi
+    echo "[continuous_train] VRAM available: $((16384 - VRAM_USED_MB))MB"
 fi
 
 # Step 1: Tokenize the batch data
@@ -114,7 +132,7 @@ fi
 "$VENV_PYTHON" "$PREP_SCRIPT" \
     --input "$BATCH_PATH" \
     --output-dir "$TOKENIZED_DIR" \
-    --max-seq-len 2048 \
+    --max-seq-len 1024 \
     --eval-ratio 0 \
     2>&1 | tee -a "$LOG"
 
@@ -140,7 +158,7 @@ fi
     --base-model google/gemma-4-E2B-it \
     --train-data "$TOKENIZED_PATH" \
     --checkpoint-dir "$CHECKPOINT_DIR" \
-    --seq-len 2048 \
+    --seq-len 1024 \
     --steps 500 \
     --batch-size 1 \
     --grad-accum 8 \

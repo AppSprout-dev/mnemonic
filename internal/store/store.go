@@ -696,6 +696,10 @@ type ContinuousLearningStore interface {
 	GetLastTrainingRunTime(ctx context.Context) (time.Time, error)
 	CountUntrainedExperience(ctx context.Context) (int, error)
 	MarkExperienceUsedInTraining(ctx context.Context, batchID string, entryIDs []string) error
+	// CountConsecutiveFailedTrainingRuns counts failed/stale runs since the last success.
+	CountConsecutiveFailedTrainingRuns(ctx context.Context) (int, error)
+	// GetLastTrainingRunEndTime returns the end time of the most recent run (any status).
+	GetLastTrainingRunEndTime(ctx context.Context) (time.Time, error)
 
 	// Quality drift detection
 	GetEncodingQualityWindow(ctx context.Context, windowSize int) (EncodingQualityWindow, error)

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -2899,6 +2900,13 @@ func (srv *MCPServer) handleCreateHandoff(ctx context.Context, args map[string]a
 func (srv *MCPServer) handleTrainModel(ctx context.Context, _ map[string]any) (any, error) {
 	if srv.trainingTriggerFn == nil {
 		return nil, fmt.Errorf("training not available — daemon must be running with dreaming agent enabled")
+	}
+
+	// Check e-stop file
+	homeDir, _ := os.UserHomeDir()
+	estopPath := filepath.Join(homeDir, ".mnemonic", "training.disabled")
+	if _, statErr := os.Stat(estopPath); statErr == nil {
+		return toolResult("Training disabled — e-stop file exists at " + estopPath + ". Remove it to re-enable training."), nil
 	}
 
 	result, err := srv.trainingTriggerFn(ctx)

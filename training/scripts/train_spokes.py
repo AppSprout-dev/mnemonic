@@ -426,7 +426,9 @@ def train(args):
     torch.cuda.empty_cache()
 
     # Training loop
+    MAX_CONSECUTIVE_OOM = 3
     model.train()
+    consecutive_oom = 0
     global_step = start_step
     opt_step_count = start_step // args.grad_accum
     losses = []
@@ -466,11 +468,16 @@ def train(args):
                     loss = (loss_sum / n_tokens) / args.grad_accum
 
                 loss.backward()
+                consecutive_oom = 0  # successful step resets counter
             except torch.cuda.OutOfMemoryError:
-                # Skip long examples that OOM — free memory and continue
-                print(f"  [OOM] Skipped step {global_step} (seq_len={input_ids.shape[1]})")
+                consecutive_oom += 1
+                print(f"  [OOM] Skipped step {global_step} (seq_len={input_ids.shape[1]}) [{consecutive_oom}/{MAX_CONSECUTIVE_OOM}]")
                 torch.cuda.empty_cache()
                 global_step += 1
+                if consecutive_oom >= MAX_CONSECUTIVE_OOM:
+                    print(f"\n  [FATAL] {MAX_CONSECUTIVE_OOM} consecutive OOM errors — VRAM budget is insufficient.")
+                    print(f"  Aborting. Reduce --seq-len, --batch-size, or free GPU memory.")
+                    sys.exit(1)
                 continue
 
             if (global_step + 1) % args.grad_accum == 0:

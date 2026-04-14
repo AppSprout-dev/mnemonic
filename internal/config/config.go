@@ -505,9 +505,11 @@ type CLTrainingConfig struct {
 
 // CLTriggerConfig holds trigger settings for continuous learning.
 type CLTriggerConfig struct {
-	Auto           bool   `yaml:"auto"`            // metacognition auto-trigger (default: false)
-	Manual         bool   `yaml:"manual"`          // MCP tool trigger (default: true)
-	TrainingWindow string `yaml:"training_window"` // auto-trigger window, e.g. "02:00-06:00"
+	Auto                   bool   `yaml:"auto"`                     // metacognition auto-trigger (default: false)
+	Manual                 bool   `yaml:"manual"`                   // MCP tool trigger (default: true)
+	TrainingWindow         string `yaml:"training_window"`          // auto-trigger window, e.g. "02:00-06:00"
+	FailureCooldownHours   int    `yaml:"failure_cooldown_hours"`   // hours to wait after a failed run (default: 24)
+	MaxConsecutiveFailures int    `yaml:"max_consecutive_failures"` // circuit breaker: disable after N failures (default: 3)
 }
 
 // LoggingConfig holds logging settings.
@@ -896,9 +898,11 @@ func Default() *Config {
 				CooldownHours:          24,
 			},
 			Trigger: CLTriggerConfig{
-				Auto:           true,
-				Manual:         true,
-				TrainingWindow: "02:00-06:00",
+				Auto:                   true,
+				Manual:                 true,
+				TrainingWindow:         "02:00-06:00",
+				FailureCooldownHours:   24,
+				MaxConsecutiveFailures: 3,
 			},
 		},
 		AgentSDK: AgentSDKConfig{

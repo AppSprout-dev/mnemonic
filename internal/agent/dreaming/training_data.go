@@ -137,6 +137,20 @@ func (da *DreamingAgent) AssembleTrainingBatch(ctx context.Context, outputDir st
 		totalWritten++
 	}
 
+	// Mark all assembled entries as used so they don't re-trigger training.
+	// This is critical: without it, CountUntrainedExperience never drops,
+	// and every dreaming cycle re-triggers training on the same data.
+	var usedEntryIDs []string
+	for _, entry := range goldEntries {
+		usedEntryIDs = append(usedEntryIDs, entry.ID)
+	}
+	for _, entry := range corrected {
+		usedEntryIDs = append(usedEntryIDs, entry.ID)
+	}
+	if err := da.store.MarkExperienceUsedInTraining(ctx, batchID, usedEntryIDs); err != nil {
+		da.log.Warn("failed to mark experience as used in training", "error", err, "count", len(usedEntryIDs))
+	}
+
 	manifest := &TrainingBatchManifest{
 		ID:             batchID,
 		CreatedAt:      time.Now(),
