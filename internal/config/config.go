@@ -881,6 +881,26 @@ func Default() *Config {
 		MCP: MCPConfig{
 			Enabled: true,
 		},
+		ContinuousLearning: ContinuousLearningConfig{
+			Enabled: true,
+			Training: CLTrainingConfig{
+				MinNewExamples:    50,
+				MaxExamplesPerRun: 200,
+				ReplayRatio:       0.30,
+				RollbackVersions:  3,
+			},
+			Curriculum: CLCurriculumConfig{
+				Enabled:                true,
+				MaxCorrectionsPerCycle: 20,
+				MinNeedsImprovement:    10,
+				CooldownHours:          24,
+			},
+			Trigger: CLTriggerConfig{
+				Auto:           true,
+				Manual:         true,
+				TrainingWindow: "02:00-06:00",
+			},
+		},
 		AgentSDK: AgentSDKConfig{
 			Enabled:      false,
 			EvolutionDir: "",
