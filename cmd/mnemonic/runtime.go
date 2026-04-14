@@ -88,9 +88,9 @@ func convertSourceWeights(src map[string]float64) map[string]float32 {
 	return out
 }
 
-// initRuntime loads config, opens store and LLM for CLI commands.
-// The returned Provider includes training data capture if enabled in config.
-func initRuntime(configPath string) (*config.Config, *sqlite.SQLiteStore, llm.Provider, *slog.Logger) {
+// initBase loads config, opens the database, and creates a logger.
+// No LLM provider is created — use this for commands that only need data access.
+func initBase(configPath string) (*config.Config, *sqlite.SQLiteStore, *slog.Logger) {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		die(exitConfig, fmt.Sprintf("loading config: %v", err), "mnemonic diagnose")
@@ -108,6 +108,15 @@ func initRuntime(configPath string) (*config.Config, *sqlite.SQLiteStore, llm.Pr
 		die(exitDatabase, fmt.Sprintf("opening database: %v", err), "mnemonic diagnose")
 	}
 
+	return cfg, db, log
+}
+
+// initRuntime loads config, opens store, and creates an LLM provider for CLI commands
+// that need inference (consolidate, dream, meta-cycle, remember, recall).
+// The returned Provider includes training data capture if enabled in config.
+func initRuntime(configPath string) (*config.Config, *sqlite.SQLiteStore, llm.Provider, *slog.Logger) {
+	cfg, db, log := initBase(configPath)
+
 	provider := newLLMProvider(cfg)
 
 	// Wrap with training data capture if enabled
@@ -116,6 +125,53 @@ func initRuntime(configPath string) (*config.Config, *sqlite.SQLiteStore, llm.Pr
 	}
 
 	return cfg, db, provider, log
+}
+
+// newMCPProvider creates an LLM provider suitable for MCP processes.
+// MCP processes handle occasional encoding (remember) and rare synthesis (recall),
+// so they should avoid loading GPU models when possible.
+//
+// Strategy:
+//  1. If an API endpoint is configured, use it directly — zero VRAM cost.
+//  2. If air-gapped (no API endpoint), create an embedded provider with deferred
+//     model loading. Models load on first Complete()/Embed() call, not at startup.
+//     MCP sessions that never call remember pay zero VRAM.
+func newMCPProvider(cfg *config.Config) llm.Provider {
+	if cfg.LLM.Endpoint != "" {
+		slog.Info("MCP using API provider for encoding", "endpoint", cfg.LLM.Endpoint)
+		return newAPIProvider(cfg)
+	}
+
+	// Air-gapped fallback: deferred embedded provider.
+	if cfg.LLM.Provider == "embedded" {
+		slog.Info("MCP using deferred embedded provider (no API endpoint configured)")
+		ep := llm.NewEmbeddedProvider(llm.EmbeddedProviderConfig{
+			ModelsDir:      cfg.LLM.Embedded.ModelsDir,
+			ChatModelFile:  cfg.LLM.Embedded.ChatModelFile,
+			EmbedModelFile: cfg.LLM.Embedded.EmbedModelFile,
+			ChatTemplate:   cfg.LLM.Embedded.ChatTemplate,
+			ContextSize:    cfg.LLM.Embedded.ContextSize,
+			GPULayers:      cfg.LLM.Embedded.GPULayers,
+			Threads:        cfg.LLM.Embedded.Threads,
+			BatchSize:      cfg.LLM.Embedded.BatchSize,
+			MaxTokens:      cfg.LLM.MaxTokens,
+			Temperature:    float32(cfg.LLM.Temperature),
+			MaxConcurrent:  cfg.LLM.MaxConcurrent,
+		})
+		backend := llamacpp.NewBackend()
+		if backend != nil {
+			ep.DeferLoad(func() llm.Backend {
+				return llamacpp.NewBackend()
+			})
+		} else {
+			slog.Warn("embedded provider selected but llama.cpp not compiled in")
+		}
+		return ep
+	}
+
+	// No endpoint, no embedded — nothing to provide.
+	slog.Warn("MCP has no LLM provider configured (no endpoint, not embedded)")
+	return newAPIProvider(cfg)
 }
 
 // toConsolidationConfig converts the global config's consolidation settings to the agent's config.

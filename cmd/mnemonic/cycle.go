@@ -17,6 +17,7 @@ import (
 	"github.com/appsprout-dev/mnemonic/internal/agent/retrieval"
 	"github.com/appsprout-dev/mnemonic/internal/config"
 	"github.com/appsprout-dev/mnemonic/internal/events"
+	"github.com/appsprout-dev/mnemonic/internal/llm"
 	"github.com/appsprout-dev/mnemonic/internal/mcp"
 )
 
@@ -110,9 +111,17 @@ func dreamCycleCommand(configPath string) {
 }
 
 // mcpCommand runs the MCP server on stdin/stdout for AI agent integration.
+// Uses a lightweight provider (API or deferred embedded) to avoid loading
+// GPU models that the daemon already owns.
 func mcpCommand(configPath string) {
-	cfg, db, llmProvider, log := initRuntime(configPath)
+	cfg, db, log := initBase(configPath)
 	defer func() { _ = db.Close() }()
+
+	llmProvider := newMCPProvider(cfg)
+	// Wrap with training data capture if enabled (MCP encoding produces useful training data)
+	if cfg.Training.CaptureEnabled && cfg.Training.CaptureDir != "" {
+		llmProvider = llm.NewTrainingCaptureProvider(llmProvider, "mcp", cfg.Training.CaptureDir)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -165,7 +174,7 @@ func mcpCommand(configPath string) {
 
 // autopilotCommand shows what the system has been doing autonomously.
 func autopilotCommand(configPath string) {
-	_, db, _, _ := initRuntime(configPath)
+	_, db, _ := initBase(configPath)
 	defer func() { _ = db.Close() }()
 
 	ctx := context.Background()

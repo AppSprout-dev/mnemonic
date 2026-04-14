@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"os"
+	"sync"
 	"testing"
 )
 
@@ -329,6 +330,226 @@ func TestEmbeddedProviderBatchEmbedEmpty(t *testing.T) {
 	}
 	if len(result) != 0 {
 		t.Errorf("expected empty result, got %d", len(result))
+	}
+}
+
+func TestDeferLoadDoesNotLoadImmediately(t *testing.T) {
+	dir := t.TempDir()
+	chatFile := "chat.gguf"
+	if err := writeTestFile(dir, chatFile); err != nil {
+		t.Fatalf("creating test file: %v", err)
+	}
+
+	loadCount := 0
+	p := NewEmbeddedProvider(EmbeddedProviderConfig{
+		ModelsDir:     dir,
+		ChatModelFile: chatFile,
+		MaxTokens:     256,
+		Temperature:   0.3,
+		MaxConcurrent: 1,
+	})
+
+	p.DeferLoad(func() Backend {
+		loadCount++
+		return &mockBackend{}
+	})
+
+	// After DeferLoad, no backend should be loaded
+	if loadCount != 0 {
+		t.Fatalf("DeferLoad triggered %d model loads, expected 0", loadCount)
+	}
+
+	// Health should report not ready (no model loaded yet)
+	ctx := context.Background()
+	if err := p.Health(ctx); err == nil {
+		t.Fatal("expected Health to fail before first use with DeferLoad")
+	}
+
+	// ActiveModel should show not loaded
+	status := p.ActiveModel()
+	if status.Loaded {
+		t.Fatal("ActiveModel.Loaded should be false before first use")
+	}
+}
+
+func TestDeferLoadTriggersOnFirstComplete(t *testing.T) {
+	dir := t.TempDir()
+	chatFile := "chat.gguf"
+	if err := writeTestFile(dir, chatFile); err != nil {
+		t.Fatalf("creating test file: %v", err)
+	}
+
+	loadCount := 0
+	p := NewEmbeddedProvider(EmbeddedProviderConfig{
+		ModelsDir:     dir,
+		ChatModelFile: chatFile,
+		MaxTokens:     256,
+		Temperature:   0.3,
+		MaxConcurrent: 1,
+	})
+
+	p.DeferLoad(func() Backend {
+		loadCount++
+		return &mockBackend{}
+	})
+
+	ctx := context.Background()
+
+	// First Complete() triggers lazy load
+	resp, err := p.Complete(ctx, CompletionRequest{
+		Messages: []Message{{Role: "user", Content: "hello"}},
+	})
+	if err != nil {
+		t.Fatalf("Complete failed: %v", err)
+	}
+	if resp.Content != `{"summary": "test"}` {
+		t.Errorf("unexpected content: %s", resp.Content)
+	}
+	if loadCount != 1 {
+		t.Fatalf("expected exactly 1 model load on first Complete, got %d", loadCount)
+	}
+
+	// Second Complete() should NOT trigger another load
+	_, err = p.Complete(ctx, CompletionRequest{
+		Messages: []Message{{Role: "user", Content: "again"}},
+	})
+	if err != nil {
+		t.Fatalf("second Complete failed: %v", err)
+	}
+	if loadCount != 1 {
+		t.Fatalf("expected still 1 model load after second Complete, got %d", loadCount)
+	}
+}
+
+func TestDeferLoadTriggersOnFirstEmbed(t *testing.T) {
+	dir := t.TempDir()
+	chatFile := "chat.gguf"
+	if err := writeTestFile(dir, chatFile); err != nil {
+		t.Fatalf("creating test file: %v", err)
+	}
+
+	loadCount := 0
+	p := NewEmbeddedProvider(EmbeddedProviderConfig{
+		ModelsDir:     dir,
+		ChatModelFile: chatFile,
+		MaxTokens:     256,
+		Temperature:   0.3,
+		MaxConcurrent: 1,
+	})
+
+	p.DeferLoad(func() Backend {
+		loadCount++
+		return &mockBackend{}
+	})
+
+	ctx := context.Background()
+
+	// First Embed() triggers lazy load
+	emb, err := p.Embed(ctx, "test")
+	if err != nil {
+		t.Fatalf("Embed failed: %v", err)
+	}
+	if len(emb) != 3 {
+		t.Errorf("expected 3-dim embedding, got %d", len(emb))
+	}
+	if loadCount != 1 {
+		t.Fatalf("expected exactly 1 model load on first Embed, got %d", loadCount)
+	}
+}
+
+func TestDeferLoadConcurrentAccess(t *testing.T) {
+	dir := t.TempDir()
+	chatFile := "chat.gguf"
+	if err := writeTestFile(dir, chatFile); err != nil {
+		t.Fatalf("creating test file: %v", err)
+	}
+
+	var mu sync.Mutex
+	loadCount := 0
+	p := NewEmbeddedProvider(EmbeddedProviderConfig{
+		ModelsDir:     dir,
+		ChatModelFile: chatFile,
+		MaxTokens:     256,
+		Temperature:   0.3,
+		MaxConcurrent: 10, // allow concurrent access
+	})
+
+	p.DeferLoad(func() Backend {
+		mu.Lock()
+		loadCount++
+		mu.Unlock()
+		return &mockBackend{}
+	})
+
+	ctx := context.Background()
+
+	// Launch 10 goroutines that all call Complete concurrently
+	var wg sync.WaitGroup
+	errs := make(chan error, 10)
+	for range 10 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Complete(ctx, CompletionRequest{
+				Messages: []Message{{Role: "user", Content: "hello"}},
+			})
+			if err != nil {
+				errs <- err
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		t.Fatalf("concurrent Complete failed: %v", err)
+	}
+
+	// sync.Once guarantees exactly 1 load despite 10 concurrent callers
+	mu.Lock()
+	got := loadCount
+	mu.Unlock()
+	if got != 1 {
+		t.Fatalf("expected exactly 1 model load with 10 concurrent callers, got %d", got)
+	}
+}
+
+func TestEagerLoadSkipsEnsureLoaded(t *testing.T) {
+	dir := t.TempDir()
+	chatFile := "chat.gguf"
+	if err := writeTestFile(dir, chatFile); err != nil {
+		t.Fatalf("creating test file: %v", err)
+	}
+
+	p := NewEmbeddedProvider(EmbeddedProviderConfig{
+		ModelsDir:     dir,
+		ChatModelFile: chatFile,
+		MaxTokens:     256,
+		Temperature:   0.3,
+		MaxConcurrent: 1,
+	})
+
+	// Eager load (the daemon path)
+	err := p.LoadModels(func() Backend { return &mockBackend{} })
+	if err != nil {
+		t.Fatalf("LoadModels failed: %v", err)
+	}
+
+	// deferredFactory should be nil — ensureLoaded is a no-op
+	if p.deferredFactory != nil {
+		t.Fatal("deferredFactory should be nil after eager LoadModels")
+	}
+
+	ctx := context.Background()
+	resp, err := p.Complete(ctx, CompletionRequest{
+		Messages: []Message{{Role: "user", Content: "hello"}},
+	})
+	if err != nil {
+		t.Fatalf("Complete failed: %v", err)
+	}
+	if resp.Content != `{"summary": "test"}` {
+		t.Errorf("unexpected content: %s", resp.Content)
 	}
 }
 

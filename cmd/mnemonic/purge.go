@@ -75,7 +75,7 @@ func purgeCommand(configPath string) {
 // cleanupCommand scans raw_memories for paths matching exclude patterns and
 // bulk-marks them as processed, then archives any encoded memories derived from them.
 func cleanupCommand(configPath string, args []string) {
-	cfg, db, _, _ := initRuntime(configPath)
+	cfg, db, _ := initBase(configPath)
 	defer func() { _ = db.Close() }()
 
 	ctx := context.Background()

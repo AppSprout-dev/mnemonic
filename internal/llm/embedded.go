@@ -93,6 +93,12 @@ type EmbeddedProvider struct {
 	embedBackend   Backend
 	sem            chan struct{}
 	backendFactory func() Backend
+
+	// Lazy loading: DeferLoad stores the factory without loading models.
+	// The first Complete() or Embed() call triggers the actual load via sync.Once.
+	deferredFactory func() Backend
+	loadOnce        sync.Once
+	loadErr         error
 }
 
 // EmbeddedProviderConfig holds the configuration for creating an EmbeddedProvider.
@@ -183,6 +189,32 @@ func (p *EmbeddedProvider) LoadModels(backendFactory func() Backend) error {
 	return nil
 }
 
+// DeferLoad stores the backend factory for lazy initialization.
+// Unlike LoadModels, this does NOT load the models into memory immediately.
+// The first call to Complete() or Embed() triggers the actual model load.
+// Use this for processes that may never need inference (e.g., MCP servers
+// in air-gapped mode where most sessions only read, not write).
+func (p *EmbeddedProvider) DeferLoad(backendFactory func() Backend) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.backendFactory = backendFactory
+	p.deferredFactory = backendFactory
+}
+
+// ensureLoaded triggers lazy model loading if DeferLoad was used.
+// Thread-safe via sync.Once — the first caller loads, all others block until done.
+// Returns nil immediately if models were loaded eagerly via LoadModels.
+func (p *EmbeddedProvider) ensureLoaded() error {
+	if p.deferredFactory == nil {
+		return nil // eager-loaded or no factory configured
+	}
+	p.loadOnce.Do(func() {
+		slog.Info("lazy-loading embedded models on first inference call")
+		p.loadErr = p.LoadModels(p.deferredFactory)
+	})
+	return p.loadErr
+}
+
 // acquire blocks until a concurrency slot is available or ctx is cancelled.
 func (p *EmbeddedProvider) acquire(ctx context.Context) error {
 	select {
@@ -260,6 +292,10 @@ func stopSequenceForTemplate(template string) string {
 
 // Complete sends a completion request to the in-process backend.
 func (p *EmbeddedProvider) Complete(ctx context.Context, req CompletionRequest) (CompletionResponse, error) {
+	if err := p.ensureLoaded(); err != nil {
+		return CompletionResponse{}, fmt.Errorf("lazy load failed: %w", err)
+	}
+
 	if err := p.acquire(ctx); err != nil {
 		return CompletionResponse{}, fmt.Errorf("embedded provider busy: %w", err)
 	}
@@ -370,6 +406,10 @@ func (p *EmbeddedProvider) Embed(ctx context.Context, text string) ([]float32, e
 func (p *EmbeddedProvider) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
 	if len(texts) == 0 {
 		return [][]float32{}, nil
+	}
+
+	if err := p.ensureLoaded(); err != nil {
+		return nil, fmt.Errorf("lazy load failed: %w", err)
 	}
 
 	if err := p.acquire(ctx); err != nil {
