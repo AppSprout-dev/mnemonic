@@ -9,17 +9,21 @@ import (
 	"time"
 
 	"github.com/appsprout-dev/mnemonic/internal/agent/agentutil"
-	"github.com/appsprout-dev/mnemonic/internal/agent/encoding"
 	"github.com/appsprout-dev/mnemonic/internal/store"
 	"github.com/google/uuid"
 )
 
 // TrainingExample is a single training pair written to JSONL.
-// The Python training script tokenizes and mixes with replay data.
+// Format matches prepare_gemma_finetune_data.py input:
+//
+//	{"raw_input": "...", "encoded": {...}, "task_type": "encoding", "memory_id": "...", "epr": 0.95}
+//
+// The prep script applies the chat template, tokenizes, and produces input_ids/completion_start
+// for the training script.
 type TrainingExample struct {
-	Type     string  `json:"type"`      // "gold" or "corrective"
-	Prompt   string  `json:"prompt"`    // system + user prompt (identical to what the model saw)
-	Output   string  `json:"output"`    // the target completion (gold encoding or corrected encoding)
+	RawInput string  `json:"raw_input"` // raw memory content (prep script applies chat template)
+	Encoded  any     `json:"encoded"`   // structured encoding output (JSON object)
+	TaskType string  `json:"task_type"` // "encoding" (for prep script compatibility)
 	MemoryID string  `json:"memory_id"` // provenance
 	EPR      float64 `json:"epr"`       // EPR score of the output
 }
@@ -93,7 +97,7 @@ func (da *DreamingAgent) AssembleTrainingBatch(ctx context.Context, outputDir st
 
 	// Write gold examples
 	for _, entry := range goldEntries {
-		example, err := da.buildTrainingExample(ctx, entry, "gold")
+		example, err := da.buildTrainingExample(ctx, entry)
 		if err != nil {
 			da.log.Debug("skipping gold entry", "entry_id", entry.ID, "error", err)
 			continue
@@ -106,20 +110,26 @@ func (da *DreamingAgent) AssembleTrainingBatch(ctx context.Context, outputDir st
 
 	// Write corrective examples (using the teacher model's output)
 	for _, entry := range corrected {
-		example := TrainingExample{
-			Type:     "corrective",
-			MemoryID: entry.MemoryID,
-			EPR:      entry.CorrectedEPR,
-			Output:   entry.CorrectedOutput,
-		}
-		// Build the prompt from raw memory
 		raw, err := da.store.GetRaw(ctx, entry.RawID)
 		if err != nil {
 			da.log.Debug("skipping corrected entry", "entry_id", entry.ID, "error", err)
 			continue
 		}
-		truncated := agentutil.Truncate(raw.Content, 4000)
-		example.Prompt = encoding.BuildCompressionPrompt(truncated, raw.Source, raw.Type, "", "", nil)
+
+		// Parse corrected output back to structured JSON
+		var encoded any
+		if err := json.Unmarshal([]byte(entry.CorrectedOutput), &encoded); err != nil {
+			da.log.Debug("skipping corrected entry with invalid JSON", "entry_id", entry.ID, "error", err)
+			continue
+		}
+
+		example := TrainingExample{
+			RawInput: agentutil.Truncate(raw.Content, 4000),
+			Encoded:  encoded,
+			TaskType: "encoding",
+			MemoryID: entry.MemoryID,
+			EPR:      entry.CorrectedEPR,
+		}
 
 		if err := enc.Encode(example); err != nil {
 			return nil, fmt.Errorf("writing corrective example: %w", err)
@@ -159,8 +169,8 @@ func (da *DreamingAgent) AssembleTrainingBatch(ctx context.Context, outputDir st
 }
 
 // buildTrainingExample creates a training example from a gold experience entry.
-// Loads the raw memory and the encoded memory to reconstruct the prompt+output pair.
-func (da *DreamingAgent) buildTrainingExample(ctx context.Context, entry store.ExperienceEntry, exType string) (*TrainingExample, error) {
+// Loads the raw memory and the encoded memory to reconstruct the raw_input+encoded pair.
+func (da *DreamingAgent) buildTrainingExample(ctx context.Context, entry store.ExperienceEntry) (*TrainingExample, error) {
 	raw, err := da.store.GetRaw(ctx, entry.RawID)
 	if err != nil {
 		return nil, fmt.Errorf("loading raw memory %s: %w", entry.RawID, err)
@@ -172,24 +182,18 @@ func (da *DreamingAgent) buildTrainingExample(ctx context.Context, entry store.E
 		return nil, fmt.Errorf("loading memory %s: %w", entry.MemoryID, err)
 	}
 
-	truncated := agentutil.Truncate(raw.Content, 4000)
-	prompt := encoding.BuildCompressionPrompt(truncated, raw.Source, raw.Type, "", "", nil)
-
-	// Reconstruct the encoding output as JSON
-	output, err := json.Marshal(map[string]any{
+	// Reconstruct the encoding output as a structured object
+	encoded := map[string]any{
 		"summary":  mem.Summary,
 		"content":  mem.Content,
 		"concepts": mem.Concepts,
 		"salience": mem.Salience,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("marshaling memory output: %w", err)
 	}
 
 	return &TrainingExample{
-		Type:     exType,
-		Prompt:   prompt,
-		Output:   string(output),
+		RawInput: agentutil.Truncate(raw.Content, 4000),
+		Encoded:  encoded,
+		TaskType: "encoding",
 		MemoryID: entry.MemoryID,
 		EPR:      entry.EncodingEPR,
 	}, nil

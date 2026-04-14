@@ -111,8 +111,17 @@ func (da *DreamingAgent) RunTrainingCycle(ctx context.Context, clCfg config.Cont
 		TotalExamples: manifest.TotalExamples,
 	}
 
-	// Step 3: Run spoke training
-	checkpointPath, err := da.runSpokeTraining(ctx, manifest.DataPath, tCfg)
+	// Step 3: Tokenize the batch (raw_input+encoded → input_ids+completion_start)
+	tokenizedPath, err := da.prepareTrainingData(ctx, manifest.DataPath, outputDir)
+	if err != nil {
+		result.Status = "failed"
+		result.ErrorMessage = fmt.Sprintf("data preparation failed: %v", err)
+		da.failTrainingRun(ctx, &run, result.ErrorMessage)
+		return result, nil
+	}
+
+	// Step 4: Run spoke training
+	checkpointPath, err := da.runSpokeTraining(ctx, tokenizedPath, tCfg)
 	if err != nil {
 		result.Status = "failed"
 		result.ErrorMessage = fmt.Sprintf("training failed: %v", err)
@@ -197,6 +206,55 @@ type qualityGateResult struct {
 	Passed bool
 }
 
+// prepareTrainingData runs the Gemma data prep script to tokenize raw_input+encoded
+// pairs into input_ids+completion_start JSONL that the training script expects.
+func (da *DreamingAgent) prepareTrainingData(ctx context.Context, batchPath string, outputDir string) (string, error) {
+	projectDir := os.Getenv("MNEMONIC_PROJECT_DIR")
+	if projectDir == "" {
+		homeDir, _ := os.UserHomeDir()
+		projectDir = filepath.Join(homeDir, "Projects", "mem")
+	}
+
+	prepScript := filepath.Join(projectDir, "training", "scripts", "prepare_gemma_finetune_data.py")
+	if _, err := os.Stat(prepScript); err != nil {
+		return "", fmt.Errorf("prep script not found at %s: %w", prepScript, err)
+	}
+
+	venvPython := filepath.Join(os.Getenv("HOME"), "Projects", "felixlm", ".venv", "bin", "python")
+	if _, err := os.Stat(venvPython); err != nil {
+		venvPython = "python3"
+	}
+
+	tokenizedDir := filepath.Join(outputDir, "tokenized")
+
+	args := []string{
+		prepScript,
+		"--input", batchPath,
+		"--output-dir", tokenizedDir,
+		"--max-seq-len", "2048",
+		"--eval-ratio", "0",
+	}
+
+	da.log.Info("preparing training data", "script", prepScript, "input", batchPath, "output_dir", tokenizedDir)
+
+	cmd := exec.CommandContext(ctx, venvPython, args...)
+	cmd.Dir = projectDir
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("prep script failed: %w\nOutput: %s", err, string(output))
+	}
+
+	// The prep script writes train.jsonl in the output dir
+	tokenizedPath := filepath.Join(tokenizedDir, "train.jsonl")
+	if _, err := os.Stat(tokenizedPath); err != nil {
+		return "", fmt.Errorf("tokenized data not found at %s after prep", tokenizedPath)
+	}
+
+	da.log.Info("training data prepared", "path", tokenizedPath)
+	return tokenizedPath, nil
+}
+
 // runSpokeTraining executes the Python training script as a subprocess.
 // Returns the path to the output checkpoint.
 func (da *DreamingAgent) runSpokeTraining(ctx context.Context, batchPath string, tCfg config.CLTrainingConfig) (string, error) {
@@ -228,12 +286,15 @@ func (da *DreamingAgent) runSpokeTraining(ctx context.Context, batchPath string,
 	args := []string{
 		scriptPath,
 		"--model-type", "gemma",
-		"--data", batchPath,
-		"--output-dir", checkpointDir,
+		"--base-model", "google/gemma-4-E2B-it",
+		"--train-data", batchPath,
+		"--checkpoint-dir", checkpointDir,
+		"--seq-len", "2048",
 		"--steps", "500",
 		"--batch-size", "1",
 		"--grad-accum", "8",
 		"--lr", "1e-4",
+		"--no-wandb",
 	}
 
 	da.log.Info("running spoke training",

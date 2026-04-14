@@ -111,29 +111,29 @@ func TestAssembleTrainingBatch_GoldOnly(t *testing.T) {
 	if err := json.Unmarshal(lines[0], &ex); err != nil {
 		t.Fatalf("parsing first JSONL line: %v", err)
 	}
-	if ex.Type != "gold" {
-		t.Errorf("expected type 'gold', got %q", ex.Type)
+	if ex.TaskType != "encoding" {
+		t.Errorf("expected task_type 'encoding', got %q", ex.TaskType)
 	}
 	if ex.MemoryID != "mem-1" {
 		t.Errorf("expected memory_id 'mem-1', got %q", ex.MemoryID)
 	}
-	if ex.Prompt == "" {
-		t.Error("expected non-empty prompt")
+	if ex.RawInput == "" {
+		t.Error("expected non-empty raw_input")
 	}
-	if ex.Output == "" {
-		t.Error("expected non-empty output")
+	if ex.Encoded == nil {
+		t.Error("expected non-nil encoded")
 	}
 
-	// Output should be valid JSON with expected fields
-	var outputFields map[string]any
-	if err := json.Unmarshal([]byte(ex.Output), &outputFields); err != nil {
-		t.Fatalf("gold output is not valid JSON: %v", err)
+	// Encoded should be a map with expected fields
+	encodedMap, ok := ex.Encoded.(map[string]any)
+	if !ok {
+		t.Fatalf("encoded is not a map, got %T", ex.Encoded)
 	}
-	if _, ok := outputFields["summary"]; !ok {
-		t.Error("gold output missing 'summary' field")
+	if _, ok := encodedMap["summary"]; !ok {
+		t.Error("encoded missing 'summary' field")
 	}
-	if _, ok := outputFields["content"]; !ok {
-		t.Error("gold output missing 'content' field")
+	if _, ok := encodedMap["content"]; !ok {
+		t.Error("encoded missing 'content' field")
 	}
 }
 
@@ -178,14 +178,18 @@ func TestAssembleTrainingBatch_CorrectedOnly(t *testing.T) {
 	if err := json.Unmarshal(lines[0], &ex); err != nil {
 		t.Fatalf("parsing JSONL line: %v", err)
 	}
-	if ex.Type != "corrective" {
-		t.Errorf("expected type 'corrective', got %q", ex.Type)
+	if ex.TaskType != "encoding" {
+		t.Errorf("expected task_type 'encoding', got %q", ex.TaskType)
 	}
 	if ex.EPR != 0.92 {
 		t.Errorf("expected EPR 0.92, got %.2f", ex.EPR)
 	}
-	if ex.Output != `{"summary":"corrected summary","content":"corrected content","concepts":["auth"]}` {
-		t.Errorf("corrective output mismatch: %s", ex.Output)
+	encodedMap, ok := ex.Encoded.(map[string]any)
+	if !ok {
+		t.Fatalf("encoded is not a map, got %T", ex.Encoded)
+	}
+	if encodedMap["summary"] != "corrected summary" {
+		t.Errorf("expected summary 'corrected summary', got %v", encodedMap["summary"])
 	}
 }
 

@@ -155,10 +155,12 @@ func TestRunTrainingCycle_AssemblesAndRecords(t *testing.T) {
 
 	clCfg := baseCLConfig()
 
-	// RunTrainingCycle will assemble data, write a training run, then fail on
-	// the subprocess call (no Python env in tests). That's expected — we're testing
-	// the trigger logic and record-keeping, not the actual training.
-	result, err := agent.RunTrainingCycle(context.Background(), clCfg)
+	// Use a short timeout — we only test trigger logic and record-keeping.
+	// The subprocess will be killed quickly rather than loading a full model.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	result, err := agent.RunTrainingCycle(ctx, clCfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
