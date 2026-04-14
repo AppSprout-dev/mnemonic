@@ -84,11 +84,8 @@ scripts/               Utility scripts
 
 ## Conventions
 
-- **Event bus architecture:** Agents communicate via events, never direct calls. To add behavior, subscribe to events in the bus.
-- **Store interface:** All data access goes through `store.Store` interface. The SQLite implementation is in `internal/store/sqlite/`.
-- **Error handling:** Wrap errors with context: `fmt.Errorf("encoding memory %s: %w", id, err)`
-- **Platform-specific code:** Use Go build tags (`//go:build darwin`, `//go:build !darwin`). See `internal/watcher/filesystem/` for examples.
-- **Config:** All tunables live in `config.yaml`. Add new fields to `internal/config/config.go` struct.
+See `.claude/rules/go-conventions.md` for Go style, lint, architecture, and build details.
+
 - **Spoke routing:** When a spoke provider is configured (`LLM.Spoke` in config), specific agent tasks route to the spoke model via `CompositeProvider` (completions → spoke, embeddings → main provider). Configure task routing in `config.yaml`'s `LLM.Spoke.Tasks` list. Health-checked at startup in `cmd/mnemonic/serve.go`.
 
 ## Adding Things
@@ -97,14 +94,6 @@ scripts/               Utility scripts
 - **New CLI command:** Add case to the command switch in `cmd/mnemonic/main.go`.
 - **New API route:** Add handler in `internal/api/routes/`, register in `internal/api/server.go`. Existing routes include `/api/v1/activity` (watcher concept tracker for MCP sync).
 - **New MCP tool:** Add to `internal/mcp/server.go` tool registration.
-
-## Platform Support
-
-| Platform | Status |
-|----------|--------|
-| macOS ARM | Full support |
-| Linux x86_64 | Full support (primary dev platform) — systemd service, RX 7800 XT + ROCm for training/inference |
-| Windows x86_64 | Supported — `serve`, `install`, `start`, `stop`, `uninstall` work via Windows Services |
 
 ## Training (Felix-LM / Mnemonic-LM)
 
@@ -132,64 +121,4 @@ All experiments must be pre-registered in `training/docs/experiment_registry.md`
 
 See [GitHub Issues](https://github.com/appsprout-dev/mnemonic/issues) for tracked bugs.
 
----
-
-## MCP Tools Available
-
-You have 24 tools via the `mnemonic` MCP server:
-
-| Tool | When to Use |
-|------|-------------|
-| `remember` | Store decisions, errors, insights, learnings (returns raw ID + salience) |
-| `recall` | Semantic search with spread activation (`explain`, `include_associations`, `format`, `type`, `types`, `include_patterns`, `include_abstractions`, `synthesize` params) |
-| `batch_recall` | Run multiple recall queries in parallel — ideal for session start |
-| `get_context` | Proactive suggestions based on recent daemon activity — call at natural breakpoints |
-| `forget` | Archive irrelevant memories |
-| `amend` | Update a memory's content in place (preserves associations, history, salience) |
-| `check_memory` | Inspect a memory's encoding status, concepts, and associations |
-| `status` | System health, encoding pipeline status, source distribution |
-| `recall_project` | Get project-specific context and patterns |
-| `recall_timeline` | See what happened in a time range |
-| `recall_session` | Retrieve all memories from a specific MCP session |
-| `list_sessions` | List recent sessions with time range and memory count |
-| `session_summary` | Summarize current/recent session |
-| `get_patterns` | View discovered recurring patterns (returns IDs for dismissal, supports `min_strength`) |
-| `get_insights` | View metacognition observations and abstractions (returns IDs for dismissal) |
-| `feedback` | Report recall quality (drives ranking, can auto-suppress noisy memories) |
-| `audit_encodings` | Review recent encoding quality and suggest improvements |
-| `coach_local_llm` | Write coaching guidance to improve local LLM prompts |
-| `ingest_project` | Bulk-ingest a project directory into memory |
-| `exclude_path` | Add a watcher exclusion pattern at runtime |
-| `list_exclusions` | List all runtime watcher exclusion patterns |
-| `dismiss_pattern` | Archive a stale or irrelevant pattern to stop it surfacing in recall |
-| `dismiss_abstraction` | Archive a stale or irrelevant principle/axiom to stop it surfacing in recall |
-| `create_handoff` | Store structured session handoff notes (high salience, surfaced by recall_project) |
-
-### At Session Start
-
-- Use `recall_project` to load context for the current project
-- Use `recall` with relevant keywords to find prior decisions
-
-### During Work
-
-- `remember` decisions with `type: "decision"` — e.g., "chose SQLite over Postgres for simplicity"
-- `remember` errors with `type: "error"` — e.g., "nil pointer in auth middleware, fixed with guard clause"
-- `remember` insights with `type: "insight"` — e.g., "spread activation works best with 3 hops max"
-- `remember` learnings with `type: "learning"` — e.g., "Go's sql.NullString needed for nullable columns"
-
-### After Recalls
-
-- Use `feedback` to rate recall quality — this helps the system improve
-- `helpful` = memories were relevant and useful
-- `partial` = some relevant, some not
-- `irrelevant` = memories didn't help
-
-### Memory Types
-
-When using `remember`, set the `type` field:
-
-- `decision` — architectural choices, tradeoffs, "we chose X because Y"
-- `error` — bugs found, error patterns, debugging insights
-- `insight` — realizations about code, architecture, or process
-- `learning` — new knowledge, API behaviors, framework quirks
-- `general` — everything else (default)
+MCP tool usage protocol: see `.claude/rules/mnemonic-usage.md`. Tool schemas come from the MCP server — no need to duplicate here.
