@@ -63,6 +63,19 @@ func TrainingRequestsDir() string {
 	return filepath.Join(homeDir, ".mnemonic", "training_requests")
 }
 
+// TrainingDisabledPath returns the path to the e-stop sentinel file.
+// When this file exists, all auto and manual training is blocked.
+func TrainingDisabledPath() string {
+	homeDir, _ := os.UserHomeDir()
+	return filepath.Join(homeDir, ".mnemonic", "training.disabled")
+}
+
+// isTrainingDisabled checks for the e-stop sentinel file.
+func isTrainingDisabled() bool {
+	_, err := os.Stat(TrainingDisabledPath())
+	return err == nil
+}
+
 // trainingCheck runs Phase 4.85: check if we should trigger spoke training.
 // Only runs during dreaming if auto-trigger is enabled. Also callable via MCP.
 func (da *DreamingAgent) trainingCheck(ctx context.Context, clCfg config.ContinuousLearningConfig) (*TrainingResult, error) {
@@ -74,10 +87,51 @@ func (da *DreamingAgent) trainingCheck(ctx context.Context, clCfg config.Continu
 		return nil, nil
 	}
 
+	// E-stop: check for sentinel file
+	if isTrainingDisabled() {
+		da.log.Warn("training disabled by e-stop file", "path", TrainingDisabledPath())
+		return nil, nil
+	}
+
 	// Check training window
 	if clCfg.Trigger.TrainingWindow != "" && !inTrainingWindow(clCfg.Trigger.TrainingWindow) {
 		da.log.Debug("outside training window, skipping", "window", clCfg.Trigger.TrainingWindow)
 		return nil, nil
+	}
+
+	// Circuit breaker: stop after too many consecutive failures
+	maxFailures := clCfg.Trigger.MaxConsecutiveFailures
+	if maxFailures <= 0 {
+		maxFailures = 3
+	}
+	consecutiveFailures, err := da.store.CountConsecutiveFailedTrainingRuns(ctx)
+	if err != nil {
+		da.log.Warn("failed to check consecutive training failures", "error", err)
+	} else if consecutiveFailures >= maxFailures {
+		da.log.Warn("training circuit breaker open: too many consecutive failures",
+			"consecutive_failures", consecutiveFailures, "max", maxFailures)
+		return nil, nil
+	}
+
+	// Cooldown: don't re-trigger too soon after a failed run
+	cooldownHours := clCfg.Trigger.FailureCooldownHours
+	if cooldownHours <= 0 {
+		cooldownHours = 24
+	}
+	if consecutiveFailures > 0 {
+		lastEnd, endErr := da.store.GetLastTrainingRunEndTime(ctx)
+		if endErr != nil {
+			da.log.Warn("failed to check last training run time", "error", endErr)
+		} else if !lastEnd.IsZero() {
+			cooldown := time.Duration(cooldownHours) * time.Hour
+			if time.Since(lastEnd) < cooldown {
+				da.log.Info("training skipped: cooling down after failure",
+					"last_run_ended", lastEnd.Format(time.RFC3339),
+					"cooldown_hours", cooldownHours,
+					"consecutive_failures", consecutiveFailures)
+				return nil, nil
+			}
+		}
 	}
 
 	return da.RunTrainingCycle(ctx, clCfg, "auto")

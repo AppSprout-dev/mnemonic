@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -364,81 +365,68 @@ func (ea *EpisodingAgent) closeEpisode(ctx context.Context, ep *store.Episode) e
 		return nil
 	}
 
-	// Build LLM prompt for episode synthesis
-	eventsStr := ""
-	for _, t := range eventTexts {
-		eventsStr += t + "\n\n"
-	}
+	// Truncate events to fit context budget (keep first + last, fill middle)
+	eventsStr := truncateEventsForPrompt(eventTexts, maxEventChars)
 
-	// Detect if episode contains MCP-source events (Claude Code interaction)
-	hasMCPEvents := false
-	for _, rawID := range ep.RawMemoryIDs {
-		raw, err := ea.store.GetRaw(ctx, rawID)
-		if err != nil {
-			continue
-		}
-		if raw.Source == "mcp" {
-			hasMCPEvents = true
-			break
-		}
-	}
+	// Build directive prompt — TASK/RULES/SCHEMA format (no placeholder values)
+	prompt := fmt.Sprintf(`TASK: Summarize these events into a single episode.
 
-	var prompt string
-	if hasMCPEvents {
-		// Claude-aware prompt: emphasize the collaborative creative journey
-		prompt = fmt.Sprintf(`You're looking at a chapter from a creative collaboration — a human and AI building something together. What's the story of this session?
+RULES:
+- FAITHFULNESS: Every fact must come from the events. Do not infer or speculate.
+- PRESERVATION: Copy file paths, function names, and technical terms VERBATIM.
+- MINIMALITY: Keep the title under 60 characters. Keep the summary under 120 characters.
 
-Look for the arc: What problem were they trying to solve? What did they decide to do? Did they hit any walls, and how did they get past them? What did they actually create or change? What's the most interesting thing that happened?
+SCHEMA: {title, summary, concepts, salience}
+- title: short name for what happened in this session
+- summary: one sentence describing the outcome
+- concepts: 2-5 keywords from the events (file names, tools, topics)
+- salience: 0.3 for routine, 0.5 for normal, 0.7 for important, 0.9 for critical
 
-Events:
-%s
+Output ONLY the JSON object. No explanation.
 
-Respond with ONLY a JSON object (no prose, no fences):
-{"title":"a vivid, specific title for this session","summary":"1-2 sentences — the outcome and why it matters","narrative":"the story of what unfolded — decisions, breakthroughs, struggles, and what was learned","emotional_tone":"neutral|satisfying|frustrating|exciting|concerning","outcome":"success|failure|ongoing|unknown","concepts":["keyword1","keyword2"],"salience":0.7}`, eventsStr)
-	} else {
-		prompt = fmt.Sprintf(`You're looking at a stream of activity — moments from someone's work. What's the thread that connects them? What was this person doing, and what's worth remembering about it?
+EVENTS:
+%s`, eventsStr)
 
-Events:
-%s
-
-Respond with ONLY a JSON object (no prose, no fences):
-{"title":"a clear, specific title","summary":"1-2 sentences capturing what happened","narrative":"the story — what was this person working on, what did they accomplish, what's interesting about it","emotional_tone":"neutral|satisfying|frustrating|exciting|concerning","outcome":"success|failure|ongoing|unknown","concepts":["keyword1","keyword2"],"salience":0.5}`, eventsStr)
-	}
-
+	usedLLM := false
 	resp, err := ea.llmProvider.Complete(ctx, llm.CompletionRequest{
 		Messages: []llm.Message{
-			{Role: "system", Content: "You are an episode synthesizer. Summarize groups of events into coherent episodes. Output JSON only."},
+			{Role: "system", Content: "You are an episode summarizer. Output JSON only. Never explain, never apologize, never chat. Just fill in the JSON fields based on the events."},
 			{Role: "user", Content: prompt},
 		},
-		MaxTokens:   1024,
-		Temperature: 0.3,
+		MaxTokens:   256,
+		Temperature: 0.2,
 		ResponseFormat: &llm.ResponseFormat{
 			Type: "json_schema",
 			JSONSchema: &llm.JSONSchema{
 				Name:   "episode_synthesis",
 				Strict: true,
-				Schema: json.RawMessage(`{"type":"object","properties":{"title":{"type":"string"},"summary":{"type":"string"},"narrative":{"type":"string"},"emotional_tone":{"type":"string"},"outcome":{"type":"string"},"concepts":{"type":"array","items":{"type":"string"}},"salience":{"type":"number"}},"required":["title","summary","narrative","emotional_tone","outcome","concepts","salience"],"additionalProperties":false}`),
+				Schema: json.RawMessage(`{"type":"object","properties":{"title":{"type":"string"},"summary":{"type":"string"},"concepts":{"type":"array","items":{"type":"string"}},"salience":{"type":"number"}},"required":["title","summary","concepts","salience"],"additionalProperties":false}`),
 			},
 		},
 	})
 
 	if err != nil {
-		ea.log.Warn("LLM episode synthesis failed, using fallback", "error", err)
-		ep.Title = fmt.Sprintf("Session with %d events", len(ep.RawMemoryIDs))
-		ep.Summary = ep.Title
-		ep.Salience = ea.defaultSalience()
-		ep.Concepts = []string{}
+		ea.log.Warn("LLM episode synthesis failed, using heuristic fallback", "error", err)
+	} else if resp.MeanProb > 0 && resp.MeanProb < 0.10 {
+		ea.log.Warn("LLM episode synthesis confidence too low, using heuristic fallback",
+			"mean_prob", resp.MeanProb, "min_prob", resp.MinProb)
 	} else {
-		// Parse LLM response
 		parsed := parseEpisodeSynthesis(resp.Content)
 		ep.Title = parsed.Title
 		ep.Summary = parsed.Summary
-		ep.Narrative = parsed.Narrative
-		ep.EmotionalTone = parsed.EmotionalTone
-		ep.Outcome = parsed.Outcome
 		ep.Concepts = parsed.Concepts
 		ep.Salience = parsed.Salience
+		usedLLM = true
 	}
+
+	if !usedLLM {
+		// Heuristic fallback: derive from events directly
+		ep.Title, ep.Summary, ep.Concepts = heuristicEpisodeSynthesis(ep, timeline)
+		ep.Salience = ea.defaultSalience()
+	}
+
+	// Enrich fields that the LLM doesn't produce (heuristic for all episodes)
+	enrichEpisodeFromEvents(ep, timeline)
 
 	ep.State = store.EpisodeStateClosed
 	ep.UpdatedAt = time.Now()
@@ -452,16 +440,14 @@ Respond with ONLY a JSON object (no prose, no fences):
 	}
 
 	// Backfill episode_id on encoded memories that came from this episode's raw observations.
-	// The encoding agent runs faster than episoding, so memories are often encoded before
-	// they're assigned to an episode. This patches up the linkage after the fact.
 	linkedCount := 0
 	for _, rawID := range ep.RawMemoryIDs {
 		mem, err := ea.store.GetMemoryByRawID(ctx, rawID)
 		if err != nil {
-			continue // not encoded yet, or encoding failed
+			continue
 		}
 		if mem.EpisodeID == ep.ID {
-			continue // already linked
+			continue
 		}
 		mem.EpisodeID = ep.ID
 		if err := ea.store.UpdateMemory(ctx, mem); err != nil {
@@ -474,7 +460,7 @@ Respond with ONLY a JSON object (no prose, no fences):
 		ea.log.Info("backfilled episode_id on encoded memories", "episode_id", ep.ID, "linked", linkedCount)
 	}
 
-	// Also populate episode.MemoryIDs for the reverse link
+	// Populate episode.MemoryIDs for the reverse link
 	var memIDs []string
 	for _, rawID := range ep.RawMemoryIDs {
 		mem, err := ea.store.GetMemoryByRawID(ctx, rawID)
@@ -488,7 +474,6 @@ Respond with ONLY a JSON object (no prose, no fences):
 		_ = ea.store.UpdateEpisode(ctx, *ep)
 	}
 
-	// Publish event
 	if ea.bus != nil {
 		_ = ea.bus.Publish(ctx, events.EpisodeClosed{
 			EpisodeID:   ep.ID,
@@ -507,20 +492,23 @@ Respond with ONLY a JSON object (no prose, no fences):
 		"tone", ep.EmotionalTone,
 		"concepts", len(ep.Concepts),
 		"files", len(ep.FilesModified),
-		"claude_session", hasMCPEvents,
+		"llm", usedLLM,
 	)
 	return nil
 }
 
-// episodeSynthesis is the LLM response structure.
+// maxEventChars is the character budget for event text in the prompt.
+// With 2048 context, 256 max_tokens, and ~200 tokens for boilerplate,
+// that leaves ~1592 tokens (~6300 chars) for events.
+const maxEventChars = 6000
+
+// episodeSynthesis is the simplified 4-field LLM response structure.
+// emotional_tone, outcome, and narrative are populated heuristically.
 type episodeSynthesis struct {
-	Title         string   `json:"title"`
-	Summary       string   `json:"summary"`
-	Narrative     string   `json:"narrative"`
-	EmotionalTone string   `json:"emotional_tone"`
-	Outcome       string   `json:"outcome"`
-	Concepts      []string `json:"concepts"`
-	Salience      float32  `json:"salience"`
+	Title    string   `json:"title"`
+	Summary  string   `json:"summary"`
+	Concepts []string `json:"concepts"`
+	Salience float32  `json:"salience"`
 }
 
 // parseEpisodeSynthesis extracts JSON from LLM response.
@@ -535,36 +523,145 @@ func parseEpisodeSynthesis(response string) episodeSynthesis {
 			"response_preview", agentutil.Truncate(response, 200),
 		)
 		return episodeSynthesis{
-			Title:         "Untitled session",
-			Summary:       "Episode synthesis failed — LLM returned unparseable response.",
-			Salience:      0.5,
-			EmotionalTone: "neutral",
-			Outcome:       "ongoing",
-			Concepts:      []string{},
+			Title:    "Untitled session",
+			Summary:  "Episode synthesis failed — LLM returned unparseable response.",
+			Salience: 0.5,
+			Concepts: []string{},
 		}
 	}
-	// Guard against the LLM returning code or garbage in fields
 	if len(result.Summary) > 500 {
 		result.Summary = result.Summary[:500] + "..."
 	}
-	if len(result.Narrative) > 2000 {
-		result.Narrative = result.Narrative[:2000] + "..."
-	}
-	// Validate fields
 	if result.Title == "" {
 		result.Title = "Untitled session"
 	}
 	if result.Salience <= 0 {
 		result.Salience = 0.5
 	}
-	if result.EmotionalTone == "" {
-		result.EmotionalTone = "neutral"
-	}
-	if result.Outcome == "" {
-		result.Outcome = "ongoing"
-	}
 	if result.Concepts == nil {
 		result.Concepts = []string{}
 	}
 	return result
+}
+
+// truncateEventsForPrompt keeps first + last events (bookends) and fills
+// middle events until the character budget is exhausted.
+func truncateEventsForPrompt(events []string, maxChars int) string {
+	if len(events) == 0 {
+		return ""
+	}
+	if len(events) == 1 {
+		return agentutil.Truncate(events[0], maxChars)
+	}
+
+	// Always include first and last
+	first := events[0]
+	last := events[len(events)-1]
+	used := len(first) + len(last) + 4 // 4 for newlines
+
+	var middle []string
+	for i := 1; i < len(events)-1; i++ {
+		if used+len(events[i])+2 > maxChars {
+			break
+		}
+		middle = append(middle, events[i])
+		used += len(events[i]) + 2
+	}
+
+	var b strings.Builder
+	b.WriteString(first)
+	b.WriteString("\n\n")
+	for _, m := range middle {
+		b.WriteString(m)
+		b.WriteString("\n\n")
+	}
+	b.WriteString(last)
+	return b.String()
+}
+
+// heuristicEpisodeSynthesis builds title, summary, and concepts from event data
+// without LLM assistance. Used as fallback when LLM fails or has low confidence.
+func heuristicEpisodeSynthesis(ep *store.Episode, timeline []store.EventEntry) (title, summary string, concepts []string) {
+	project := ep.Project
+	if project == "" {
+		project = "Activity"
+	}
+	title = fmt.Sprintf("%s: %d events", project, len(ep.RawMemoryIDs))
+
+	if len(timeline) > 0 {
+		summary = timeline[0].Brief
+		if len(timeline) > 1 {
+			summary += " ... " + timeline[len(timeline)-1].Brief
+		}
+	} else {
+		summary = title
+	}
+
+	// Extract concepts from file paths and event types
+	seen := make(map[string]bool)
+	for _, entry := range timeline {
+		if entry.FilePath != "" && !seen[entry.FilePath] {
+			seen[entry.FilePath] = true
+			concepts = append(concepts, entry.FilePath)
+		}
+		if entry.Type != "" && !seen[entry.Type] {
+			seen[entry.Type] = true
+			concepts = append(concepts, entry.Type)
+		}
+		if len(concepts) >= 5 {
+			break
+		}
+	}
+	if concepts == nil {
+		concepts = []string{}
+	}
+	return title, summary, concepts
+}
+
+// enrichEpisodeFromEvents populates emotional_tone, outcome, and narrative
+// heuristically from event data. Called for all episodes (both LLM and fallback).
+func enrichEpisodeFromEvents(ep *store.Episode, timeline []store.EventEntry) {
+	// Build narrative from timeline briefs
+	if ep.Narrative == "" && len(timeline) > 0 {
+		var b strings.Builder
+		for i, entry := range timeline {
+			if i > 0 {
+				b.WriteString(" ")
+			}
+			b.WriteString(entry.Brief)
+			if i < len(timeline)-1 {
+				b.WriteString(".")
+			}
+		}
+		ep.Narrative = agentutil.Truncate(b.String(), 2000)
+	}
+
+	// Detect emotional tone from event content
+	if ep.EmotionalTone == "" {
+		tone := "neutral"
+		for _, entry := range timeline {
+			lower := strings.ToLower(entry.Brief)
+			if strings.Contains(lower, "error") || strings.Contains(lower, "fail") || strings.Contains(lower, "panic") || strings.Contains(lower, "crash") {
+				tone = "frustrating"
+				break
+			}
+			if strings.Contains(lower, "success") || strings.Contains(lower, "done") || strings.Contains(lower, "complete") || strings.Contains(lower, "fixed") {
+				tone = "satisfying"
+			}
+		}
+		ep.EmotionalTone = tone
+	}
+
+	// Detect outcome from last events
+	if ep.Outcome == "" {
+		ep.Outcome = "ongoing"
+		if len(timeline) > 0 {
+			last := strings.ToLower(timeline[len(timeline)-1].Brief)
+			if strings.Contains(last, "error") || strings.Contains(last, "fail") {
+				ep.Outcome = "failure"
+			} else if strings.Contains(last, "success") || strings.Contains(last, "done") || strings.Contains(last, "complete") {
+				ep.Outcome = "success"
+			}
+		}
+	}
 }

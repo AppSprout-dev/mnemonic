@@ -18,13 +18,16 @@ import (
 // triggerMockStore provides controlled responses for training trigger tests.
 type triggerMockStore struct {
 	storetest.MockStore
-	untrainedCount  int
-	goldEntries     []store.ExperienceEntry
-	needsImpEntries []store.ExperienceEntry
-	rawMemories     map[string]store.RawMemory
-	memories        map[string]store.Memory
-	trainingRunsW   []store.TrainingRun
-	trainingRunsU   []store.TrainingRun
+	untrainedCount         int
+	goldEntries            []store.ExperienceEntry
+	needsImpEntries        []store.ExperienceEntry
+	rawMemories            map[string]store.RawMemory
+	memories               map[string]store.Memory
+	trainingRunsW          []store.TrainingRun
+	trainingRunsU          []store.TrainingRun
+	consecutiveFailures    int
+	lastTrainingRunEndTime time.Time
+	markedUsedEntryIDs     []string
 }
 
 func (m *triggerMockStore) CountUntrainedExperience(_ context.Context) (int, error) {
@@ -70,6 +73,19 @@ func (m *triggerMockStore) WriteTrainingRun(_ context.Context, run store.Trainin
 
 func (m *triggerMockStore) UpdateTrainingRun(_ context.Context, run store.TrainingRun) error {
 	m.trainingRunsU = append(m.trainingRunsU, run)
+	return nil
+}
+
+func (m *triggerMockStore) CountConsecutiveFailedTrainingRuns(_ context.Context) (int, error) {
+	return m.consecutiveFailures, nil
+}
+
+func (m *triggerMockStore) GetLastTrainingRunEndTime(_ context.Context) (time.Time, error) {
+	return m.lastTrainingRunEndTime, nil
+}
+
+func (m *triggerMockStore) MarkExperienceUsedInTraining(_ context.Context, _ string, entryIDs []string) error {
+	m.markedUsedEntryIDs = append(m.markedUsedEntryIDs, entryIDs...)
 	return nil
 }
 
@@ -337,6 +353,136 @@ func TestPickUpTrainingResult_FailedRun(t *testing.T) {
 	}
 	if update.ErrorMessage != "quality gate failed: EPR=0.82" {
 		t.Errorf("unexpected error message: %q", update.ErrorMessage)
+	}
+}
+
+func TestTrainingCheck_CircuitBreakerBlocks(t *testing.T) {
+	ms := &triggerMockStore{
+		untrainedCount:      100,
+		consecutiveFailures: 3,
+	}
+	agent := NewDreamingAgent(ms, nil, DreamingConfig{Interval: time.Hour}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	clCfg := baseCLConfig()
+	clCfg.Trigger.MaxConsecutiveFailures = 3
+
+	result, err := agent.trainingCheck(context.Background(), clCfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != nil {
+		t.Fatal("expected nil result when circuit breaker is open")
+	}
+}
+
+func TestTrainingCheck_CooldownBlocks(t *testing.T) {
+	ms := &triggerMockStore{
+		untrainedCount:         100,
+		consecutiveFailures:    1,
+		lastTrainingRunEndTime: time.Now().Add(-30 * time.Minute), // 30 min ago
+	}
+	agent := NewDreamingAgent(ms, nil, DreamingConfig{Interval: time.Hour}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	clCfg := baseCLConfig()
+	clCfg.Trigger.FailureCooldownHours = 24
+
+	result, err := agent.trainingCheck(context.Background(), clCfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != nil {
+		t.Fatal("expected nil result during cooldown period")
+	}
+}
+
+func TestTrainingCheck_AllowsAfterCooldown(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("MNEMONIC_TRAINING_REQUESTS_DIR", tmpDir)
+
+	ms := &triggerMockStore{
+		untrainedCount:         100,
+		consecutiveFailures:    1,
+		lastTrainingRunEndTime: time.Now().Add(-25 * time.Hour), // 25h ago
+		goldEntries: []store.ExperienceEntry{
+			{ID: "e1", RawID: "raw-1", MemoryID: "mem-1", EncodingEPR: 0.95, Category: "gold"},
+		},
+		rawMemories: map[string]store.RawMemory{
+			"raw-1": {ID: "raw-1", Content: "Test", Source: "mcp", Type: "general"},
+		},
+		memories: map[string]store.Memory{
+			"mem-1": {ID: "mem-1", Summary: "test", Content: "test", Concepts: []string{"test"}, Salience: 0.5},
+		},
+	}
+	agent := NewDreamingAgent(ms, nil, DreamingConfig{Interval: time.Hour}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	clCfg := baseCLConfig()
+	clCfg.Trigger.FailureCooldownHours = 24
+
+	result, err := agent.trainingCheck(context.Background(), clCfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected training to proceed after cooldown expires")
+	}
+	if result.Status != "training_requested" {
+		t.Errorf("expected status 'training_requested', got %q", result.Status)
+	}
+}
+
+func TestTrainingCheck_EStopBlocks(t *testing.T) {
+	tmpDir := t.TempDir()
+	estopPath := filepath.Join(tmpDir, ".mnemonic", "training.disabled")
+	if err := os.MkdirAll(filepath.Dir(estopPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(estopPath, []byte("stopped"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Override HOME so isTrainingDisabled() finds the sentinel
+	t.Setenv("HOME", tmpDir)
+
+	ms := &triggerMockStore{untrainedCount: 100}
+	agent := NewDreamingAgent(ms, nil, DreamingConfig{Interval: time.Hour}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	result, err := agent.trainingCheck(context.Background(), baseCLConfig())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != nil {
+		t.Fatal("expected nil result when e-stop file exists")
+	}
+}
+
+func TestAssembleTrainingBatch_MarksExperienceAsUsed(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	ms := &triggerMockStore{
+		untrainedCount: 10,
+		goldEntries: []store.ExperienceEntry{
+			{ID: "e1", RawID: "raw-1", MemoryID: "mem-1", EncodingEPR: 0.95, Category: "gold"},
+			{ID: "e2", RawID: "raw-2", MemoryID: "mem-2", EncodingEPR: 0.90, Category: "gold"},
+		},
+		rawMemories: map[string]store.RawMemory{
+			"raw-1": {ID: "raw-1", Content: "First event", Source: "mcp", Type: "general"},
+			"raw-2": {ID: "raw-2", Content: "Second event", Source: "mcp", Type: "general"},
+		},
+		memories: map[string]store.Memory{
+			"mem-1": {ID: "mem-1", Summary: "first", Content: "first content", Concepts: []string{"test"}, Salience: 0.5},
+			"mem-2": {ID: "mem-2", Summary: "second", Content: "second content", Concepts: []string{"test"}, Salience: 0.5},
+		},
+	}
+
+	agent := NewDreamingAgent(ms, nil, DreamingConfig{Interval: time.Hour}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	_, err := agent.AssembleTrainingBatch(context.Background(), tmpDir, 50)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Both gold entries should be marked as used
+	if len(ms.markedUsedEntryIDs) != 2 {
+		t.Fatalf("expected 2 entries marked as used, got %d", len(ms.markedUsedEntryIDs))
 	}
 }
 
