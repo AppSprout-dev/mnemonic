@@ -4,15 +4,19 @@ package daemon
 
 import (
 	"fmt"
+	"html"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
+	"unicode/utf16"
 
 	"golang.org/x/sys/windows"
 )
 
+// taskName is the Task Scheduler task name. The leading backslash places
+// it in the root of the Task Scheduler namespace (not a subfolder).
 const taskName = `\Mnemonic`
 const taskDescription = "Local-first semantic memory system with cognitive agents."
 
@@ -43,18 +47,8 @@ func isTaskRegistered() bool {
 }
 
 func (m *taskSchedulerManager) IsRunning() (bool, int) {
-	// Task Scheduler doesn't directly expose the child PID.
-	// Fall back to the PID file written by the daemon.
-	pid, err := ReadPID()
-	if err != nil {
-		return false, 0
-	}
-	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
-	if err != nil {
-		return false, 0
-	}
-	_ = windows.CloseHandle(handle)
-	return true, pid
+	// Delegate to the package-level PID-file implementation.
+	return IsRunning()
 }
 
 func (m *taskSchedulerManager) Install(execPath, configPath string) error {
@@ -81,7 +75,11 @@ func (m *taskSchedulerManager) Install(execPath, configPath string) error {
 	// DisallowStartIfOnBatteries=false — always run.
 	// MultipleInstances=IgnoreNew — don't spawn duplicates.
 	// ExecutionTimeLimit=PT0S — no timeout (run indefinitely).
-	username := os.Getenv("USERDOMAIN") + `\` + os.Getenv("USERNAME")
+	// Escape values for safe XML interpolation. Windows paths and usernames
+	// can legally contain '&' (e.g. "C:\Users\Tom & Jerry\") which would
+	// produce malformed XML without escaping.
+	esc := html.EscapeString
+	username := esc(os.Getenv("USERDOMAIN") + `\` + os.Getenv("USERNAME"))
 	taskXML := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
@@ -126,7 +124,7 @@ func (m *taskSchedulerManager) Install(execPath, configPath string) error {
       <WorkingDirectory>%s</WorkingDirectory>
     </Exec>
   </Actions>
-</Task>`, taskDescription, username, username, execPath, configPath, filepath.Dir(execPath))
+</Task>`, esc(taskDescription), username, username, esc(execPath), esc(configPath), esc(filepath.Dir(execPath)))
 
 	// Write XML to a temp file (schtasks /XML requires a file path).
 	// UTF-16 LE with BOM as required by schtasks.
@@ -159,19 +157,11 @@ func (m *taskSchedulerManager) Install(execPath, configPath string) error {
 
 // utf8ToUTF16LE converts a UTF-8 string to a UTF-16 LE byte slice.
 func utf8ToUTF16LE(s string) []byte {
-	runes := []rune(s)
-	buf := make([]byte, 0, len(runes)*2)
-	for _, r := range runes {
-		if r <= 0xFFFF {
-			buf = append(buf, byte(r), byte(r>>8))
-		} else {
-			// Surrogate pair for characters above BMP
-			r -= 0x10000
-			high := 0xD800 + (r>>10)&0x3FF
-			low := 0xDC00 + r&0x3FF
-			buf = append(buf, byte(high), byte(high>>8))
-			buf = append(buf, byte(low), byte(low>>8))
-		}
+	encoded := utf16.Encode([]rune(s))
+	buf := make([]byte, len(encoded)*2)
+	for i, v := range encoded {
+		buf[i*2] = byte(v)
+		buf[i*2+1] = byte(v >> 8)
 	}
 	return buf
 }
@@ -193,19 +183,10 @@ func (m *taskSchedulerManager) Start() error {
 }
 
 func (m *taskSchedulerManager) Stop() error {
-	// Stop via PID file (direct process kill)
-	pid, err := ReadPID()
-	if err == nil {
-		handle, herr := windows.OpenProcess(windows.PROCESS_TERMINATE|windows.SYNCHRONIZE, false, uint32(pid))
-		if herr == nil {
-			_ = windows.TerminateProcess(handle, 1)
-			_, _ = windows.WaitForSingleObject(handle, 5000)
-			_ = windows.CloseHandle(handle)
-		}
-		_ = RemovePID()
-	}
+	// Delegate to the package-level PID-file stop (handles terminate + cleanup).
+	_ = Stop()
 
-	// Also tell Task Scheduler to end the task
+	// Also tell Task Scheduler to end the task (belt-and-suspenders).
 	cmd := exec.Command("schtasks", "/End", "/TN", taskName)
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NO_WINDOW}
 	_ = cmd.Run() // Best-effort — process may already be gone
@@ -214,22 +195,17 @@ func (m *taskSchedulerManager) Stop() error {
 
 func (m *taskSchedulerManager) Restart() error {
 	_ = m.Stop()
-	return m.Start()
+	execPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolving executable path: %w", err)
+	}
+	// Default config lives next to the binary. This matches the Task
+	// Scheduler registration (Install sets WorkingDirectory to the
+	// binary's directory).
+	configPath := filepath.Join(filepath.Dir(execPath), "config.yaml")
+	return PIDRestart(execPath, configPath)
 }
 
 func (m *taskSchedulerManager) ServiceName() string {
 	return "task-scheduler"
-}
-
-// IsWindowsService always returns false with the Task Scheduler backend.
-// The daemon runs as a normal process under the user's logon session,
-// not as a Windows Service invoked by the Service Control Manager.
-func IsWindowsService() bool {
-	return false
-}
-
-// RunAsService is unused with the Task Scheduler backend.
-// Kept for interface compatibility with svc_other.go.
-func RunAsService(_, _ string) error {
-	return nil
 }

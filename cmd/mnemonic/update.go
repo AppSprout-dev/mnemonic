@@ -32,7 +32,7 @@ func checkUpdateCommand() {
 	}
 }
 
-func updateCommand() {
+func updateCommand(configPath string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
@@ -74,6 +74,20 @@ func updateCommand() {
 			}
 			fmt.Printf("%sDaemon restarted with v%s%s\n", colorGreen, result.NewVersion, colorReset)
 		}
+	} else if running, _ := daemon.IsRunning(); running {
+		// No platform service manager — restart via PID file
+		fmt.Printf("Restarting daemon...\n")
+		if err := daemon.Stop(); err != nil {
+			fmt.Fprintf(os.Stderr, "%sWarning:%s failed to stop daemon: %v\n", colorYellow, colorReset, err)
+			fmt.Printf("Restart manually: mnemonic restart\n")
+			return
+		}
+		if err := daemon.PIDRestart(result.BinaryPath, configPath); err != nil {
+			fmt.Fprintf(os.Stderr, "%sWarning:%s failed to restart daemon: %v\n", colorYellow, colorReset, err)
+			fmt.Printf("Start manually: mnemonic start\n")
+			return
+		}
+		fmt.Printf("%sDaemon restart scheduled with v%s%s\n", colorGreen, result.NewVersion, colorReset)
 	}
 }
 

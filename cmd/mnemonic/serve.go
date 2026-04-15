@@ -45,15 +45,6 @@ import (
 
 // serveCommand runs the mnemonic daemon.
 func serveCommand(configPath string) {
-	// If running as a Windows Service, delegate to the service handler.
-	if daemon.IsWindowsService() {
-		execPath, _ := os.Executable()
-		if err := daemon.RunAsService(execPath, configPath); err != nil {
-			die(exitGeneral, fmt.Sprintf("running as Windows service: %v", err), "")
-		}
-		return
-	}
-
 	// Load configuration
 	cfg, err := config.Load(configPath)
 	if err != nil {
