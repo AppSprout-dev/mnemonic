@@ -34,6 +34,7 @@ type mockStore struct {
 	batchMergeMemoriesFn    func(ctx context.Context, sourceIDs []string, gist store.Memory) error
 	writeConsolidationFn    func(ctx context.Context, record store.ConsolidationRecord) error
 	getMemoryAttributesFn   func(ctx context.Context, memoryID string) (store.MemoryAttributes, error)
+	searchPatternsByEmbFn   func(ctx context.Context, emb []float32, limit int) ([]store.Pattern, error)
 
 	// Call tracking
 	updateStateCalls         []updateStateCall
@@ -68,6 +69,12 @@ func (m *mockStore) UpdateState(ctx context.Context, id string, state string) er
 func (m *mockStore) ListMemories(ctx context.Context, state string, limit, offset int) ([]store.Memory, error) {
 	if m.listMemoriesFn != nil {
 		return m.listMemoriesFn(ctx, state, limit, offset)
+	}
+	return nil, nil
+}
+func (m *mockStore) SearchPatternsByEmbedding(ctx context.Context, emb []float32, limit int) ([]store.Pattern, error) {
+	if m.searchPatternsByEmbFn != nil {
+		return m.searchPatternsByEmbFn(ctx, emb, limit)
 	}
 	return nil, nil
 }
@@ -1276,4 +1283,98 @@ func TestCreateGistEmptySummaryFallback(t *testing.T) {
 			t.Errorf("expected 'consolidated insight', got %q", gist.Summary)
 		}
 	})
+}
+
+// TestFindMatchingPattern_ConceptGate verifies the concept-overlap requirement
+// introduced to break the pattern-dedup super-attractor: a cluster whose
+// embedding is highly similar to an existing pattern must ALSO share at least
+// MinConceptOverlap concepts with that pattern before being matched.
+func TestFindMatchingPattern_ConceptGate(t *testing.T) {
+	ms := newMockStore()
+	mlp := &mockLLMProvider{}
+	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+
+	cfg := DefaultConfig()
+	// Force the concept gate on so the test is explicit; DefaultConfig already sets 2.
+	cfg.PatternMatchMinConceptOverlap = 2
+
+	agent := NewConsolidationAgent(ms, mlp, cfg, log)
+
+	// Two existing patterns share a similar embedding with the incoming cluster.
+	// Only one of them shares enough concepts — the gate should pick that one
+	// and skip the top-1 embedding match.
+	superAttractor := store.Pattern{
+		ID:        "super-attractor",
+		Title:     "Modular Model Migration Workflow",
+		Embedding: []float32{1, 0, 0, 0},
+		Concepts:  []string{"llm", "migration", "adapter"},
+	}
+	onTopic := store.Pattern{
+		ID:        "on-topic",
+		Title:     "Defensive Nil Guarding in Go Event Loops",
+		Embedding: []float32{0.98, 0.05, 0, 0}, // slightly less similar but concept-matched
+		Concepts:  []string{"go", "nil-guard", "event-bus"},
+	}
+	ms.searchPatternsByEmbFn = func(ctx context.Context, emb []float32, limit int) ([]store.Pattern, error) {
+		return []store.Pattern{superAttractor, onTopic}, nil
+	}
+
+	// Cluster shares 2 concepts with onTopic (go, nil-guard) and 0 with superAttractor.
+	cluster := []store.Memory{
+		{ID: "m1", Embedding: []float32{1, 0, 0, 0}, Concepts: []string{"go", "nil-guard", "panic"}},
+		{ID: "m2", Embedding: []float32{1, 0, 0, 0}, Concepts: []string{"go", "event-bus"}},
+		{ID: "m3", Embedding: []float32{1, 0, 0, 0}, Concepts: []string{"nil-guard", "runtime"}},
+	}
+
+	match, sim, err := agent.findMatchingPattern(context.Background(), cluster)
+	if err != nil {
+		t.Fatalf("findMatchingPattern: %v", err)
+	}
+	if match == nil {
+		t.Fatal("expected a match (onTopic), got nil")
+	}
+	if match.ID != "on-topic" {
+		t.Errorf("expected on-topic pattern to be selected past the gate, got %s", match.ID)
+	}
+	if sim < 0.9 {
+		t.Errorf("expected high cosine similarity on the matched pattern, got %v", sim)
+	}
+}
+
+// TestFindMatchingPattern_ConceptGateRejectsAll verifies that when the
+// embedding matches are high but no candidate shares enough concepts, the
+// function returns no match — this is the super-attractor break.
+func TestFindMatchingPattern_ConceptGateRejectsAll(t *testing.T) {
+	ms := newMockStore()
+	mlp := &mockLLMProvider{}
+	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+
+	cfg := DefaultConfig()
+	cfg.PatternMatchMinConceptOverlap = 2
+
+	agent := NewConsolidationAgent(ms, mlp, cfg, log)
+
+	// Existing pattern with a broad embedding but a distinct concept set.
+	superAttractor := store.Pattern{
+		ID:        "super-attractor",
+		Title:     "Modular Model Migration Workflow",
+		Embedding: []float32{1, 0, 0, 0},
+		Concepts:  []string{"llm", "migration", "adapter"},
+	}
+	ms.searchPatternsByEmbFn = func(ctx context.Context, emb []float32, limit int) ([]store.Pattern, error) {
+		return []store.Pattern{superAttractor}, nil
+	}
+
+	// Cluster has an embedding that would match at cosine 1.0 but zero
+	// overlapping concepts — should NOT match.
+	cluster := []store.Memory{
+		{ID: "m1", Embedding: []float32{1, 0, 0, 0}, Concepts: []string{"go", "nil-guard"}},
+		{ID: "m2", Embedding: []float32{1, 0, 0, 0}, Concepts: []string{"go", "event-bus"}},
+		{ID: "m3", Embedding: []float32{1, 0, 0, 0}, Concepts: []string{"panic", "runtime"}},
+	}
+
+	match, _, err := agent.findMatchingPattern(context.Background(), cluster)
+	if err == nil || match != nil {
+		t.Fatalf("expected concept gate to reject match, got match=%v err=%v", match, err)
+	}
 }

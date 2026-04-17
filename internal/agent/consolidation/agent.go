@@ -38,9 +38,10 @@ type ConsolidationConfig struct {
 	AccessResistanceScale float64 // per-access resistance factor (default 0.02)
 
 	// Pattern strength tunables
-	MergeSimilarityThreshold float64 // cosine threshold for memory merge clustering (default 0.85)
-	PatternMatchThreshold    float64 // cosine threshold for cluster→pattern matching (default 0.70)
-	PatternStrengthIncrement float32 // strength gain per new evidence (default 0.03)
+	MergeSimilarityThreshold      float64 // cosine threshold for memory merge clustering (default 0.85)
+	PatternMatchThreshold         float64 // cosine threshold for cluster→pattern matching (default 0.70)
+	PatternMatchMinConceptOverlap int     // min shared concepts required for cluster→pattern match (default 2) — prevents super-attractor behavior
+	PatternStrengthIncrement      float32 // strength gain per new evidence (default 0.03)
 	PatternIncrementCap      float32 // max single-cycle strength gain (default 0.15)
 	LargeClusterBonus        float32 // multiplier for clusters >= LargeClusterMinSize (default 1.3)
 	LargeClusterMinSize      int     // cluster size to trigger bonus (default 5)
@@ -83,9 +84,10 @@ func DefaultConfig() ConsolidationConfig {
 		RecencyProtection168h:     0.9,
 		AccessResistanceCap:       0.3,
 		AccessResistanceScale:     0.02,
-		MergeSimilarityThreshold:  0.85,
-		PatternMatchThreshold:     0.70,
-		PatternStrengthIncrement:  0.03,
+		MergeSimilarityThreshold:      0.85,
+		PatternMatchThreshold:         0.70,
+		PatternMatchMinConceptOverlap: 2,
+		PatternStrengthIncrement:      0.03,
 		PatternIncrementCap:       0.15,
 		LargeClusterBonus:         1.3,
 		LargeClusterMinSize:       5,
@@ -884,11 +886,16 @@ func (ca *ConsolidationAgent) processPatternClusters(ctx context.Context, cluste
 			}
 		}
 		if len(qualified) < 3 {
+			ca.log.Info("pattern extraction: cluster dropped by salience filter",
+				"project", project, "cluster_size", len(cluster),
+				"qualified", len(qualified), "min_salience", minSalience)
 			continue
 		}
 
-		// Check if this cluster matches an existing pattern (by embedding similarity)
-		existing, err := ca.findMatchingPattern(ctx, qualified)
+		// Check if this cluster matches an existing pattern (by embedding similarity
+		// AND concept overlap). Concept overlap is required to stop one broad-embedding
+		// pattern from becoming a super-attractor that consumes unrelated clusters.
+		existing, matchSim, err := ca.findMatchingPattern(ctx, qualified)
 		if err == nil && existing != nil {
 			// Count genuinely new evidence
 			newEvidence := 0
@@ -920,7 +927,10 @@ func (ca *ConsolidationAgent) processPatternClusters(ctx context.Context, cluste
 			if err := ca.store.UpdatePattern(ctx, *existing); err != nil {
 				ca.log.Warn("failed to update existing pattern", "pattern_id", existing.ID, "error", err)
 			} else {
-				ca.log.Debug("strengthened existing pattern", "pattern_id", existing.ID, "strength", existing.Strength, "new_evidence", newEvidence)
+				ca.log.Info("pattern extraction: strengthened existing pattern",
+					"pattern_id", existing.ID, "title", existing.Title,
+					"cosine_sim", matchSim, "strength", existing.Strength,
+					"new_evidence", newEvidence, "access_count", existing.AccessCount)
 			}
 			continue
 		}
@@ -1117,28 +1127,67 @@ func countConceptOverlap(a, b []string) int {
 }
 
 // findMatchingPattern checks if a cluster matches an existing pattern by embedding similarity.
-func (ca *ConsolidationAgent) findMatchingPattern(ctx context.Context, cluster []store.Memory) (*store.Pattern, error) {
-	// Compute average embedding for the cluster
+// findMatchingPattern returns the top-1 existing pattern whose embedding is
+// close to the cluster's averaged embedding AND whose concepts overlap the
+// cluster's concepts by at least minConceptOverlap. The overlap requirement
+// prevents a broad-embedding pattern from becoming a super-attractor that
+// consumes topically unrelated clusters. Returns the pattern, the cosine
+// similarity that was used, and any error.
+func (ca *ConsolidationAgent) findMatchingPattern(ctx context.Context, cluster []store.Memory) (*store.Pattern, float32, error) {
 	avgEmb := averageEmbedding(cluster)
 	if len(avgEmb) == 0 {
-		return nil, fmt.Errorf("no embeddings in cluster")
+		return nil, 0, fmt.Errorf("no embeddings in cluster")
 	}
 
-	patterns, err := ca.store.SearchPatternsByEmbedding(ctx, avgEmb, 1)
+	// Search top-5 candidates so the concept gate can reject the top-1 embedding
+	// match and fall back to a lower-ranked pattern that actually shares concepts.
+	patterns, err := ca.store.SearchPatternsByEmbedding(ctx, avgEmb, 5)
 	if err != nil || len(patterns) == 0 {
-		return nil, fmt.Errorf("no matching patterns")
+		return nil, 0, fmt.Errorf("no matching patterns")
 	}
 
-	// Check if the top match is close enough
 	threshold := float32(agentutil.Float64Or(ca.config.PatternMatchThreshold, 0.70))
-	if len(patterns[0].Embedding) > 0 {
-		sim := agentutil.CosineSimilarity(avgEmb, patterns[0].Embedding)
-		if sim >= threshold {
-			return &patterns[0], nil
+	minConceptOverlap := agentutil.IntOr(ca.config.PatternMatchMinConceptOverlap, 2)
+
+	clusterConcepts := collectClusterConcepts(cluster)
+
+	for i := range patterns {
+		p := &patterns[i]
+		if len(p.Embedding) == 0 {
+			continue
+		}
+		sim := agentutil.CosineSimilarity(avgEmb, p.Embedding)
+		if sim < threshold {
+			continue
+		}
+		overlap := countConceptOverlap(clusterConcepts, p.Concepts)
+		if overlap < minConceptOverlap {
+			ca.log.Info("pattern extraction: rejected embedding match on concept gate",
+				"pattern_id", p.ID, "title", p.Title,
+				"cosine_sim", sim, "concept_overlap", overlap,
+				"min_required", minConceptOverlap)
+			continue
+		}
+		return p, sim, nil
+	}
+
+	return nil, 0, fmt.Errorf("no close match")
+}
+
+// collectClusterConcepts returns the deduplicated set of concepts across all
+// memories in the cluster, as a slice suitable for countConceptOverlap.
+func collectClusterConcepts(cluster []store.Memory) []string {
+	seen := make(map[string]bool)
+	for _, m := range cluster {
+		for _, c := range m.Concepts {
+			seen[c] = true
 		}
 	}
-
-	return nil, fmt.Errorf("no close match")
+	out := make([]string, 0, len(seen))
+	for c := range seen {
+		out = append(out, c)
+	}
+	return out
 }
 
 // averageEmbedding computes the element-wise average of embeddings from memories.
