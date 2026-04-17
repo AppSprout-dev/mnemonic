@@ -13,7 +13,8 @@ Mnemonic is a local-first, air-gapped semantic memory system built in Go. It use
 ## Build & Test
 
 ```bash
-make build                    # go build ...
+ROCM=1 make build-embedded    # Daemon with embedded llama.cpp + GPU. USE THIS for daemon binaries.
+make build                    # Plain build (no embedded LLM) — only for CLI/test utilities.
 make test                     # go test ./... -v
 make check                    # go fmt + go vet
 make run                      # Build and run in foreground (serve mode)
@@ -21,7 +22,11 @@ make lifecycle-test           # Build + run full lifecycle simulation
 golangci-lint run             # Lint (uses .golangci.yml config)
 ```
 
+The daemon loads its chat model in-process via the CGo bridge to the custom llama.cpp fork — `make build` alone produces a binary with `llm_available: false`. Use `ROCM=1 make build-embedded` whenever you plan to restart the systemd service.
+
 **Version** is injected via ldflags from `Makefile` (managed by release-please). The binary var is in `cmd/mnemonic/main.go`.
+
+**Before restarting the daemon:** ask first. The daemon is a live runtime that other agents (especially crispr-lm — see Coupled Projects below) actively edit via the splice API. A restart discards in-memory spoke edits. See `.claude/rules/testing-against-daemon.md`.
 
 ## Project Layout
 
@@ -65,9 +70,8 @@ sdk/                   Python agent SDK (self-evolving assistant)
   agent/evolution/     Agent evolution data (created at runtime, gitignored)
   agent/evolution/examples/  Example evolution data for reference
 models/                GGUF model files (gitignored)
-  qwen3.5-2b/         HuggingFace Qwen 3.5 2B weights
-  qwen35-2b-f16.gguf  Base Qwen 3.5 2B in GGUF format
-  qwen35-2b-spokes-f16.gguf  Qwen 3.5 2B + trained encoding spokes
+  gemma4-e2b-exp31-spokes-*.gguf  Production: Gemma 4 E2B base + EXP-31 spokes
+  qwen35-2b-spokes-*.gguf         Retired: Qwen 3.5 2B + EXP-20 spokes
 training/              Mnemonic-LM training infrastructure
   scripts/             Training, evaluation, data generation, GGUF export
   configs/             Data mix config (pretrain_mix.yaml)
@@ -101,13 +105,15 @@ Felix-LM is a hub-and-spoke architecture for language models. The "central post"
 
 The architecture supports hot-swappable task-specific spoke sets: encoding spokes, synthesis spokes, retrieval spokes, all sharing the same frozen post. This is the Felix-LM vision: one backbone, many specialized tools.
 
-**Current state:** Qwen 3.5 2B is the production encoding model (100% schema, 7/7 stress test). Deployed via custom llama.cpp fork at 95 tok/s on RX 7800 XT. Gemma 4 E2B spoke training is active (EXP-31, branch `feat/gemma-e2b-spokes`). See `training/docs/experiment_registry.md` for EXP-1 through EXP-31.
+**Current state:** Gemma 4 E2B + EXP-31 spokes (all-RQ4 quant) is the production encoding model, deployed 2026-04-13. Loaded in-process via the custom llama.cpp fork with ROCm on RX 7800 XT (~3GB VRAM). The config.yaml `chat_model_file` may be stale — the daemon overrides via the Model Control Center API. Qwen 3.5 2B production is retired. See `training/docs/experiment_registry.md` for EXP-1 through EXP-31+.
+
+Only `task_type: encoding` is in EXP-31's training mix (`training/data/finetune_gemma4_v7_faithful/`). LLM-gated code paths that ask for other schemas (pattern identification, insight synthesis, etc.) are out-of-distribution for the current spoke — this is a known coverage gap, not a code bug.
 
 **Critical Gemma 4 training note:** On transformers <5.5.3, HF's `gradient_checkpointing_enable()` forces `use_cache=False`, which breaks ISWA KV sharing layers (garbage output, PPL 2.7M). Fixed upstream in transformers 5.5.3 (huggingface/transformers#45312). Our `SpokeWrappedLayer` has its own gradient checkpointing (`TrainingCache` + custom checkpoint) as a safety net regardless of transformers version.
 
 ### Inference
 
-Custom llama.cpp fork (`third_party/llama.cpp/`) with Felix-LM spoke support in `src/models/qwen35.cpp`. Spoke GGUF at `models/qwen35-2b-spokes-f16.gguf`. Build with `-DGGML_HIP=ON`. Export via `training/scripts/export_qwen35_spokes.py`.
+Custom llama.cpp fork (`third_party/llama.cpp/`, branch `felix`) with Felix-LM spoke support in `src/models/qwen35.cpp` (legacy) and Gemma 4 spoke paths. Production GGUFs at `models/gemma4-e2b-exp31-spokes-rq4-*.gguf`. Build with `-DGGML_HIP=ON` (handled by `ROCM=1 make build-embedded`). Live spoke tensor editing via `POST /api/v1/splice/tensor` (F32 with auto-quantization, or raw bytes). Export via `training/scripts/export_gemma4_spokes.py` / `export_qwen35_spokes.py`.
 
 ### Training
 
@@ -116,6 +122,10 @@ Scripts in `training/scripts/`, require `source ~/Projects/felixlm/.venv/bin/act
 Current datasets: Qwen `training/data/finetune_qwen_v6/` (4,255 train / 472 eval), Gemma `training/data/finetune_gemma4_v7_faithful/` (5,238 train / 581 eval). Design paper: `~/Projects/felixlm/docs/felix_lm_design.tex`.
 
 All experiments must be pre-registered in `training/docs/experiment_registry.md`. See `.claude/rules/scientific-method.md` and `.claude/rules/experiment-logging.md`.
+
+## Coupled Projects
+
+**crispr-lm** (`~/Projects/crispr-lm`) is mnemonic's model-editing sibling: logit-lens diagnosis identifies where knowledge lives in the spoke, KL-penalized corrective training (kl_weight≈0.3, lr≈1e-4, ~20 steps) produces patches, and `POST /api/v1/splice/tensor` pushes F32 weights into the running daemon (auto-quantized to RQ4 in ~0.1s). End-to-end fix cycle is ~20s vs ~216s for a GGUF rebuild. It may be actively editing the daemon at any moment — check crispr-lm session handoffs in mnemonic memory before a restart.
 
 ## Known Issues
 
