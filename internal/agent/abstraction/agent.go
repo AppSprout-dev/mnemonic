@@ -26,6 +26,11 @@ type AbstractionConfig struct {
 	ConfidenceSignificantDecay float32
 	ConfidenceSevereDecay      float32
 	GroundingFloor             float32
+	// DedupMinConceptOverlap is the minimum number of shared concepts required
+	// for findSimilarAbstraction to treat a new principle/axiom as a duplicate
+	// of an existing abstraction. Prevents the same embedding-only attractor
+	// behavior fixed for consolidation in PRs #412 and #414. Default: 2.
+	DedupMinConceptOverlap int
 }
 
 type AbstractionAgent struct {
@@ -174,6 +179,10 @@ func (aa *AbstractionAgent) runCycle(ctx context.Context) (*CycleReport, error) 
 
 // synthesizePrinciples loads strong patterns, clusters by embedding similarity, and asks LLM to synthesize principles.
 func (aa *AbstractionAgent) synthesizePrinciples(ctx context.Context, report *CycleReport) error {
+	minOverlap := aa.config.DedupMinConceptOverlap
+	if minOverlap <= 0 {
+		minOverlap = 2
+	}
 	patterns, err := aa.store.ListPatterns(ctx, "", 50) // all projects
 	if err != nil {
 		return fmt.Errorf("failed to list patterns: %w", err)
@@ -225,7 +234,7 @@ func (aa *AbstractionAgent) synthesizePrinciples(ctx context.Context, report *Cy
 		// Dedup: compare the synthesized principle's own embedding against existing ones.
 		// Using 0.85 threshold since both are text-derived embeddings in the same space.
 		if len(principle.Embedding) > 0 {
-			if match := findSimilarAbstraction(existingPrinciples, principle.Embedding, principle.Title, 0.85); match != nil {
+			if match := findSimilarAbstraction(existingPrinciples, principle.Concepts, principle.Embedding, principle.Title, 0.85, minOverlap, aa.log); match != nil {
 				// Strengthen the existing principle instead of creating a duplicate
 				match.Confidence = min32(match.Confidence+0.05, 1.0)
 				match.AccessCount++
@@ -269,6 +278,10 @@ func (aa *AbstractionAgent) synthesizePrinciples(ctx context.Context, report *Cy
 
 // synthesizeAxioms clusters level-2 abstractions and synthesizes level-3 axioms.
 func (aa *AbstractionAgent) synthesizeAxioms(ctx context.Context, report *CycleReport) error {
+	minOverlap := aa.config.DedupMinConceptOverlap
+	if minOverlap <= 0 {
+		minOverlap = 2
+	}
 	principles, err := aa.store.ListAbstractions(ctx, 2, 500)
 	if err != nil {
 		return fmt.Errorf("failed to list principles: %w", err)
@@ -317,7 +330,7 @@ func (aa *AbstractionAgent) synthesizeAxioms(ctx context.Context, report *CycleR
 
 		// Dedup: compare the synthesized axiom's own embedding against existing ones
 		if len(axiom.Embedding) > 0 {
-			if match := findSimilarAbstraction(existingAxioms, axiom.Embedding, axiom.Title, 0.85); match != nil {
+			if match := findSimilarAbstraction(existingAxioms, axiom.Concepts, axiom.Embedding, axiom.Title, 0.85, minOverlap, aa.log); match != nil {
 				match.Confidence = min32(match.Confidence+0.05, 1.0)
 				match.AccessCount++
 				match.UpdatedAt = time.Now()
@@ -751,23 +764,74 @@ func clusterAbstractions(abstractions []store.Abstraction, threshold float32) []
 	return clusters
 }
 
-// findSimilarAbstraction returns the first existing abstraction with embedding similarity >= threshold
-// or high title similarity, checking both active and fading states.
-func findSimilarAbstraction(existing []store.Abstraction, embedding []float32, title string, threshold float32) *store.Abstraction {
+// findSimilarAbstraction returns the first existing abstraction that is a true
+// duplicate of the new one: similarity check (embedding cosine >= threshold OR
+// title Jaccard >= 0.6) AND concept overlap >= minConceptOverlap.
+//
+// The concept-overlap gate is the fix for the same attractor bug repaired in
+// consolidation by PRs #412 and #414: without it, a dominant existing
+// abstraction whose embedding happens to sit near the new principle's
+// embedding will absorb topically-unrelated new abstractions indefinitely.
+// Rejections are logged at INFO so operators can see when the gate fires.
+//
+// A logger pointer is accepted (may be nil) so the function remains easy to
+// call from tests without mocking the agent's logger.
+func findSimilarAbstraction(existing []store.Abstraction, concepts []string, embedding []float32, title string, threshold float32, minConceptOverlap int, log *slog.Logger) *store.Abstraction {
 	for i, abs := range existing {
 		if abs.State != "active" && abs.State != "fading" {
 			continue
 		}
-		// Embedding similarity check
-		if len(abs.Embedding) > 0 && len(embedding) > 0 && agentutil.CosineSimilarity(abs.Embedding, embedding) >= threshold {
-			return &existing[i]
+		var embSim float32
+		if len(abs.Embedding) > 0 && len(embedding) > 0 {
+			embSim = agentutil.CosineSimilarity(abs.Embedding, embedding)
 		}
-		// Title similarity fallback (word-level Jaccard)
-		if title != "" && abs.Title != "" && titleJaccard(title, abs.Title) >= 0.6 {
-			return &existing[i]
+		titleSim := float32(0)
+		if title != "" && abs.Title != "" {
+			titleSim = titleJaccard(title, abs.Title)
 		}
+		similar := embSim >= threshold || titleSim >= 0.6
+		if !similar {
+			continue
+		}
+		overlap := countConceptOverlap(concepts, abs.Concepts)
+		if overlap < minConceptOverlap {
+			if log != nil {
+				log.Info("abstraction dedup: rejected similarity match on concept gate",
+					"existing_id", abs.ID, "existing_title", abs.Title,
+					"emb_sim", embSim, "title_sim", titleSim,
+					"concept_overlap", overlap, "min_required", minConceptOverlap)
+			}
+			continue
+		}
+		if log != nil {
+			log.Info("abstraction dedup: merged new into existing",
+				"existing_id", abs.ID, "existing_title", abs.Title,
+				"emb_sim", embSim, "title_sim", titleSim,
+				"concept_overlap", overlap)
+		}
+		return &existing[i]
 	}
 	return nil
+}
+
+// countConceptOverlap returns the number of concepts shared between two slices
+// (case-insensitive, whitespace-trimmed). Local copy to keep the abstraction
+// package self-contained.
+func countConceptOverlap(a, b []string) int {
+	if len(a) == 0 || len(b) == 0 {
+		return 0
+	}
+	set := make(map[string]bool, len(a))
+	for _, c := range a {
+		set[strings.ToLower(strings.TrimSpace(c))] = true
+	}
+	shared := 0
+	for _, c := range b {
+		if set[strings.ToLower(strings.TrimSpace(c))] {
+			shared++
+		}
+	}
+	return shared
 }
 
 // titleJaccard computes word-level Jaccard similarity between two titles.
