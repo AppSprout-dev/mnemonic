@@ -140,6 +140,16 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/models/active", routes.HandleActiveModel(s.deps.ModelManager, s.deps.Log))
 	s.mux.HandleFunc("POST /api/v1/models/active", routes.HandleSwapModel(s.deps.ModelManager, s.deps.Log))
 
+	// SPLICE: spoke tensor editing
+	s.mux.HandleFunc("POST /api/v1/splice/edit", routes.HandleSpliceEdit(s.deps.ModelManager, s.deps.Log))
+	s.mux.HandleFunc("GET /api/v1/splice/status", routes.HandleSpliceStatus(s.deps.ModelManager, s.deps.Log))
+
+	// SPLICE Phase 2: spoke tensor editing
+	s.mux.HandleFunc("POST /api/v1/splice/tensor", routes.HandleSpliceTensor(s.deps.ModelManager, s.deps.Log))
+
+	// Raw completion (bypasses retrieval — for CRISPR-LM controlled testing)
+	s.mux.HandleFunc("POST /api/v1/complete", routes.HandleComplete(s.deps.LLM, s.deps.Log))
+
 	// LLM usage monitoring
 	s.mux.HandleFunc("GET /api/v1/llm/usage", routes.HandleLLMUsage(s.deps.Store, s.deps.Log))
 

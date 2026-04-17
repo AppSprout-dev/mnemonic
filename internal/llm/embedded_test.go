@@ -309,9 +309,9 @@ func TestFormatPrompt(t *testing.T) {
 		t.Errorf("formatPrompt(chatml) mismatch:\ngot:  %q\nwant: %q", got, expected)
 	}
 
-	// Gemma format — system role mapped to user turn
+	// Gemma 4 format — <|turn>/<turn|> tokens, native system role
 	gotGemma := formatPrompt(messages, "gemma")
-	expectedGemma := "<start_of_turn>user\nYou are helpful.<end_of_turn>\n<start_of_turn>user\nHello<end_of_turn>\n<start_of_turn>model\n"
+	expectedGemma := "<|turn>system\nYou are helpful.<turn|>\n<|turn>user\nHello<turn|>\n<|turn>model\n"
 	if gotGemma != expectedGemma {
 		t.Errorf("formatPrompt(gemma) mismatch:\ngot:  %q\nwant: %q", gotGemma, expectedGemma)
 	}
