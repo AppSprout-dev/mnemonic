@@ -373,7 +373,7 @@ type AbstractionConfig struct {
 	Enabled                    bool          `yaml:"enabled"`
 	IntervalRaw                string        `yaml:"interval"`
 	Interval                   time.Duration `yaml:"-"`
-	MinStrength                float32       `yaml:"min_strength"`                 // minimum pattern strength to consider
+	MinStrength                float32       `yaml:"min_strength"`                 // minimum pattern strength to consider (default: 0.5 — equal to a pattern's initial strength, so any non-decayed pattern qualifies; tightened attractors via PRs #412/#414/#415 make this trustworthy)
 	MaxLLMCalls                int           `yaml:"max_llm_calls"`                // budget per cycle
 	StartupDelaySec            int           `yaml:"startup_delay_sec"`            // seconds before first cycle (default: 300)
 	DefaultConfidence          float32       `yaml:"default_confidence"`           // fallback confidence for principles (default: 0.6)
@@ -844,7 +844,7 @@ func Default() *Config {
 			Enabled:                    true,
 			IntervalRaw:                "6h",
 			Interval:                   6 * time.Hour,
-			MinStrength:                0.7,
+			MinStrength:                0.5,
 			MaxLLMCalls:                5,
 			StartupDelaySec:            300,
 			DefaultConfidence:          0.6,

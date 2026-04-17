@@ -425,8 +425,10 @@ abstraction:
   interval: "2h"
 
   # Minimum pattern strength to consider for principle synthesis (0.0-1.0)
-  # Patterns start at 0.5 — set below that to let fresh patterns qualify
-  min_strength: 0.4
+  # Patterns start at 0.5. Setting to 0.5 lets any non-decayed pattern qualify —
+  # the consolidation concept gates (PRs #412/#414) keep junk out at pattern
+  # creation time, so trusting patterns at the starting line is fine.
+  min_strength: 0.5
 
   # Maximum LLM calls per abstraction cycle
   max_llm_calls: 10
