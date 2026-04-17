@@ -1342,6 +1342,75 @@ func TestFindMatchingPattern_ConceptGate(t *testing.T) {
 	}
 }
 
+// TestFindSecondStageDuplicate_ConceptGateAccepts verifies that the
+// second-stage dedup merges into an existing pattern only when BOTH the
+// similarity signal fires AND concepts overlap by at least minOverlap.
+func TestFindSecondStageDuplicate_ConceptGateAccepts(t *testing.T) {
+	ms := newMockStore()
+	mlp := &mockLLMProvider{}
+	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	agent := NewConsolidationAgent(ms, mlp, DefaultConfig(), log)
+
+	newPat := &store.Pattern{
+		Title:     "Recurring Nil-Guard Drift in Go Event Loop",
+		Embedding: []float32{0.9, 0.1, 0, 0},
+		Concepts:  []string{"go", "nil-guard", "event-bus"},
+	}
+	existing := []store.Pattern{
+		{
+			ID:        "other-topic",
+			Title:     "Modular Model Migration Workflow",
+			Embedding: []float32{0.95, 0.05, 0, 0}, // high embedding sim, no shared concepts
+			Concepts:  []string{"llm", "migration", "adapter"},
+		},
+		{
+			ID:        "real-dup",
+			Title:     "Defensive Nil Guarding in Go Event Loops",
+			Embedding: []float32{0.88, 0.1, 0.05, 0}, // lower sim but concepts match
+			Concepts:  []string{"go", "nil-guard", "event-bus"},
+		},
+	}
+
+	match := agent.findSecondStageDuplicate(newPat, existing, 2)
+	if match == nil {
+		t.Fatal("expected a concept-compatible match, got nil")
+	}
+	if match.ID != "real-dup" {
+		t.Errorf("expected match to be real-dup (concept-compatible), got %s", match.ID)
+	}
+}
+
+// TestFindSecondStageDuplicate_ConceptGateRejects verifies that a new pattern
+// is NOT merged into an existing attractor when their embeddings match but
+// concepts do not — the core behavior that protects against the kind of
+// "every new pattern folded into Developing a Self-Contained LLM Architecture"
+// attractor we observed during PR #413 validation.
+func TestFindSecondStageDuplicate_ConceptGateRejects(t *testing.T) {
+	ms := newMockStore()
+	mlp := &mockLLMProvider{}
+	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	agent := NewConsolidationAgent(ms, mlp, DefaultConfig(), log)
+
+	newPat := &store.Pattern{
+		Title:     "Splice Tensor API for CRISPR-LM",
+		Embedding: []float32{1, 0, 0, 0},
+		Concepts:  []string{"crispr-lm", "splice", "api"},
+	}
+	existing := []store.Pattern{
+		{
+			ID:        "attractor",
+			Title:     "Developing a Self-Contained LLM Architecture",
+			Embedding: []float32{0.98, 0.05, 0, 0}, // 0.82+ cosine, easily above 0.75
+			Concepts:  []string{"llm", "architecture", "workflow"},
+		},
+	}
+
+	match := agent.findSecondStageDuplicate(newPat, existing, 2)
+	if match != nil {
+		t.Errorf("expected concept gate to reject attractor match, got match=%s", match.ID)
+	}
+}
+
 // TestIdentifyPattern_LargeClusterSampled verifies that when a cluster
 // exceeds MaxClusterSampleForLLM, only the top-salience sample is shown to
 // the LLM (preventing JSON truncation) while MaxTokens provides enough
