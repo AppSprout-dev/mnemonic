@@ -948,37 +948,30 @@ func (ca *ConsolidationAgent) processPatternClusters(ctx context.Context, cluste
 			continue
 		}
 
-		// Second dedup: compare the new pattern's embedding AND title against existing patterns.
-		// Two signals: embedding cosine >= 0.80 OR title Jaccard >= 0.6.
-		// This catches duplicates where embeddings differ but titles are near-identical.
+		// Second dedup: compare the new pattern against existing patterns on
+		// embedding-or-title similarity AND concept overlap. The concept gate
+		// (added after PR #413 validation) prevents a dominant existing pattern
+		// from absorbing topically-unrelated LLM outputs whose title+embedding
+		// happen to sit close to it in the retrieval space — same architectural
+		// issue fixed for the first-stage match in PR #412.
 		if len(pattern.Embedding) > 0 {
 			existingPatterns, searchErr := ca.store.SearchPatternsByEmbedding(ctx, pattern.Embedding, 5)
 			if searchErr == nil {
 				foundDup := false
-				for i := range existingPatterns {
-					ep := &existingPatterns[i]
-					if len(ep.Embedding) == 0 {
-						continue
-					}
-					embSim := agentutil.CosineSimilarity(pattern.Embedding, ep.Embedding)
-					titleSim := normalizedTitleSimilarity(pattern.Title, ep.Title)
-					if isDuplicate(pattern.Title, ep.Title, pattern.Embedding, ep.Embedding, 0.5, 0.75) {
-						for _, mem := range qualified {
-							if !containsString(ep.EvidenceIDs, mem.ID) {
-								ep.EvidenceIDs = append(ep.EvidenceIDs, mem.ID)
-							}
+				minOverlap := agentutil.IntOr(ca.config.PatternMatchMinConceptOverlap, 2)
+				ep := ca.findSecondStageDuplicate(pattern, existingPatterns, minOverlap)
+				if ep != nil {
+					for _, mem := range qualified {
+						if !containsString(ep.EvidenceIDs, mem.ID) {
+							ep.EvidenceIDs = append(ep.EvidenceIDs, mem.ID)
 						}
-						ep.Strength = min32(ep.Strength+0.03, 1.0)
-						ep.AccessCount++
-						ep.LastAccessed = time.Now()
-						ep.UpdatedAt = time.Now()
-						_ = ca.store.UpdatePattern(ctx, *ep)
-						ca.log.Info("dedup: merged new pattern into existing",
-							"existing_id", ep.ID, "existing_title", ep.Title,
-							"emb_sim", embSim, "title_sim", titleSim)
-						foundDup = true
-						break
 					}
+					ep.Strength = min32(ep.Strength+0.03, 1.0)
+					ep.AccessCount++
+					ep.LastAccessed = time.Now()
+					ep.UpdatedAt = time.Now()
+					_ = ca.store.UpdatePattern(ctx, *ep)
+					foundDup = true
 				}
 				if foundDup {
 					continue
@@ -1174,6 +1167,47 @@ func (ca *ConsolidationAgent) findMatchingPattern(ctx context.Context, cluster [
 	}
 
 	return nil, 0, fmt.Errorf("no close match")
+}
+
+// findSecondStageDuplicate scans candidate patterns (returned by
+// SearchPatternsByEmbedding) and returns the first one that qualifies as a
+// duplicate of the newly-generated pattern. A duplicate must pass BOTH:
+//   - isDuplicate on (title, embedding) at the long-standing thresholds
+//     (embedding cosine >= 0.75 OR title Jaccard >= 0.5, with an AND variant
+//     for short titles), AND
+//   - concept overlap >= minOverlap with the new pattern.
+//
+// The concept gate is the key change relative to the pre-PR behavior, which
+// used similarity alone and silently absorbed topically-unrelated LLM outputs
+// into a single attractor pattern. Rejections are logged at INFO so the
+// operator can see when the gate fires. Returns a pointer into the provided
+// slice so the caller can mutate+persist the match; nil when nothing matches.
+func (ca *ConsolidationAgent) findSecondStageDuplicate(pattern *store.Pattern, candidates []store.Pattern, minOverlap int) *store.Pattern {
+	for i := range candidates {
+		ep := &candidates[i]
+		if len(ep.Embedding) == 0 {
+			continue
+		}
+		embSim := agentutil.CosineSimilarity(pattern.Embedding, ep.Embedding)
+		titleSim := normalizedTitleSimilarity(pattern.Title, ep.Title)
+		if !isDuplicate(pattern.Title, ep.Title, pattern.Embedding, ep.Embedding, 0.5, 0.75) {
+			continue
+		}
+		conceptOverlap := countConceptOverlap(pattern.Concepts, ep.Concepts)
+		if conceptOverlap < minOverlap {
+			ca.log.Info("dedup: rejected similarity match on concept gate",
+				"existing_id", ep.ID, "existing_title", ep.Title,
+				"emb_sim", embSim, "title_sim", titleSim,
+				"concept_overlap", conceptOverlap, "min_required", minOverlap)
+			continue
+		}
+		ca.log.Info("dedup: merged new pattern into existing",
+			"existing_id", ep.ID, "existing_title", ep.Title,
+			"emb_sim", embSim, "title_sim", titleSim,
+			"concept_overlap", conceptOverlap)
+		return ep
+	}
+	return nil
 }
 
 // collectClusterConcepts returns the deduplicated set of concepts across all
