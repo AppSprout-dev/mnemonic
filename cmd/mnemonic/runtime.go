@@ -193,6 +193,7 @@ func toConsolidationConfig(cfg *config.Config) consolidation.ConsolidationConfig
 		MergeSimilarityThreshold:      cfg.Consolidation.MergeSimilarityThreshold,
 		PatternMatchThreshold:         cfg.Consolidation.PatternMatchThreshold,
 		PatternMatchMinConceptOverlap: cfg.Consolidation.PatternMatchMinConceptOverlap,
+		MaxClusterSampleForLLM:        cfg.Consolidation.MaxClusterSampleForLLM,
 		PatternStrengthIncrement:      float32(cfg.Consolidation.PatternStrengthIncrement),
 		PatternIncrementCap:       float32(cfg.Consolidation.PatternIncrementCap),
 		LargeClusterBonus:         float32(cfg.Consolidation.LargeClusterBonus),

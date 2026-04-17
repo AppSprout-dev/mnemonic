@@ -41,6 +41,7 @@ type ConsolidationConfig struct {
 	MergeSimilarityThreshold      float64 // cosine threshold for memory merge clustering (default 0.85)
 	PatternMatchThreshold         float64 // cosine threshold for cluster→pattern matching (default 0.70)
 	PatternMatchMinConceptOverlap int     // min shared concepts required for cluster→pattern match (default 2) — prevents super-attractor behavior
+	MaxClusterSampleForLLM        int     // max cluster memories shown to the LLM for identifyPattern (default 10) — prevents JSON truncation on huge clusters
 	PatternStrengthIncrement      float32 // strength gain per new evidence (default 0.03)
 	PatternIncrementCap      float32 // max single-cycle strength gain (default 0.15)
 	LargeClusterBonus        float32 // multiplier for clusters >= LargeClusterMinSize (default 1.3)
@@ -87,6 +88,7 @@ func DefaultConfig() ConsolidationConfig {
 		MergeSimilarityThreshold:      0.85,
 		PatternMatchThreshold:         0.70,
 		PatternMatchMinConceptOverlap: 2,
+		MaxClusterSampleForLLM:        10,
 		PatternStrengthIncrement:      0.03,
 		PatternIncrementCap:       0.15,
 		LargeClusterBonus:         1.3,
@@ -1232,19 +1234,36 @@ type patternResponse struct {
 }
 
 // identifyPattern asks the LLM whether a cluster of memories represents a recurring pattern.
+// For large clusters, only a salience-ranked sample is shown to the LLM; the full cluster
+// is still used for evidence tracking by the caller.
 func (ca *ConsolidationAgent) identifyPattern(ctx context.Context, cluster []store.Memory, project string) (*store.Pattern, error) {
-	// Build prompt with quality signals
-	var summaries strings.Builder
-	allConcepts := make(map[string]bool)
-	for i, mem := range cluster {
-		qualityInfo := fmt.Sprintf("salience:%.2f, accessed:%d", mem.Salience, mem.AccessCount)
-		fmt.Fprintf(&summaries, "%d. [%s] %s (concepts: %s)\n", i+1, qualityInfo, mem.Summary, strings.Join(mem.Concepts, ", "))
-		for _, c := range mem.Concepts {
-			allConcepts[c] = true
-		}
+	sample := cluster
+	sampleCap := agentutil.IntOr(ca.config.MaxClusterSampleForLLM, 10)
+	if len(cluster) > sampleCap {
+		ranked := make([]store.Memory, len(cluster))
+		copy(ranked, cluster)
+		sort.Slice(ranked, func(i, j int) bool {
+			return ranked[i].Salience > ranked[j].Salience
+		})
+		sample = ranked[:sampleCap]
+		ca.log.Info("pattern extraction: sampled large cluster for LLM",
+			"project", project, "full_size", len(cluster), "sample_size", len(sample))
 	}
 
-	prompt := fmt.Sprintf(`Look at these %d memories together. Is there a recurring theme here — something that keeps happening, a habit forming, a lesson being learned (or not learned)?
+	// Build prompt with quality signals from the sample
+	var summaries strings.Builder
+	for i, mem := range sample {
+		qualityInfo := fmt.Sprintf("salience:%.2f, accessed:%d", mem.Salience, mem.AccessCount)
+		fmt.Fprintf(&summaries, "%d. [%s] %s (concepts: %s)\n", i+1, qualityInfo, mem.Summary, strings.Join(mem.Concepts, ", "))
+	}
+
+	intro := fmt.Sprintf("Look at these %d memories together.", len(sample))
+	if len(cluster) > len(sample) {
+		intro = fmt.Sprintf("Look at these %d memories (sampled by salience from a cluster of %d) together.",
+			len(sample), len(cluster))
+	}
+
+	prompt := fmt.Sprintf(`%s Is there a recurring theme here — something that keeps happening, a habit forming, a lesson being learned (or not learned)?
 
 I'm curious whether these point to a pattern: a practice this person keeps returning to, an error they keep encountering, a decision style they favor, or a workflow that's emerging.
 
@@ -1254,14 +1273,14 @@ Memories:
 Respond with ONLY a JSON object:
 {"is_pattern": true/false, "title": "a descriptive name for the pattern", "description": "what the pattern is and why it matters", "pattern_type": "recurring_error|code_practice|decision_pattern|workflow|temporal_sequence", "concepts": ["key", "concepts"]}
 
-If these memories are just coincidentally similar but don't reveal a real pattern, set is_pattern to false. Only call it a pattern if it genuinely recurs.`, len(cluster), summaries.String())
+If these memories are just coincidentally similar but don't reveal a real pattern, set is_pattern to false. Only call it a pattern if it genuinely recurs.`, intro, summaries.String())
 
 	req := llm.CompletionRequest{
 		Messages: []llm.Message{
 			{Role: "system", Content: "You are a pattern detector. Identify recurring patterns in memories. Output JSON only."},
 			{Role: "user", Content: prompt},
 		},
-		MaxTokens:   200,
+		MaxTokens:   500,
 		Temperature: 0.3,
 		ResponseFormat: &llm.ResponseFormat{
 			Type: "json_schema",

@@ -245,6 +245,7 @@ type ConsolidationConfig struct {
 	MergeSimilarityThreshold      float64 `yaml:"merge_similarity_threshold"`
 	PatternMatchThreshold         float64 `yaml:"pattern_match_threshold"`
 	PatternMatchMinConceptOverlap int     `yaml:"pattern_match_min_concept_overlap"`
+	MaxClusterSampleForLLM        int     `yaml:"max_cluster_sample_for_llm"`
 	PatternStrengthIncrement      float64 `yaml:"pattern_strength_increment"`
 	PatternIncrementCap           float64 `yaml:"pattern_increment_cap"`
 	LargeClusterBonus             float64 `yaml:"large_cluster_bonus"`
@@ -737,6 +738,7 @@ func Default() *Config {
 			MergeSimilarityThreshold:      0.85,
 			PatternMatchThreshold:         0.70,
 			PatternMatchMinConceptOverlap: 2,
+			MaxClusterSampleForLLM:        10,
 			PatternStrengthIncrement:      0.03,
 			PatternIncrementCap:       0.15,
 			LargeClusterBonus:         1.3,
