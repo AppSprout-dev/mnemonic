@@ -53,6 +53,20 @@ mnm_completion_result mnm_complete(
 // Generate an embedding vector for the given text.
 mnm_embedding_result mnm_embed(mnm_model *m, const char *text);
 
+// SPLICE: spoke tensor hot-swap
+// Set a single gate_bias for a spoke layer. Returns 0 on success.
+int mnm_set_spoke_gate_bias(mnm_model *m, int layer, float value);
+
+// Set arbitrary tensor data by name (raw bytes, must match tensor size). Returns 0 on success.
+int mnm_set_spoke_tensor(mnm_model *m, const char *name, const void *data, int nbytes);
+
+// Set tensor from F32 data with automatic quantization to native type.
+// nelem = total number of float32 elements. Returns 0 on success.
+int mnm_set_spoke_tensor_f32(mnm_model *m, const char *name, const float *data, int nelem);
+
+// Get tensor data by name. Returns 0 on success.
+int mnm_get_spoke_tensor(mnm_model *m, const char *name, void *data, int nbytes);
+
 // Free helpers
 void mnm_free_string(char *s);
 void mnm_free_floats(float *f);

@@ -277,6 +277,33 @@ mnm_embedding_result mnm_embed(mnm_model *m, const char *text) {
     return result;
 }
 
+int mnm_set_spoke_gate_bias(mnm_model *m, int layer, float value) {
+    if (!m || !m->model) return -1;
+
+    char name[64];
+    snprintf(name, sizeof(name), "blk.%d.spoke.gate_bias", layer);
+
+    return llama_model_set_tensor_data(m->model, name, &value, 0, sizeof(float));
+}
+
+int mnm_set_spoke_tensor(mnm_model *m, const char *name, const void *data, int nbytes) {
+    if (!m || !m->model || !name || !data) return -1;
+
+    return llama_model_set_tensor_data(m->model, name, data, 0, (size_t)nbytes);
+}
+
+int mnm_set_spoke_tensor_f32(mnm_model *m, const char *name, const float *data, int nelem) {
+    if (!m || !m->model || !name || !data) return -1;
+
+    return llama_model_set_tensor_data_f32(m->model, name, data, (int64_t)nelem);
+}
+
+int mnm_get_spoke_tensor(mnm_model *m, const char *name, void *data, int nbytes) {
+    if (!m || !m->model || !name || !data) return -1;
+
+    return llama_model_get_tensor_data(m->model, name, data, 0, (size_t)nbytes);
+}
+
 void mnm_free_string(char *s) { free(s); }
 void mnm_free_floats(float *f) { free(f); }
 

@@ -262,30 +262,26 @@ func formatPromptChatML(messages []Message) string {
 	return b.String()
 }
 
-// formatPromptGemma formats messages using Gemma's chat template.
-// Maps "system" role to user turn (Gemma doesn't have a system role — system
-// instructions go in the first user turn).
+// formatPromptGemma formats messages using Gemma 4's chat template.
+// Gemma 4 uses <|turn> / <turn|> tokens (not <start_of_turn> / <end_of_turn>).
+// Maps "system" role to a system turn (Gemma 4 supports system role natively).
 func formatPromptGemma(messages []Message) string {
 	var b strings.Builder
 	for _, msg := range messages {
-		role := msg.Role
-		if role == "system" {
-			role = "user"
-		}
-		b.WriteString("<start_of_turn>")
-		b.WriteString(role)
+		b.WriteString("<|turn>")
+		b.WriteString(msg.Role)
 		b.WriteByte('\n')
 		b.WriteString(msg.Content)
-		b.WriteString("<end_of_turn>\n")
+		b.WriteString("<turn|>\n")
 	}
-	b.WriteString("<start_of_turn>model\n")
+	b.WriteString("<|turn>model\n")
 	return b.String()
 }
 
 // stopSequenceForTemplate returns the EOS token for the given chat template.
 func stopSequenceForTemplate(template string) string {
 	if template == "gemma" {
-		return "<end_of_turn>"
+		return "<turn|>"
 	}
 	return "<|im_end|>"
 }
@@ -696,6 +692,18 @@ func (p *EmbeddedProvider) Close() error {
 
 	if len(errs) > 0 {
 		return fmt.Errorf("closing embedded provider: %v", errs)
+	}
+	return nil
+}
+
+// SpokeEditor returns the chat backend as a SpokeEditor if it supports
+// spoke tensor editing (SPLICE). Returns nil if not supported.
+func (p *EmbeddedProvider) SpokeEditor() SpokeEditor {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	if se, ok := p.chatBackend.(SpokeEditor); ok {
+		return se
 	}
 	return nil
 }

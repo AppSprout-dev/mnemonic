@@ -13,6 +13,7 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"sync"
 	"unsafe"
 
@@ -148,4 +149,86 @@ func (b *Backend) Close() error {
 		b.model = nil
 	}
 	return nil
+}
+
+// --- SPLICE: Spoke tensor hot-swap ---
+
+// SetSpokeGateBias sets the gate bias for a single spoke layer.
+func (b *Backend) SetSpokeGateBias(layer int, value float32) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.model == nil {
+		return fmt.Errorf("model not loaded")
+	}
+
+	rc := C.mnm_set_spoke_gate_bias(b.model, C.int(layer), C.float(value))
+	if rc != 0 {
+		return fmt.Errorf("set spoke gate bias failed (layer=%d, rc=%d)", layer, rc)
+	}
+	return nil
+}
+
+// SetSpokeTensor sets arbitrary tensor data by name (raw bytes, must match tensor size).
+func (b *Backend) SetSpokeTensor(name string, data []byte) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.model == nil {
+		return fmt.Errorf("model not loaded")
+	}
+
+	cname := C.CString(name)
+	defer C.free(unsafe.Pointer(cname))
+
+	rc := C.mnm_set_spoke_tensor(b.model, cname, unsafe.Pointer(&data[0]), C.int(len(data)))
+	if rc != 0 {
+		return fmt.Errorf("set spoke tensor failed (name=%s, rc=%d)", name, rc)
+	}
+	return nil
+}
+
+// SetSpokeTensorF32 sets tensor data from F32 floats with automatic quantization.
+// The data is quantized to the tensor's native type (F16, RQ4, etc.) before writing.
+// Pins the goroutine to the current OS thread for ROCm/HIP context affinity.
+func (b *Backend) SetSpokeTensorF32(name string, data []float32) error {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.model == nil {
+		return fmt.Errorf("model not loaded")
+	}
+
+	cname := C.CString(name)
+	defer C.free(unsafe.Pointer(cname))
+
+	rc := C.mnm_set_spoke_tensor_f32(b.model, cname, (*C.float)(unsafe.Pointer(&data[0])), C.int(len(data)))
+	if rc != 0 {
+		return fmt.Errorf("set spoke tensor f32 failed (name=%s, rc=%d)", name, rc)
+	}
+	return nil
+}
+
+// GetSpokeGateBias reads the current gate bias for a spoke layer.
+func (b *Backend) GetSpokeGateBias(layer int) (float32, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.model == nil {
+		return 0, fmt.Errorf("model not loaded")
+	}
+
+	name := fmt.Sprintf("blk.%d.spoke.gate_bias", layer)
+	cname := C.CString(name)
+	defer C.free(unsafe.Pointer(cname))
+
+	var value float32
+	rc := C.mnm_get_spoke_tensor(b.model, cname, unsafe.Pointer(&value), C.int(4))
+	if rc != 0 {
+		return 0, fmt.Errorf("get spoke gate bias failed (layer=%d, rc=%d)", layer, int(rc))
+	}
+	return value, nil
 }

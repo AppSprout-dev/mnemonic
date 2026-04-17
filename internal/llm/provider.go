@@ -131,6 +131,18 @@ type ModelManager interface {
 
 	// ProviderMode returns the current mode ("embedded" or "api").
 	ProviderMode() string
+
+	// SpokeEditor returns the spoke editor if available (SPLICE), or nil.
+	SpokeEditor() SpokeEditor
+}
+
+// SpokeEditor is the interface for SPLICE spoke tensor editing.
+// Implemented by the llamacpp Backend when spokes are present.
+type SpokeEditor interface {
+	SetSpokeGateBias(layer int, value float32) error
+	GetSpokeGateBias(layer int) (float32, error)
+	SetSpokeTensor(name string, data []byte) error
+	SetSpokeTensorF32(name string, data []float32) error
 }
 
 // ErrProviderUnavailable is returned when the LLM backend is not reachable.

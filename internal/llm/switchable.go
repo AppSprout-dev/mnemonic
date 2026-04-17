@@ -148,3 +148,8 @@ func (s *SwitchableProvider) ProviderMode() string {
 	}
 	return "embedded"
 }
+
+// SpokeEditor delegates to the embedded provider's spoke editor.
+func (s *SwitchableProvider) SpokeEditor() SpokeEditor {
+	return s.embedded.SpokeEditor()
+}
