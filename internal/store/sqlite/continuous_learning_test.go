@@ -191,6 +191,58 @@ func TestCurriculumRunLifecycle(t *testing.T) {
 	}
 }
 
+func TestGetLastCurriculumRunTime_LegacyMonotonicFormat(t *testing.T) {
+	s := createTestStore(t)
+	defer func() { _ = s.Close() }()
+	ctx := context.Background()
+
+	// Simulate a row written by the old buggy code path: a value that looks
+	// like time.Time.String() output, complete with the " m=+..." monotonic
+	// clock suffix that is not parseable by time.Parse.
+	legacy := "2026-04-14 00:22:17.933215768 -0400 EDT m=+91.373505619"
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO curriculum_runs (id, started_at, status) VALUES (?, ?, ?)`,
+		"legacy-run", legacy, "completed",
+	)
+	if err != nil {
+		t.Fatalf("inserting legacy row: %v", err)
+	}
+
+	got, err := s.GetLastCurriculumRunTime(ctx)
+	if err != nil {
+		t.Fatalf("GetLastCurriculumRunTime on legacy row: %v", err)
+	}
+	if got.IsZero() {
+		t.Fatalf("expected parsed time, got zero")
+	}
+	want := time.Date(2026, 4, 14, 0, 22, 17, 933215768, time.FixedZone("-0400", -4*3600))
+	if !got.Equal(want) {
+		t.Errorf("parsed time mismatch:\n  got  %v\n  want %v", got, want)
+	}
+}
+
+func TestFormatAndParseSQLTime_RoundTrip(t *testing.T) {
+	// Ensure new writes use RFC3339Nano and parseSQLTime reads them back
+	// faithfully with no monotonic-clock artifact.
+	orig := time.Now()
+	formatted := formatSQLTime(orig)
+	if formatted == "" {
+		t.Fatal("formatSQLTime returned empty for non-zero time")
+	}
+	parsed, err := parseSQLTime(formatted)
+	if err != nil {
+		t.Fatalf("parseSQLTime(%q): %v", formatted, err)
+	}
+	if !parsed.Equal(orig) {
+		t.Errorf("round-trip mismatch:\n  got  %v\n  want %v", parsed, orig)
+	}
+	// Zero time should serialize to "" and parse back as zero via the
+	// empty-string branch in GetLastCurriculumRunTime.
+	if s := formatSQLTime(time.Time{}); s != "" {
+		t.Errorf("expected empty string for zero time, got %q", s)
+	}
+}
+
 func TestListNeedsImprovement_RespectsLimit(t *testing.T) {
 	s := createTestStore(t)
 	defer func() { _ = s.Close() }()

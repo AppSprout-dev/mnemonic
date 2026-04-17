@@ -4,11 +4,60 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/appsprout-dev/mnemonic/internal/store"
 	"github.com/google/uuid"
 )
+
+// formatSQLTime serializes a time.Time as an RFC3339Nano UTC string, stripping
+// any monotonic-clock component. Zero times return an empty string. Used when
+// binding DATETIME columns so stored values round-trip cleanly through
+// time.Parse — passing a raw time.Time risks the driver falling back to
+// time.Time.String(), which includes a " m=+..." monotonic suffix that is not
+// parseable.
+func formatSQLTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339Nano)
+}
+
+// formatSQLTimePtr is formatSQLTime for nullable columns. Nil or zero returns
+// nil so SQLite stores NULL.
+func formatSQLTimePtr(t *time.Time) any {
+	if t == nil || t.IsZero() {
+		return nil
+	}
+	return t.UTC().Format(time.RFC3339Nano)
+}
+
+// parseSQLTime parses a time string stored by SQLite. Handles RFC3339 variants,
+// the SQLite default layout, and legacy rows written via time.Time.String()
+// whose trailing " m=+..." monotonic suffix is not parseable by time.Parse.
+func parseSQLTime(raw string) (time.Time, error) {
+	if i := strings.Index(raw, " m=+"); i >= 0 {
+		raw = raw[:i]
+	}
+	if i := strings.Index(raw, " m=-"); i >= 0 {
+		raw = raw[:i]
+	}
+	formats := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05.999999999 -0700 MST",
+		"2006-01-02 15:04:05 -0700 MST",
+		"2006-01-02 15:04:05-07:00",
+		"2006-01-02T15:04:05Z",
+	}
+	for _, f := range formats {
+		if t, err := time.Parse(f, raw); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("no matching format for %q", raw)
+}
 
 func (s *SQLiteStore) WriteVerificationResult(ctx context.Context, memoryID string, epr float64, fr float64, flags []string) error {
 	// Store SQL NULL for empty/nil flags, JSON array for non-empty
@@ -276,9 +325,9 @@ func (s *SQLiteStore) WriteCurriculumRun(ctx context.Context, run store.Curricul
 		`INSERT INTO curriculum_runs (id, started_at, completed_at, corrections_attempted, corrections_passed,
 		     corrections_failed, entries_reclassified, training_batch_path, status, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		run.ID, run.StartedAt, run.CompletedAt,
+		run.ID, formatSQLTime(run.StartedAt), formatSQLTimePtr(run.CompletedAt),
 		run.CorrectionsAttempted, run.CorrectionsPassed, run.CorrectionsFailed,
-		run.EntriesReclassified, run.TrainingBatchPath, run.Status, time.Now(),
+		run.EntriesReclassified, run.TrainingBatchPath, run.Status, formatSQLTime(time.Now()),
 	)
 	if err != nil {
 		return fmt.Errorf("writing curriculum run %s: %w", run.ID, err)
@@ -292,7 +341,7 @@ func (s *SQLiteStore) UpdateCurriculumRun(ctx context.Context, run store.Curricu
 		 SET completed_at = ?, corrections_attempted = ?, corrections_passed = ?,
 		     corrections_failed = ?, entries_reclassified = ?, training_batch_path = ?, status = ?
 		 WHERE id = ?`,
-		run.CompletedAt, run.CorrectionsAttempted, run.CorrectionsPassed,
+		formatSQLTimePtr(run.CompletedAt), run.CorrectionsAttempted, run.CorrectionsPassed,
 		run.CorrectionsFailed, run.EntriesReclassified, run.TrainingBatchPath, run.Status, run.ID,
 	)
 	if err != nil {
@@ -312,24 +361,9 @@ func (s *SQLiteStore) GetLastCurriculumRunTime(ctx context.Context) (time.Time, 
 	if raw == nil || *raw == "" {
 		return time.Time{}, nil
 	}
-	// Try multiple time formats — SQLite + Go's time.Time.String() output
-	formats := []string{
-		time.RFC3339Nano,
-		time.RFC3339,
-		"2006-01-02 15:04:05-07:00",
-		"2006-01-02T15:04:05Z",
-		"2006-01-02 15:04:05 -0700 MST",
-	}
-	var t time.Time
-	var parseErr error
-	for _, f := range formats {
-		t, parseErr = time.Parse(f, *raw)
-		if parseErr == nil {
-			break
-		}
-	}
-	if parseErr != nil {
-		return time.Time{}, fmt.Errorf("parsing curriculum run time %q: %w", *raw, parseErr)
+	t, err := parseSQLTime(*raw)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parsing curriculum run time %q: %w", *raw, err)
 	}
 	return t, nil
 }
