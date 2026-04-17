@@ -242,15 +242,16 @@ type ConsolidationConfig struct {
 	AccessResistanceScale float64 `yaml:"access_resistance_scale"`
 
 	// Pattern strength tunables
-	MergeSimilarityThreshold float64 `yaml:"merge_similarity_threshold"`
-	PatternMatchThreshold    float64 `yaml:"pattern_match_threshold"`
-	PatternStrengthIncrement float64 `yaml:"pattern_strength_increment"`
-	PatternIncrementCap      float64 `yaml:"pattern_increment_cap"`
-	LargeClusterBonus        float64 `yaml:"large_cluster_bonus"`
-	LargeClusterMinSize      int     `yaml:"large_cluster_min_size"`
-	PatternStrengthCeiling   float64 `yaml:"pattern_strength_ceiling"`
-	StrongEvidenceCeiling    float64 `yaml:"strong_evidence_ceiling"`
-	StrongEvidenceMinCount   int     `yaml:"strong_evidence_min_count"`
+	MergeSimilarityThreshold      float64 `yaml:"merge_similarity_threshold"`
+	PatternMatchThreshold         float64 `yaml:"pattern_match_threshold"`
+	PatternMatchMinConceptOverlap int     `yaml:"pattern_match_min_concept_overlap"`
+	PatternStrengthIncrement      float64 `yaml:"pattern_strength_increment"`
+	PatternIncrementCap           float64 `yaml:"pattern_increment_cap"`
+	LargeClusterBonus             float64 `yaml:"large_cluster_bonus"`
+	LargeClusterMinSize           int     `yaml:"large_cluster_min_size"`
+	PatternStrengthCeiling        float64 `yaml:"pattern_strength_ceiling"`
+	StrongEvidenceCeiling         float64 `yaml:"strong_evidence_ceiling"`
+	StrongEvidenceMinCount        int     `yaml:"strong_evidence_min_count"`
 
 	// Pattern decay tunables
 	PatternBaselineDecay float64 `yaml:"pattern_baseline_decay"`
@@ -733,9 +734,10 @@ func Default() *Config {
 			RecencyProtection168h:     0.9,
 			AccessResistanceCap:       0.3,
 			AccessResistanceScale:     0.02,
-			MergeSimilarityThreshold:  0.85,
-			PatternMatchThreshold:     0.70,
-			PatternStrengthIncrement:  0.03,
+			MergeSimilarityThreshold:      0.85,
+			PatternMatchThreshold:         0.70,
+			PatternMatchMinConceptOverlap: 2,
+			PatternStrengthIncrement:      0.03,
 			PatternIncrementCap:       0.15,
 			LargeClusterBonus:         1.3,
 			LargeClusterMinSize:       5,
