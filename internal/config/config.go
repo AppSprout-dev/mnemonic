@@ -382,6 +382,7 @@ type AbstractionConfig struct {
 	ConfidenceSignificantDecay float32       `yaml:"confidence_significant_decay"` // grounding multiplier for significant decay (default: 0.7)
 	ConfidenceSevereDecay      float32       `yaml:"confidence_severe_decay"`      // grounding multiplier for severe decay (default: 0.5)
 	GroundingFloor             float32       `yaml:"grounding_floor"`              // confidence floor for young abstractions (default: 0.5)
+	DedupMinConceptOverlap     int           `yaml:"dedup_min_concept_overlap"`    // min shared concepts for abstraction dedup match (default: 2)
 }
 
 // OrchestratorConfig configures the autonomous orchestrator.
@@ -852,6 +853,7 @@ func Default() *Config {
 			ConfidenceSignificantDecay: 0.7,
 			ConfidenceSevereDecay:      0.5,
 			GroundingFloor:             0.5,
+			DedupMinConceptOverlap:     2,
 		},
 		Orchestrator: OrchestratorConfig{
 			Enabled:                 true,
