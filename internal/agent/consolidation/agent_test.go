@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"math"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -1338,6 +1339,110 @@ func TestFindMatchingPattern_ConceptGate(t *testing.T) {
 	}
 	if sim < 0.9 {
 		t.Errorf("expected high cosine similarity on the matched pattern, got %v", sim)
+	}
+}
+
+// TestIdentifyPattern_LargeClusterSampled verifies that when a cluster
+// exceeds MaxClusterSampleForLLM, only the top-salience sample is shown to
+// the LLM (preventing JSON truncation) while MaxTokens provides enough
+// budget for a complete response.
+func TestIdentifyPattern_LargeClusterSampled(t *testing.T) {
+	ms := newMockStore()
+	mlp := newMockLLMProvider()
+	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+
+	cfg := DefaultConfig()
+	cfg.MaxClusterSampleForLLM = 5
+
+	mlp.completeFn = func(ctx context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
+		return llm.CompletionResponse{Content: `{"is_pattern":true,"title":"t","description":"d","pattern_type":"workflow","concepts":["a"]}`}, nil
+	}
+
+	agent := NewConsolidationAgent(ms, mlp, cfg, log)
+
+	// 20 memories, salience running 0.01..1.00 so the top 5 are easy to verify.
+	cluster := make([]store.Memory, 20)
+	for i := 0; i < 20; i++ {
+		cluster[i] = store.Memory{
+			ID:        fmt.Sprintf("m%02d", i),
+			Summary:   fmt.Sprintf("memory %d", i),
+			Salience:  float32(i+1) * 0.05, // m19 = 1.00, m00 = 0.05
+			Concepts:  []string{"c1"},
+			Embedding: []float32{1, 0, 0, 0},
+		}
+	}
+
+	_, err := agent.identifyPattern(context.Background(), cluster, "test")
+	if err != nil {
+		t.Fatalf("identifyPattern: %v", err)
+	}
+
+	if len(mlp.completions) != 1 {
+		t.Fatalf("expected 1 LLM completion call, got %d", len(mlp.completions))
+	}
+
+	req := mlp.completions[0]
+	if req.MaxTokens < 400 {
+		t.Errorf("expected MaxTokens >= 400 (enough for full pattern response), got %d", req.MaxTokens)
+	}
+
+	prompt := req.Messages[1].Content
+	// Only top-5-salience memories (m15..m19) should appear in the prompt.
+	// m00..m14 must NOT appear. Check both directions to catch off-by-one errors.
+	for i := 15; i < 20; i++ {
+		want := fmt.Sprintf("memory %d", i)
+		if !strings.Contains(prompt, want) {
+			t.Errorf("expected prompt to contain %q (top-salience memory), but it did not", want)
+		}
+	}
+	for i := 0; i < 15; i++ {
+		unwant := fmt.Sprintf("memory %d (", i)
+		if strings.Contains(prompt, unwant) {
+			t.Errorf("did NOT expect prompt to contain %q (below sample cap), but it did", unwant)
+		}
+	}
+	// The prompt should mention the full cluster size alongside the sample size.
+	if !strings.Contains(prompt, "cluster of 20") {
+		t.Errorf("expected prompt to disclose the full cluster size (20), got:\n%s", prompt)
+	}
+}
+
+// TestIdentifyPattern_SmallClusterUnsampled verifies that clusters at or below
+// the sample cap are passed to the LLM in full, with the original prompt
+// framing (no sampling disclosure).
+func TestIdentifyPattern_SmallClusterUnsampled(t *testing.T) {
+	ms := newMockStore()
+	mlp := newMockLLMProvider()
+	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+
+	cfg := DefaultConfig()
+	cfg.MaxClusterSampleForLLM = 10
+
+	mlp.completeFn = func(ctx context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
+		return llm.CompletionResponse{Content: `{"is_pattern":true,"title":"t","description":"d","pattern_type":"workflow","concepts":["a"]}`}, nil
+	}
+
+	agent := NewConsolidationAgent(ms, mlp, cfg, log)
+
+	cluster := []store.Memory{
+		{ID: "m1", Summary: "alpha", Salience: 0.9, Concepts: []string{"c1"}, Embedding: []float32{1, 0}},
+		{ID: "m2", Summary: "beta", Salience: 0.8, Concepts: []string{"c1"}, Embedding: []float32{1, 0}},
+		{ID: "m3", Summary: "gamma", Salience: 0.7, Concepts: []string{"c1"}, Embedding: []float32{1, 0}},
+	}
+
+	_, err := agent.identifyPattern(context.Background(), cluster, "test")
+	if err != nil {
+		t.Fatalf("identifyPattern: %v", err)
+	}
+
+	prompt := mlp.completions[0].Messages[1].Content
+	for _, name := range []string{"alpha", "beta", "gamma"} {
+		if !strings.Contains(prompt, name) {
+			t.Errorf("expected prompt to contain %q, it did not", name)
+		}
+	}
+	if strings.Contains(prompt, "sampled by salience") {
+		t.Error("did not expect sampling disclosure on a small cluster")
 	}
 }
 
