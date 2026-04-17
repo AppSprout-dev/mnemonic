@@ -11,11 +11,12 @@ import (
 
 // completeRequest is the JSON body for POST /api/v1/complete.
 type completeRequest struct {
-	Prompt      string        `json:"prompt,omitempty"`
-	Messages    []llm.Message `json:"messages,omitempty"`
-	System      string        `json:"system,omitempty"`
-	MaxTokens   int           `json:"max_tokens,omitempty"`
-	Temperature float32       `json:"temperature,omitempty"`
+	Prompt         string              `json:"prompt,omitempty"`
+	Messages       []llm.Message       `json:"messages,omitempty"`
+	System         string              `json:"system,omitempty"`
+	MaxTokens      int                 `json:"max_tokens,omitempty"`
+	Temperature    float32             `json:"temperature,omitempty"`
+	ResponseFormat *llm.ResponseFormat `json:"response_format,omitempty"`
 }
 
 // HandleComplete handles POST /api/v1/complete
@@ -59,9 +60,10 @@ func HandleComplete(provider llm.Provider, log *slog.Logger) http.HandlerFunc {
 
 		start := time.Now()
 		resp, err := provider.Complete(r.Context(), llm.CompletionRequest{
-			Messages:    messages,
-			MaxTokens:   maxTokens,
-			Temperature: temperature,
+			Messages:       messages,
+			MaxTokens:      maxTokens,
+			Temperature:    temperature,
+			ResponseFormat: req.ResponseFormat,
 		})
 		if err != nil {
 			log.Error("complete failed", "error", err)
