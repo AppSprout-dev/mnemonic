@@ -549,7 +549,7 @@ func serveCommand(configPath string) {
 			GroundingFloor:             cfg.Abstraction.GroundingFloor,
 			DedupMinConceptOverlap:     cfg.Abstraction.DedupMinConceptOverlap,
 			ArchiveDecayConfidence:     cfg.Abstraction.ArchiveDecayConfidence,
-			ArchiveDecayMinAge:         cfg.Abstraction.ArchiveDecayMinAge,
+			ArchiveDemotionStreak:      cfg.Abstraction.ArchiveDemotionStreak,
 		}, log)
 
 		if err := abstractionAgent.Start(rootCtx, bus); err != nil {

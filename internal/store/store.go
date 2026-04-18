@@ -317,8 +317,13 @@ type Abstraction struct {
 	Embedding        []float32 `json:"embedding,omitempty"`
 	AccessCount      int       `json:"access_count"`
 	State            string    `json:"state"` // "active", "fading", "archived"
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	// DemotionStreak counts consecutive grounding-verification cycles in which
+	// the abstraction's grounding ratio fell below the "healthy" threshold.
+	// Reset to 0 on any healthy cycle. Used to trigger archival of chronically
+	// decayed abstractions that would otherwise cycle through demotion forever.
+	DemotionStreak int       `json:"demotion_streak"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 // SessionSummary aggregates metadata about an MCP session.

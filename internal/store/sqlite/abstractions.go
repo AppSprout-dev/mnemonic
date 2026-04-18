@@ -12,7 +12,7 @@ import (
 )
 
 // abstractionColumns is the standard column list for abstraction queries.
-const abstractionColumns = `id, level, title, description, parent_id, source_pattern_ids, source_memory_ids, confidence, concepts, embedding, access_count, state, created_at, updated_at`
+const abstractionColumns = `id, level, title, description, parent_id, source_pattern_ids, source_memory_ids, confidence, concepts, embedding, access_count, state, demotion_streak, created_at, updated_at`
 
 // WriteAbstraction inserts a new abstraction.
 func (s *SQLiteStore) WriteAbstraction(ctx context.Context, a store.Abstraction) error {
@@ -26,7 +26,7 @@ func (s *SQLiteStore) WriteAbstraction(ctx context.Context, a store.Abstraction)
 
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO abstractions (`+abstractionColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ID,
 		a.Level,
 		a.Title,
@@ -39,6 +39,7 @@ func (s *SQLiteStore) WriteAbstraction(ctx context.Context, a store.Abstraction)
 		embeddingBlob,
 		a.AccessCount,
 		a.State,
+		a.DemotionStreak,
 		a.CreatedAt.Format(time.RFC3339),
 		a.UpdatedAt.Format(time.RFC3339),
 	)
@@ -69,7 +70,8 @@ func (s *SQLiteStore) UpdateAbstraction(ctx context.Context, a store.Abstraction
 		`UPDATE abstractions
 		SET level = ?, title = ?, description = ?, parent_id = ?,
 		    source_pattern_ids = ?, source_memory_ids = ?, confidence = ?,
-		    concepts = ?, embedding = ?, access_count = ?, state = ?, updated_at = ?
+		    concepts = ?, embedding = ?, access_count = ?, state = ?,
+		    demotion_streak = ?, updated_at = ?
 		WHERE id = ?`,
 		a.Level,
 		a.Title,
@@ -82,6 +84,7 @@ func (s *SQLiteStore) UpdateAbstraction(ctx context.Context, a store.Abstraction
 		embeddingBlob,
 		a.AccessCount,
 		a.State,
+		a.DemotionStreak,
 		a.UpdatedAt.Format(time.RFC3339),
 		a.ID,
 	)
@@ -199,6 +202,7 @@ func scanAbstractionFrom(s scanner) (store.Abstraction, error) {
 		&embeddingBlob,
 		&a.AccessCount,
 		&a.State,
+		&a.DemotionStreak,
 		&a.CreatedAt,
 		&a.UpdatedAt,
 	)
