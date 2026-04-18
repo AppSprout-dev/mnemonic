@@ -150,7 +150,7 @@ func main() {
 	case "check-update":
 		checkUpdateCommand()
 	case "update":
-		updateCommand()
+		updateCommand(*configPath)
 	case "version":
 		fmt.Printf("mnemonic v%s\n", Version)
 	default:

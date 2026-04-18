@@ -1091,7 +1091,7 @@
     <div id="app">
         <!-- Nav -->
         <div class="top" id="forumTop">
-                <div class="top-brand"><img src="/logo.png" alt="" style="height:20px;vertical-align:middle;margin-right:6px">mnemonic <a id="navVersion" target="_blank" rel="noopener" style="font-size:0.7rem;font-weight:normal;color:var(--text-dim);text-decoration:none"></a></div>
+                <div class="top-brand"><img src="/logo.png" alt="" style="height:20px;vertical-align:middle;margin-right:6px">mnemonic <a id="navVersion" target="_blank" rel="noopener" style="font-size:0.7rem;font-weight:normal;color:var(--text-dim);text-decoration:none"></a><span id="navUpdateBadge" class="update-badge" style="display:none" onclick="triggerUpdate()"></span><a id="navChangelogLink" class="update-changelog" style="display:none" target="_blank" rel="noopener">changelog</a></div>
                 <div class="top-right">
                     <select class="nav-theme-select" id="themeSelect" onchange="setTheme(this.value)">
                         <option value="midnight">Midnight</option>
