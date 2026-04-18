@@ -383,6 +383,9 @@ type AbstractionConfig struct {
 	ConfidenceSevereDecay      float32       `yaml:"confidence_severe_decay"`      // grounding multiplier for severe decay (default: 0.5)
 	GroundingFloor             float32       `yaml:"grounding_floor"`              // confidence floor for young abstractions (default: 0.5)
 	DedupMinConceptOverlap     int           `yaml:"dedup_min_concept_overlap"`    // min shared concepts for abstraction dedup match (default: 2)
+	ArchiveDecayConfidence     float32       `yaml:"archive_decay_confidence"`     // confidence threshold below which aged, low-grounded abstractions are archived (default: 0.2)
+	ArchiveDecayMinAgeRaw      string        `yaml:"archive_decay_min_age"`        // minimum age before an abstraction is eligible for decay-driven archival (default: "336h" / 14d)
+	ArchiveDecayMinAge         time.Duration `yaml:"-"`
 }
 
 // OrchestratorConfig configures the autonomous orchestrator.
@@ -854,6 +857,9 @@ func Default() *Config {
 			ConfidenceSevereDecay:      0.5,
 			GroundingFloor:             0.5,
 			DedupMinConceptOverlap:     2,
+			ArchiveDecayConfidence:     0.2,
+			ArchiveDecayMinAgeRaw:      "336h",
+			ArchiveDecayMinAge:         14 * 24 * time.Hour,
 		},
 		Orchestrator: OrchestratorConfig{
 			Enabled:                 true,
@@ -1003,6 +1009,7 @@ func (c *Config) process(configDir string) error {
 		{c.Metacognition.IntervalRaw, &c.Metacognition.Interval, "metacognition.interval"},
 		{c.Dreaming.IntervalRaw, &c.Dreaming.Interval, "dreaming.interval"},
 		{c.Abstraction.IntervalRaw, &c.Abstraction.Interval, "abstraction.interval"},
+		{c.Abstraction.ArchiveDecayMinAgeRaw, &c.Abstraction.ArchiveDecayMinAge, "abstraction.archive_decay_min_age"},
 		{c.Orchestrator.SelfTestIntervalRaw, &c.Orchestrator.SelfTestInterval, "orchestrator.self_test_interval"},
 		{c.Orchestrator.MonitorIntervalRaw, &c.Orchestrator.MonitorInterval, "orchestrator.monitor_interval"},
 		{c.Orchestrator.HealthReportIntervalRaw, &c.Orchestrator.HealthReportInterval, "orchestrator.health_report_interval"},

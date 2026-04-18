@@ -433,6 +433,19 @@ abstraction:
   # Maximum LLM calls per abstraction cycle
   max_llm_calls: 10
 
+  # Archive escape hatch for chronically-demoted abstractions.
+  # Abstractions with low grounding get their confidence multiplied down each
+  # cycle (see confidence_*_decay above). Without an exit path, that leaves
+  # them cycling through demotion forever. These two settings archive any
+  # abstraction that is:
+  #   - state = "active"
+  #   - older than archive_decay_min_age
+  #   - confidence below archive_decay_confidence
+  #   - grounding ratio below 0.3 (same threshold as "significant decay")
+  # Both settings default to the values below if unset.
+  archive_decay_confidence: 0.2
+  archive_decay_min_age: "336h"  # 14 days
+
 # Orchestrator Configuration (autonomous scheduler and health monitoring)
 orchestrator:
   # Enable orchestrator
