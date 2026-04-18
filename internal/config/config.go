@@ -240,6 +240,7 @@ type ConsolidationConfig struct {
 	RecencyProtection168h float64 `yaml:"recency_protection_168h"`
 	AccessResistanceCap   float64 `yaml:"access_resistance_cap"`
 	AccessResistanceScale float64 `yaml:"access_resistance_scale"`
+	SalienceCeiling       float64 `yaml:"salience_ceiling"` // upper bound applied in decaySalience (default 1.0)
 
 	// Pattern strength tunables
 	MergeSimilarityThreshold      float64 `yaml:"merge_similarity_threshold"`
@@ -738,6 +739,7 @@ func Default() *Config {
 			RecencyProtection168h:         0.9,
 			AccessResistanceCap:           0.3,
 			AccessResistanceScale:         0.02,
+			SalienceCeiling:               1.0,
 			MergeSimilarityThreshold:      0.85,
 			PatternMatchThreshold:         0.70,
 			PatternMatchMinConceptOverlap: 2,

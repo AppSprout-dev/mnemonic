@@ -746,6 +746,136 @@ func TestDecaySalience(t *testing.T) {
 	})
 }
 
+// TestSalienceCeiling_ClampsBloatedMemory verifies the ceiling introduced in
+// RC#3. Before the fix, attribute-boost multipliers (satisfying+success = 1.05,
+// frustrating = 1.03) applied after decay could flip the net per-cycle
+// multiplier above 1.0 for recently-accessed popular memories, producing
+// unbounded growth. Audit on 2026-04-18 found salience at 21,539 on a
+// production memory. The ceiling guarantees salience stays <= SalienceCeiling
+// (default 1.0) regardless of attribute effects.
+func TestSalienceCeiling_ClampsBloatedMemory(t *testing.T) {
+	ms := newMockStore()
+	mlp := newMockLLMProvider()
+	cfg := testConfig()
+	cfg.DecayRate = 0.95
+	cfg.SalienceCeiling = 1.0
+	agent := NewConsolidationAgent(ms, mlp, cfg, testLogger())
+
+	bloated := store.Memory{
+		ID:           "bloated",
+		Salience:     21539.0, // reproduces the production anomaly
+		AccessCount:  200,
+		LastAccessed: time.Now().Add(-1 * time.Hour),
+		CreatedAt:    time.Now().Add(-30 * 24 * time.Hour),
+		State:        "active",
+	}
+	ms.listMemoriesFn = func(_ context.Context, state string, _, _ int) ([]store.Memory, error) {
+		if state == "active" {
+			return []store.Memory{bloated}, nil
+		}
+		return nil, nil
+	}
+	// Satisfying+success attributes — the exact combination that drove the
+	// unbounded growth. Ceiling must dominate the +5% post-multiplier.
+	ms.getMemoryAttributesFn = func(_ context.Context, _ string) (store.MemoryAttributes, error) {
+		return store.MemoryAttributes{EmotionalTone: "satisfying", Outcome: "success"}, nil
+	}
+
+	if _, _, err := agent.decaySalience(context.Background()); err != nil {
+		t.Fatalf("decaySalience: %v", err)
+	}
+
+	if len(ms.batchUpdateSalienceCalls) != 1 {
+		t.Fatalf("expected 1 BatchUpdateSalience call, got %d", len(ms.batchUpdateSalienceCalls))
+	}
+	got := ms.batchUpdateSalienceCalls[0]["bloated"]
+	if got > cfg.SalienceCeiling {
+		t.Errorf("salience must be clamped to ceiling %f, got %f", cfg.SalienceCeiling, got)
+	}
+	if got != cfg.SalienceCeiling {
+		t.Errorf("bloated memory should clamp exactly to ceiling %f, got %f", cfg.SalienceCeiling, got)
+	}
+}
+
+// TestSalienceCeiling_DisabledWhenZero verifies the ceiling is a no-op when
+// SalienceCeiling is <= 0, so callers can opt out explicitly.
+func TestSalienceCeiling_DisabledWhenZero(t *testing.T) {
+	ms := newMockStore()
+	mlp := newMockLLMProvider()
+	cfg := testConfig()
+	cfg.DecayRate = 0.95
+	cfg.SalienceCeiling = 0
+	agent := NewConsolidationAgent(ms, mlp, cfg, testLogger())
+
+	bloated := store.Memory{
+		ID:           "bloated",
+		Salience:     500.0,
+		AccessCount:  0,
+		LastAccessed: time.Now().Add(-200 * time.Hour),
+		CreatedAt:    time.Now().Add(-200 * time.Hour),
+		State:        "active",
+	}
+	ms.listMemoriesFn = func(_ context.Context, state string, _, _ int) ([]store.Memory, error) {
+		if state == "active" {
+			return []store.Memory{bloated}, nil
+		}
+		return nil, nil
+	}
+	ms.getMemoryAttributesFn = func(_ context.Context, _ string) (store.MemoryAttributes, error) {
+		return store.MemoryAttributes{}, fmt.Errorf("not found")
+	}
+
+	if _, _, err := agent.decaySalience(context.Background()); err != nil {
+		t.Fatalf("decaySalience: %v", err)
+	}
+
+	got := ms.batchUpdateSalienceCalls[0]["bloated"]
+	// With ceiling disabled, should just apply 0.95 decay: 500 * 0.95 = 475.
+	expected := float32(500.0 * 0.95)
+	if !almostEqual(got, expected, 0.5) {
+		t.Errorf("ceiling-disabled path should apply raw decay, expected ~%f got %f", expected, got)
+	}
+}
+
+// TestSalienceCeiling_DoesNotBoostBelowCeiling verifies the ceiling only
+// clamps downward — it does not artificially lift low-salience memories.
+func TestSalienceCeiling_DoesNotBoostBelowCeiling(t *testing.T) {
+	ms := newMockStore()
+	mlp := newMockLLMProvider()
+	cfg := testConfig()
+	cfg.DecayRate = 0.95
+	cfg.SalienceCeiling = 1.0
+	agent := NewConsolidationAgent(ms, mlp, cfg, testLogger())
+
+	low := store.Memory{
+		ID:           "low",
+		Salience:     0.4,
+		AccessCount:  0,
+		LastAccessed: time.Now().Add(-200 * time.Hour),
+		CreatedAt:    time.Now().Add(-200 * time.Hour),
+		State:        "active",
+	}
+	ms.listMemoriesFn = func(_ context.Context, state string, _, _ int) ([]store.Memory, error) {
+		if state == "active" {
+			return []store.Memory{low}, nil
+		}
+		return nil, nil
+	}
+	ms.getMemoryAttributesFn = func(_ context.Context, _ string) (store.MemoryAttributes, error) {
+		return store.MemoryAttributes{}, fmt.Errorf("not found")
+	}
+
+	if _, _, err := agent.decaySalience(context.Background()); err != nil {
+		t.Fatalf("decaySalience: %v", err)
+	}
+
+	got := ms.batchUpdateSalienceCalls[0]["low"]
+	expected := float32(0.4 * 0.95)
+	if !almostEqual(got, expected, 0.01) {
+		t.Errorf("low-salience memory should decay normally, expected ~%f got %f", expected, got)
+	}
+}
+
 func TestTransitionStates(t *testing.T) {
 	t.Run("active memory below fade threshold transitions to fading", func(t *testing.T) {
 		ms := newMockStore()

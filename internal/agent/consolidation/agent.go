@@ -37,6 +37,15 @@ type ConsolidationConfig struct {
 	AccessResistanceCap   float64 // max resistance from access count (default 0.3)
 	AccessResistanceScale float64 // per-access resistance factor (default 0.02)
 
+	// SalienceCeiling is the upper bound for salience applied in decaySalience.
+	// The post-decay attribute boosts (satisfying+success, frustrating) combined
+	// with recency protection and access resistance can produce an effective
+	// per-cycle multiplier above 1.0 for popular memories, causing unbounded
+	// salience growth that strands memories above the fade threshold forever.
+	// Encoding already clamps new salience to [0, 1.0], so a 1.0 ceiling matches
+	// the rest of the system. Set <= 0 to disable clamping. Default: 1.0.
+	SalienceCeiling float32
+
 	// Pattern strength tunables
 	MergeSimilarityThreshold      float64 // cosine threshold for memory merge clustering (default 0.85)
 	PatternMatchThreshold         float64 // cosine threshold for cluster→pattern matching (default 0.70)
@@ -85,6 +94,7 @@ func DefaultConfig() ConsolidationConfig {
 		RecencyProtection168h:         0.9,
 		AccessResistanceCap:           0.3,
 		AccessResistanceScale:         0.02,
+		SalienceCeiling:               1.0,
 		MergeSimilarityThreshold:      0.85,
 		PatternMatchThreshold:         0.70,
 		PatternMatchMinConceptOverlap: 2,
@@ -459,6 +469,18 @@ func (ca *ConsolidationAgent) decaySalience(ctx context.Context) (decayed, proce
 		// Floor at 0.01 (don't let it hit exactly 0)
 		if newSalience < 0.01 {
 			newSalience = 0.01
+		}
+
+		// Ceiling symmetric to the 0.01 floor. The attribute-boost path above
+		// multiplies salience by up to 1.05 per cycle after decay, which over
+		// hundreds of cycles can flip the net multiplier above 1.0 for popular
+		// memories. Without a ceiling, salience grows unbounded — audit on
+		// 2026-04-18 found a memory at 21,539 and 71/117 active memories above
+		// 1.0, none reachable by the 0.3 fade threshold. Encoding already
+		// clamps new salience to <= 1.0, so this keeps the whole system inside
+		// [0.01, SalienceCeiling]. Set SalienceCeiling <= 0 to disable.
+		if ca.config.SalienceCeiling > 0 && newSalience > ca.config.SalienceCeiling {
+			newSalience = ca.config.SalienceCeiling
 		}
 
 		if newSalience != mem.Salience {

@@ -321,6 +321,12 @@ consolidation:
   # Threshold below which memories are archived (0.0-1.0)
   archive_threshold: 0.1
 
+  # Upper bound applied in salience decay. Encoding clamps new memories to
+  # [0, 1.0]; without a matching ceiling here, post-decay attribute boosts
+  # (satisfying+success, frustrating) compound above 1.0 and strand memories
+  # above the fade threshold forever. Set <= 0 to disable. Default: 1.0.
+  salience_ceiling: 1.0
+
   # Retention window before permanent deletion (e.g., "90d", "6w")
   retention_window: "90d"
 
