@@ -2,6 +2,7 @@ package dreaming
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"testing"
 	"time"
@@ -20,7 +21,7 @@ func TestNewDreamingAgent(t *testing.T) {
 		AssociationBoostFactor: 1.15,
 		NoisePruneThreshold:    0.15,
 	}
-	logger := slog.New(slog.NewTextHandler(nil, nil))
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	agent := NewDreamingAgent(mockStore, nil, config, logger)
 
@@ -203,7 +204,7 @@ func TestDreamingAgentName(t *testing.T) {
 	config := DreamingConfig{
 		Interval: 3 * time.Hour,
 	}
-	logger := slog.New(slog.NewTextHandler(nil, nil))
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	agent := NewDreamingAgent(mockStore, nil, config, logger)
 
@@ -218,7 +219,7 @@ func TestDreamingAgentName(t *testing.T) {
 // but zero shared concepts.
 func TestCrossProjectLinkRequiresConceptOverlap(t *testing.T) {
 	ms := &crossProjectMockStore{}
-	logger := slog.New(slog.NewTextHandler(nil, nil))
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	config := DreamingConfig{
 		Interval:               3 * time.Hour,
 		BatchSize:              20,
@@ -262,13 +263,17 @@ func TestCrossProjectLinkRequiresConceptOverlap(t *testing.T) {
 	if ms.associationsCreated != 0 {
 		t.Fatalf("expected 0 associations created, got %d", ms.associationsCreated)
 	}
+	// Observability: the concept-gate reject should have been counted.
+	if report.CrossProjectRejectedConcept != 1 {
+		t.Fatalf("expected 1 concept-gate rejection, got %d", report.CrossProjectRejectedConcept)
+	}
 }
 
 // TestCrossProjectLinkCreatesWithConceptOverlap verifies that crossProjectLink
 // creates an association when memories share at least 1 concept.
 func TestCrossProjectLinkCreatesWithConceptOverlap(t *testing.T) {
 	ms := &crossProjectMockStore{}
-	logger := slog.New(slog.NewTextHandler(nil, nil))
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	config := DreamingConfig{
 		Interval:               3 * time.Hour,
 		BatchSize:              20,
@@ -314,7 +319,7 @@ func TestCrossProjectLinkCreatesWithConceptOverlap(t *testing.T) {
 // does not boost a pattern when the memory shares no concepts with it.
 func TestLinkToPatternsRequiresConceptOverlap(t *testing.T) {
 	ms := &patternLinkMockStore{}
-	logger := slog.New(slog.NewTextHandler(nil, nil))
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	config := DreamingConfig{
 		Interval:               3 * time.Hour,
 		BatchSize:              20,
@@ -351,6 +356,56 @@ func TestLinkToPatternsRequiresConceptOverlap(t *testing.T) {
 	}
 	if ms.patternsUpdated != 0 {
 		t.Fatalf("expected 0 patterns updated, got %d", ms.patternsUpdated)
+	}
+	// Observability: the concept-gate reject should have been counted.
+	if report.PatternLinkRejectedConcept != 1 {
+		t.Fatalf("expected 1 pattern-link concept-gate rejection, got %d", report.PatternLinkRejectedConcept)
+	}
+}
+
+// TestCrossProjectLinkEmbeddingGateCounter verifies the embedding-gate reject
+// increments the observability counter without creating an association.
+func TestCrossProjectLinkEmbeddingGateCounter(t *testing.T) {
+	ms := &crossProjectMockStore{}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	config := DreamingConfig{
+		Interval:               3 * time.Hour,
+		BatchSize:              20,
+		SalienceThreshold:      0.3,
+		AssociationBoostFactor: 1.15,
+		NoisePruneThreshold:    0.15,
+	}
+	agent := NewDreamingAgent(ms, nil, config, logger)
+
+	memA := store.Memory{
+		ID:        "mem-a",
+		Project:   "project-alpha",
+		Concepts:  []string{"golang", "testing"},
+		Embedding: []float32{0.9, 0.1, 0.0},
+	}
+	memB := store.Memory{
+		ID:        "mem-b",
+		Project:   "project-beta",
+		Concepts:  []string{"golang", "testing"},
+		Embedding: []float32{0.3, 0.7, 0.1},
+	}
+
+	// Score below the 0.75 embedding threshold.
+	ms.embeddingResults = []store.RetrievalResult{{Memory: memB, Score: 0.5}}
+
+	report := &DreamReport{}
+	if err := agent.crossProjectLink(context.Background(), []store.Memory{memA}, report); err != nil {
+		t.Fatalf("crossProjectLink failed: %v", err)
+	}
+
+	if report.CrossProjectLinks != 0 {
+		t.Fatalf("expected 0 cross-project links, got %d", report.CrossProjectLinks)
+	}
+	if report.CrossProjectRejectedEmbedding != 1 {
+		t.Fatalf("expected 1 embedding-gate rejection, got %d", report.CrossProjectRejectedEmbedding)
+	}
+	if report.CrossProjectRejectedConcept != 0 {
+		t.Fatalf("expected 0 concept-gate rejections (gate not reached), got %d", report.CrossProjectRejectedConcept)
 	}
 }
 
