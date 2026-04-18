@@ -155,6 +155,18 @@ func (m *groundingMockStore) GetPattern(_ context.Context, _ string) (store.Patt
 	return store.Pattern{State: "archived"}, nil
 }
 
+// GetAbstraction exposes the mock's stored abstractions by ID so level-3 axioms
+// (whose SourcePatternIDs point at principles) can have their grounding computed
+// against the principles' live state.
+func (m *groundingMockStore) GetAbstraction(_ context.Context, id string) (store.Abstraction, error) {
+	for _, a := range m.abstractions {
+		if a.ID == id {
+			return a, nil
+		}
+	}
+	return store.Abstraction{}, store.ErrNotFound
+}
+
 func (m *groundingMockStore) UpdateAbstraction(_ context.Context, a store.Abstraction) error {
 	if m.updates == nil {
 		m.updates = map[string]store.Abstraction{}
@@ -300,8 +312,8 @@ func TestVerifyGrounding_YoungAbstractionNotArchived(t *testing.T) {
 		Level:           2,
 		State:           "active",
 		Confidence:      0.15,
-		DemotionStreak:  99,                                    // way past threshold
-		CreatedAt:       time.Now().Add(-2 * 24 * time.Hour),   // 2 days — isYoung
+		DemotionStreak:  99,                                  // way past threshold
+		CreatedAt:       time.Now().Add(-2 * 24 * time.Hour), // 2 days — isYoung
 		SourceMemoryIDs: []string{"mem-a", "mem-b", "mem-c"},
 	}
 
@@ -322,5 +334,100 @@ func TestVerifyGrounding_YoungAbstractionNotArchived(t *testing.T) {
 	}
 	if report.AbstractionsArchived != 0 {
 		t.Errorf("expected AbstractionsArchived=0, got %d", report.AbstractionsArchived)
+	}
+}
+
+// TestVerifyGrounding_AxiomResolvesSourcePrinciples verifies the fix for the
+// overnight bug where level-3 axioms always computed grounding_ratio=0. The
+// axiom's SourcePatternIDs field holds principle IDs (abs-*), not pattern IDs,
+// so routing them through GetPattern (which searches the patterns table) always
+// failed and the axiom was stuck in severe-decay forever. Level>=3 must route
+// through GetAbstraction instead.
+func TestVerifyGrounding_AxiomResolvesSourcePrinciples(t *testing.T) {
+	principleA := store.Abstraction{ID: "abs-A", Level: 2, State: "active"}
+	principleB := store.Abstraction{ID: "abs-B", Level: 2, State: "active"}
+	principleC := store.Abstraction{ID: "abs-C", Level: 2, State: "active"}
+	axiom := store.Abstraction{
+		ID:               "axm-live",
+		Level:            3,
+		State:            "active",
+		Confidence:       0.8,
+		DemotionStreak:   2,
+		CreatedAt:        time.Now().Add(-30 * 24 * time.Hour),
+		SourcePatternIDs: []string{"abs-A", "abs-B", "abs-C"},
+	}
+
+	ms := &groundingMockStore{abstractions: []store.Abstraction{principleA, principleB, principleC, axiom}}
+	agent := NewAbstractionAgent(ms, nil, standardStreakConfig(), silentLogger())
+
+	report := &CycleReport{}
+	if err := agent.verifyGrounding(context.Background(), report); err != nil {
+		t.Fatalf("verifyGrounding failed: %v", err)
+	}
+
+	got, ok := ms.updates[axiom.ID]
+	if !ok {
+		t.Fatalf("expected axiom update, got none")
+	}
+	if got.DemotionStreak != 0 {
+		t.Errorf("axiom with 3/3 active principles should reset streak, got DemotionStreak=%d", got.DemotionStreak)
+	}
+}
+
+// TestVerifyGrounding_AxiomDecaysWhenPrinciplesArchived verifies the axiom
+// fix in the inverse direction: when its source principles are archived, the
+// axiom actually decays instead of silently resetting every cycle.
+func TestVerifyGrounding_AxiomDecaysWhenPrinciplesArchived(t *testing.T) {
+	archivedA := store.Abstraction{ID: "abs-A", Level: 2, State: "archived"}
+	archivedB := store.Abstraction{ID: "abs-B", Level: 2, State: "archived"}
+	axiom := store.Abstraction{
+		ID:               "axm-dead",
+		Level:            3,
+		State:            "active",
+		Confidence:       0.3,
+		DemotionStreak:   0,
+		CreatedAt:        time.Now().Add(-30 * 24 * time.Hour),
+		SourcePatternIDs: []string{"abs-A", "abs-B"},
+	}
+
+	ms := &groundingMockStore{abstractions: []store.Abstraction{archivedA, archivedB, axiom}}
+	agent := NewAbstractionAgent(ms, nil, standardStreakConfig(), silentLogger())
+
+	report := &CycleReport{}
+	if err := agent.verifyGrounding(context.Background(), report); err != nil {
+		t.Fatalf("verifyGrounding failed: %v", err)
+	}
+
+	got, ok := ms.updates[axiom.ID]
+	if !ok {
+		t.Fatalf("expected axiom update, got none")
+	}
+	if got.DemotionStreak != 1 {
+		t.Errorf("axiom with 0/2 active principles should demote, got DemotionStreak=%d", got.DemotionStreak)
+	}
+}
+
+// TestFindSimilarAbstraction_StrongTitleMatchBypassesConceptGate verifies the
+// title+embedding short-circuit: when titleSim and embSim are both very high,
+// the concept gate is bypassed. LLM-extracted concepts drift run-to-run even
+// for the same principle, which was creating duplicate principles with
+// identical titles overnight.
+func TestFindSimilarAbstraction_StrongTitleMatchBypassesConceptGate(t *testing.T) {
+	existing := []store.Abstraction{{
+		ID:        "strong-title",
+		Title:     "Iterative LLM Architecture Development",
+		State:     "active",
+		Embedding: []float32{1, 0, 0, 0},
+		Concepts:  []string{"llm", "architecture"},
+	}}
+
+	match := findSimilarAbstraction(existing,
+		[]string{"retrieval", "orchestration"}, // zero concept overlap
+		[]float32{0.99, 0.01, 0, 0},            // embSim >= 0.9
+		"Iterative LLM Architecture Development",
+		0.85, 2, silentLogger())
+
+	if match == nil || match.ID != "strong-title" {
+		t.Errorf("expected strong title+embedding match to bypass concept gate, got %+v", match)
 	}
 }

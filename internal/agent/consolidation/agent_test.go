@@ -1411,6 +1411,41 @@ func TestFindSecondStageDuplicate_ConceptGateRejects(t *testing.T) {
 	}
 }
 
+// TestFindSecondStageDuplicate_StrongTitleMatchBypassesConceptGate verifies
+// the title+embedding short-circuit. When the LLM re-emits the same pattern
+// title with near-identical embedding but different concept vocabulary, the
+// concept gate must yield to the title signal instead of spawning a duplicate.
+// This is the fix for the overnight recurrence of patterns like "The Emergence
+// of the CRISPR-LM Research Workflow" getting created every abstraction cycle.
+func TestFindSecondStageDuplicate_StrongTitleMatchBypassesConceptGate(t *testing.T) {
+	ms := newMockStore()
+	mlp := &mockLLMProvider{}
+	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	agent := NewConsolidationAgent(ms, mlp, DefaultConfig(), log)
+
+	newPat := &store.Pattern{
+		Title:     "The Emergence of the CRISPR-LM Research Workflow",
+		Embedding: []float32{0.99, 0.01, 0, 0},
+		Concepts:  []string{"crispr-lm", "training"}, // different vocabulary
+	}
+	existing := []store.Pattern{
+		{
+			ID:        "crispr-workflow",
+			Title:     "The Emergence of the CRISPR-LM Research Workflow",
+			Embedding: []float32{1, 0, 0, 0},
+			Concepts:  []string{"research", "workflow"}, // zero overlap with newPat
+		},
+	}
+
+	match := agent.findSecondStageDuplicate(newPat, existing, 2)
+	if match == nil {
+		t.Fatal("expected title+embedding short-circuit to merge, got nil")
+	}
+	if match.ID != "crispr-workflow" {
+		t.Errorf("expected match=crispr-workflow, got %s", match.ID)
+	}
+}
+
 // TestIdentifyPattern_LargeClusterSampled verifies that when a cluster
 // exceeds MaxClusterSampleForLLM, only the top-salience sample is shown to
 // the LLM (preventing JSON truncation) while MaxTokens provides enough

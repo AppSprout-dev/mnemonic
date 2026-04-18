@@ -410,7 +410,19 @@ func (aa *AbstractionAgent) verifyGrounding(ctx context.Context, report *CycleRe
 				}
 			}
 
+			// Level-2 principles reference patterns in SourcePatternIDs; level-3
+			// axioms reuse the same field to reference their source principles
+			// (see synthesizeAxiom). Route the lookup by level so axiom grounding
+			// actually reflects the health of its supporting principles rather
+			// than always resolving to zero.
 			for _, patID := range abs.SourcePatternIDs {
+				if abs.Level >= 3 {
+					src, err := aa.store.GetAbstraction(ctx, patID)
+					if err == nil && src.State == "active" {
+						activeEvidence++
+					}
+					continue
+				}
 				pat, err := aa.store.GetPattern(ctx, patID)
 				if err == nil && pat.State == "active" {
 					activeEvidence++
@@ -854,7 +866,11 @@ func findSimilarAbstraction(existing []store.Abstraction, concepts []string, emb
 			continue
 		}
 		overlap := countConceptOverlap(concepts, abs.Concepts)
-		if overlap < minConceptOverlap {
+		// Title+embedding override mirrors consolidation.findSecondStageDuplicate:
+		// when title and embedding are nearly identical, LLM-extracted concept
+		// drift shouldn't spawn a duplicate principle/axiom.
+		strongTitleMatch := titleSim >= 0.8 && embSim >= 0.9
+		if overlap < minConceptOverlap && !strongTitleMatch {
 			if log != nil {
 				log.Info("abstraction dedup: rejected similarity match on concept gate",
 					"existing_id", abs.ID, "existing_title", abs.Title,

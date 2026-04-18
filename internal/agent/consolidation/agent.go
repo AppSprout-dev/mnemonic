@@ -43,12 +43,12 @@ type ConsolidationConfig struct {
 	PatternMatchMinConceptOverlap int     // min shared concepts required for cluster→pattern match (default 2) — prevents super-attractor behavior
 	MaxClusterSampleForLLM        int     // max cluster memories shown to the LLM for identifyPattern (default 10) — prevents JSON truncation on huge clusters
 	PatternStrengthIncrement      float32 // strength gain per new evidence (default 0.03)
-	PatternIncrementCap      float32 // max single-cycle strength gain (default 0.15)
-	LargeClusterBonus        float32 // multiplier for clusters >= LargeClusterMinSize (default 1.3)
-	LargeClusterMinSize      int     // cluster size to trigger bonus (default 5)
-	PatternStrengthCeiling   float32 // max strength unless strong evidence (default 0.95)
-	StrongEvidenceCeiling    float32 // max strength with strong evidence (default 1.0)
-	StrongEvidenceMinCount   int     // evidence count to unlock strong ceiling (default 10)
+	PatternIncrementCap           float32 // max single-cycle strength gain (default 0.15)
+	LargeClusterBonus             float32 // multiplier for clusters >= LargeClusterMinSize (default 1.3)
+	LargeClusterMinSize           int     // cluster size to trigger bonus (default 5)
+	PatternStrengthCeiling        float32 // max strength unless strong evidence (default 0.95)
+	StrongEvidenceCeiling         float32 // max strength with strong evidence (default 1.0)
+	StrongEvidenceMinCount        int     // evidence count to unlock strong ceiling (default 10)
 
 	// Pattern decay tunables
 	PatternBaselineDecay float32 // per-cycle baseline decay (default 0.995)
@@ -71,39 +71,39 @@ type ConsolidationConfig struct {
 // DefaultConfig returns sensible defaults for consolidation.
 func DefaultConfig() ConsolidationConfig {
 	return ConsolidationConfig{
-		Interval:                  6 * time.Hour,
-		DecayRate:                 0.95,
-		FadeThreshold:             0.3,
-		ArchiveThreshold:          0.1,
-		RetentionWindow:           90 * 24 * time.Hour,
-		MaxMemoriesPerCycle:       100,
-		MaxMergesPerCycle:         5,
-		MinClusterSize:            3,
-		MinEvidenceSalience:       0.5,
-		AssocPruneThreshold:       0.05,
-		RecencyProtection24h:      0.8,
-		RecencyProtection168h:     0.9,
-		AccessResistanceCap:       0.3,
-		AccessResistanceScale:     0.02,
+		Interval:                      6 * time.Hour,
+		DecayRate:                     0.95,
+		FadeThreshold:                 0.3,
+		ArchiveThreshold:              0.1,
+		RetentionWindow:               90 * 24 * time.Hour,
+		MaxMemoriesPerCycle:           100,
+		MaxMergesPerCycle:             5,
+		MinClusterSize:                3,
+		MinEvidenceSalience:           0.5,
+		AssocPruneThreshold:           0.05,
+		RecencyProtection24h:          0.8,
+		RecencyProtection168h:         0.9,
+		AccessResistanceCap:           0.3,
+		AccessResistanceScale:         0.02,
 		MergeSimilarityThreshold:      0.85,
 		PatternMatchThreshold:         0.70,
 		PatternMatchMinConceptOverlap: 2,
 		MaxClusterSampleForLLM:        10,
 		PatternStrengthIncrement:      0.03,
-		PatternIncrementCap:       0.15,
-		LargeClusterBonus:         1.3,
-		LargeClusterMinSize:       5,
-		PatternStrengthCeiling:    0.95,
-		StrongEvidenceCeiling:     1.0,
-		StrongEvidenceMinCount:    10,
-		PatternBaselineDecay:      0.995,
-		StaleDecayHealthy:         0.97,
-		StaleDecayModerate:        0.93,
-		StaleDecayAggressive:      0.85,
-		SelfSustainingMinEvidence: 10,
-		SelfSustainingMinStrength: 0.9,
-		SelfSustainingDecay:       0.995,
-		NeverRecalledArchiveDays:  30,
+		PatternIncrementCap:           0.15,
+		LargeClusterBonus:             1.3,
+		LargeClusterMinSize:           5,
+		PatternStrengthCeiling:        0.95,
+		StrongEvidenceCeiling:         1.0,
+		StrongEvidenceMinCount:        10,
+		PatternBaselineDecay:          0.995,
+		StaleDecayHealthy:             0.97,
+		StaleDecayModerate:            0.93,
+		StaleDecayAggressive:          0.85,
+		SelfSustainingMinEvidence:     10,
+		SelfSustainingMinStrength:     0.9,
+		SelfSustainingDecay:           0.995,
+		NeverRecalledArchiveDays:      30,
 	}
 }
 
@@ -1194,7 +1194,14 @@ func (ca *ConsolidationAgent) findSecondStageDuplicate(pattern *store.Pattern, c
 			continue
 		}
 		conceptOverlap := countConceptOverlap(pattern.Concepts, ep.Concepts)
-		if conceptOverlap < minOverlap {
+		// Title+embedding override: when both titles and embeddings are nearly
+		// identical, concept drift alone shouldn't spawn a duplicate pattern.
+		// LLM-extracted concepts vary run-to-run even for the same pattern, so
+		// requiring concept overlap here was the source of overnight duplicate
+		// patterns like "The Emergence of the CRISPR-LM Research Workflow"
+		// getting re-created every abstraction cycle.
+		strongTitleMatch := titleSim >= 0.8 && embSim >= 0.9
+		if conceptOverlap < minOverlap && !strongTitleMatch {
 			ca.log.Info("dedup: rejected similarity match on concept gate",
 				"existing_id", ep.ID, "existing_title", ep.Title,
 				"emb_sim", embSim, "title_sim", titleSim,
