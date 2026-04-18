@@ -28,6 +28,51 @@ func writeMemoryForExperience(t *testing.T, s *SQLiteStore, id string) {
 	}
 }
 
+// TestCountConsecutiveFailedTrainingRuns_StaleFailuresExcluded verifies the
+// #424 fix. Failures older than breakerFailureWindow (7 days) must not count
+// toward the circuit breaker. Without this, a batch of old failures from a
+// since-fixed bug blocks all training forever because the count can't reset
+// without a successful run.
+func TestCountConsecutiveFailedTrainingRuns_StaleFailuresExcluded(t *testing.T) {
+	s := createTestStore(t)
+	defer func() { _ = s.Close() }()
+	ctx := context.Background()
+
+	// Three old failures (>7d ago — should NOT count) and two recent failures
+	// (within window, older than 10-min in-progress grace — should count).
+	old := time.Now().Add(-10 * 24 * time.Hour)
+	recent := time.Now().Add(-2 * time.Hour)
+	runs := []struct {
+		id      string
+		started time.Time
+	}{
+		{"old-1", old},
+		{"old-2", old.Add(1 * time.Hour)},
+		{"old-3", old.Add(2 * time.Hour)},
+		{"recent-1", recent},
+		{"recent-2", recent.Add(30 * time.Minute)},
+	}
+	for _, r := range runs {
+		if err := s.WriteTrainingRun(ctx, store.TrainingRun{
+			ID:        r.id,
+			BatchID:   "batch-" + r.id,
+			BatchPath: "/tmp/batch-" + r.id,
+			Status:    "failed",
+			StartedAt: r.started,
+		}); err != nil {
+			t.Fatalf("writing training run %s: %v", r.id, err)
+		}
+	}
+
+	count, err := s.CountConsecutiveFailedTrainingRuns(ctx)
+	if err != nil {
+		t.Fatalf("CountConsecutiveFailedTrainingRuns: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("expected 2 failures within window, got %d (stale failures should not count)", count)
+	}
+}
+
 func TestListNeedsImprovement(t *testing.T) {
 	s := createTestStore(t)
 	defer func() { _ = s.Close() }()

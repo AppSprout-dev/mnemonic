@@ -434,11 +434,21 @@ func (s *SQLiteStore) GetLastTrainingRunTime(ctx context.Context) (time.Time, er
 	return t, nil
 }
 
+// breakerFailureWindow bounds how far back the circuit breaker looks when
+// counting consecutive failures. Without this, a cluster of failures from a
+// long-fixed bug (e.g. the seq_len=2048 OOM on 2026-04-14) blocks all future
+// training forever because the count never resets without a successful run.
+// 7 days is the operator-intervention window — by then a real bug should
+// have been fixed, or a human should have manually acked the cluster.
+const breakerFailureWindow = "-7 days"
+
 func (s *SQLiteStore) CountConsecutiveFailedTrainingRuns(ctx context.Context) (int, error) {
 	var count int
 	// Count failed or stale "requested" runs since the last successful one.
 	// Stale "requested" = daemon crashed mid-training, result never written.
 	// Grace period: don't count runs started within 10 minutes (may be in-progress).
+	// Age cap: stale failures older than breakerFailureWindow don't count, so a
+	// batch of old failures doesn't block training indefinitely (#424).
 	err := s.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM training_runs
 		 WHERE status IN ('failed', 'requested')
@@ -446,7 +456,9 @@ func (s *SQLiteStore) CountConsecutiveFailedTrainingRuns(ctx context.Context) (i
 		       (SELECT MAX(started_at) FROM training_runs WHERE status = 'completed'),
 		       '1970-01-01T00:00:00Z'
 		   )
+		   AND started_at > datetime('now', ?)
 		   AND started_at < datetime('now', '-10 minutes')`,
+		breakerFailureWindow,
 	).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("counting consecutive failed training runs: %w", err)
