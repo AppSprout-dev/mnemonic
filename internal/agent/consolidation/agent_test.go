@@ -36,6 +36,8 @@ type mockStore struct {
 	writeConsolidationFn    func(ctx context.Context, record store.ConsolidationRecord) error
 	getMemoryAttributesFn   func(ctx context.Context, memoryID string) (store.MemoryAttributes, error)
 	searchPatternsByEmbFn   func(ctx context.Context, emb []float32, limit int) ([]store.Pattern, error)
+	searchArchivedByEmbFn   func(ctx context.Context, emb []float32, limit int) ([]store.Pattern, error)
+	updatePatternFn         func(ctx context.Context, p store.Pattern) error
 
 	// Call tracking
 	updateStateCalls         []updateStateCall
@@ -78,6 +80,18 @@ func (m *mockStore) SearchPatternsByEmbedding(ctx context.Context, emb []float32
 		return m.searchPatternsByEmbFn(ctx, emb, limit)
 	}
 	return nil, nil
+}
+func (m *mockStore) SearchArchivedPatternsByEmbedding(ctx context.Context, emb []float32, limit int) ([]store.Pattern, error) {
+	if m.searchArchivedByEmbFn != nil {
+		return m.searchArchivedByEmbFn(ctx, emb, limit)
+	}
+	return nil, nil
+}
+func (m *mockStore) UpdatePattern(ctx context.Context, p store.Pattern) error {
+	if m.updatePatternFn != nil {
+		return m.updatePatternFn(ctx, p)
+	}
+	return nil
 }
 func (m *mockStore) PruneWeakAssociations(ctx context.Context, strengthThreshold float32) (int, error) {
 	m.pruneWeakAssocCalls = append(m.pruneWeakAssocCalls, strengthThreshold)
@@ -1443,6 +1457,134 @@ func TestFindSecondStageDuplicate_StrongTitleMatchBypassesConceptGate(t *testing
 	}
 	if match.ID != "crispr-workflow" {
 		t.Errorf("expected match=crispr-workflow, got %s", match.ID)
+	}
+}
+
+// TestTryResurrectArchivedPattern_StrongMatchResurrects verifies the fix for
+// #423. When a newly-synthesized pattern matches a fading/archived pattern on
+// both title and embedding, the archived one is re-activated, its strength
+// restored above the fading threshold, and new evidence merged in. This breaks
+// the archive → recreate loop where canonical patterns would decay past the
+// archive threshold and the next cluster in the same theme would spawn a fresh
+// duplicate.
+func TestTryResurrectArchivedPattern_StrongMatchResurrects(t *testing.T) {
+	ms := newMockStore()
+	ms.searchArchivedByEmbFn = func(_ context.Context, _ []float32, _ int) ([]store.Pattern, error) {
+		return []store.Pattern{{
+			ID:        "archived-canonical",
+			Title:     "The Emergence of the CRISPR-LM Research Workflow",
+			State:     "archived",
+			Strength:  0.04, // below fading threshold — archived
+			Embedding: []float32{1, 0, 0, 0},
+			Concepts:  []string{"crispr-lm"},
+		}}, nil
+	}
+	var updated *store.Pattern
+	ms.updatePatternFn = func(_ context.Context, p store.Pattern) error {
+		updated = &p
+		return nil
+	}
+
+	mlp := &mockLLMProvider{}
+	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	agent := NewConsolidationAgent(ms, mlp, DefaultConfig(), log)
+
+	newPat := &store.Pattern{
+		Title:     "The Emergence of the CRISPR-LM Research Workflow",
+		Embedding: []float32{0.99, 0.01, 0, 0},
+		Concepts:  []string{"crispr-lm", "research"},
+	}
+	qualified := []store.Memory{
+		{ID: "mem-new-1"},
+		{ID: "mem-new-2"},
+	}
+
+	resurrected := agent.tryResurrectArchivedPattern(context.Background(), newPat, qualified)
+	if resurrected == nil {
+		t.Fatal("expected resurrection on strong title+embedding match, got nil")
+	}
+	if resurrected.ID != "archived-canonical" {
+		t.Errorf("expected archived-canonical to be resurrected, got %s", resurrected.ID)
+	}
+	if updated == nil {
+		t.Fatal("expected UpdatePattern to be called")
+	}
+	if updated.State != "active" {
+		t.Errorf("expected state=active after resurrection, got %s", updated.State)
+	}
+	if updated.Strength < resurrectionStrengthFloor {
+		t.Errorf("expected strength >= %.2f after resurrection, got %.3f", resurrectionStrengthFloor, updated.Strength)
+	}
+	if !containsString(updated.EvidenceIDs, "mem-new-1") || !containsString(updated.EvidenceIDs, "mem-new-2") {
+		t.Errorf("expected new evidence IDs merged in, got %v", updated.EvidenceIDs)
+	}
+}
+
+// TestTryResurrectArchivedPattern_WeakTitleMatchRejected verifies that the
+// resurrection predicate is tight: high embedding similarity alone isn't
+// enough to resurrect when titles diverge. Prevents accidentally reviving a
+// broadly-related archived pattern when the new theme is actually different.
+func TestTryResurrectArchivedPattern_WeakTitleMatchRejected(t *testing.T) {
+	ms := newMockStore()
+	ms.searchArchivedByEmbFn = func(_ context.Context, _ []float32, _ int) ([]store.Pattern, error) {
+		return []store.Pattern{{
+			ID:        "archived-unrelated",
+			Title:     "Modular Model Migration Workflow",
+			State:     "archived",
+			Embedding: []float32{1, 0, 0, 0},
+		}}, nil
+	}
+	updateCalled := false
+	ms.updatePatternFn = func(_ context.Context, _ store.Pattern) error {
+		updateCalled = true
+		return nil
+	}
+
+	mlp := &mockLLMProvider{}
+	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	agent := NewConsolidationAgent(ms, mlp, DefaultConfig(), log)
+
+	newPat := &store.Pattern{
+		Title:     "Splice Tensor API for CRISPR-LM", // very different title
+		Embedding: []float32{0.99, 0.01, 0, 0},
+	}
+
+	resurrected := agent.tryResurrectArchivedPattern(context.Background(), newPat, nil)
+	if resurrected != nil {
+		t.Errorf("expected weak-title match to be rejected, got %s", resurrected.ID)
+	}
+	if updateCalled {
+		t.Error("expected no UpdatePattern call when resurrection predicate fails")
+	}
+}
+
+// TestTryResurrectArchivedPattern_WeakEmbeddingRejected verifies the
+// resurrection predicate requires high embedding similarity even when titles
+// match. A coincidentally-identical title with a distant embedding vector
+// shouldn't trigger resurrection.
+func TestTryResurrectArchivedPattern_WeakEmbeddingRejected(t *testing.T) {
+	ms := newMockStore()
+	ms.searchArchivedByEmbFn = func(_ context.Context, _ []float32, _ int) ([]store.Pattern, error) {
+		return []store.Pattern{{
+			ID:        "archived-different-embedding",
+			Title:     "The Emergence of the CRISPR-LM Research Workflow",
+			State:     "archived",
+			Embedding: []float32{0.1, 0.9, 0, 0}, // orthogonal-ish to newPat
+		}}, nil
+	}
+
+	mlp := &mockLLMProvider{}
+	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	agent := NewConsolidationAgent(ms, mlp, DefaultConfig(), log)
+
+	newPat := &store.Pattern{
+		Title:     "The Emergence of the CRISPR-LM Research Workflow",
+		Embedding: []float32{0.99, 0.01, 0, 0},
+	}
+
+	resurrected := agent.tryResurrectArchivedPattern(context.Background(), newPat, nil)
+	if resurrected != nil {
+		t.Errorf("expected weak-embedding match to be rejected, got %s", resurrected.ID)
 	}
 }
 

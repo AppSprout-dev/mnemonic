@@ -501,6 +501,11 @@ type PatternStore interface {
 	ListPatterns(ctx context.Context, project string, limit int) ([]Pattern, error)
 	SearchPatternsByEmbedding(ctx context.Context, embedding []float32, limit int) ([]Pattern, error)
 	SearchPatternsByEmbeddingInProject(ctx context.Context, embedding []float32, project string, limit int) ([]Pattern, error)
+	// SearchArchivedPatternsByEmbedding returns fading/archived patterns ranked
+	// by embedding similarity. Used by the consolidation dedup pipeline to
+	// detect re-emergence of a previously archived canonical and resurrect it
+	// rather than spawn a duplicate. See #423.
+	SearchArchivedPatternsByEmbedding(ctx context.Context, embedding []float32, limit int) ([]Pattern, error)
 	ArchivePattern(ctx context.Context, id string) error
 	ArchiveAllPatterns(ctx context.Context) (int, error)
 }

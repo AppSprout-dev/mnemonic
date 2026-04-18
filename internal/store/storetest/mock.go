@@ -242,6 +242,9 @@ func (MockStore) SearchPatternsByEmbedding(context.Context, []float32, int) ([]s
 func (MockStore) SearchPatternsByEmbeddingInProject(context.Context, []float32, string, int) ([]store.Pattern, error) {
 	return nil, nil
 }
+func (MockStore) SearchArchivedPatternsByEmbedding(context.Context, []float32, int) ([]store.Pattern, error) {
+	return nil, nil
+}
 func (MockStore) ArchivePattern(context.Context, string) error    { return nil }
 func (MockStore) ArchiveAllPatterns(context.Context) (int, error) { return 0, nil }
 

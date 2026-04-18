@@ -977,6 +977,17 @@ func (ca *ConsolidationAgent) processPatternClusters(ctx context.Context, cluste
 					continue
 				}
 			}
+
+			// Third stage: re-emergence detection. When no active pattern matches,
+			// check whether a previously-archived canonical matches on title AND
+			// embedding. If so, resurrect it instead of writing a fresh duplicate.
+			// This is the fix for #423, where patterns like "The Emergence of the
+			// CRISPR-LM Research Workflow" kept being re-created each cycle because
+			// the canonical had decayed to archived and the active-only search
+			// returned nothing. See tryResurrectArchivedPattern for the predicate.
+			if resurrected := ca.tryResurrectArchivedPattern(ctx, pattern, qualified); resurrected != nil {
+				continue
+			}
 		}
 
 		if err := ca.store.WritePattern(ctx, *pattern); err != nil {
@@ -1167,6 +1178,82 @@ func (ca *ConsolidationAgent) findMatchingPattern(ctx context.Context, cluster [
 	}
 
 	return nil, 0, fmt.Errorf("no close match")
+}
+
+// resurrectionTitleSimThreshold is the minimum normalized title similarity
+// required to treat an archived pattern as a re-emergence of the new one.
+// Deliberately stricter than the active-dedup title bar (0.8) — resurrection
+// must be obvious, not just plausible.
+const resurrectionTitleSimThreshold = 0.85
+
+// resurrectionEmbSimThreshold is the minimum cosine embedding similarity for
+// archived-pattern resurrection. Matches the active-dedup bar.
+const resurrectionEmbSimThreshold = 0.9
+
+// resurrectionStrengthFloor is the strength the resurrected pattern is bumped
+// to on re-activation. Well above the fading threshold (0.1) so it survives
+// the next decay pass, but below the ceiling so it must earn its way back up
+// through real evidence accrual.
+const resurrectionStrengthFloor = 0.5
+
+// tryResurrectArchivedPattern checks whether a fading/archived pattern matches
+// the newly-synthesized pattern on both title and embedding. When the match is
+// strong (both gates clear), the archived pattern is re-activated, its evidence
+// merged with the new cluster, and returned. Fixes #423: without this, every
+// time a canonical pattern decays past the archive threshold, the next cluster
+// matching that theme spawns a fresh duplicate.
+//
+// Returns nil when no archived candidate passes the resurrection predicate.
+func (ca *ConsolidationAgent) tryResurrectArchivedPattern(ctx context.Context, pattern *store.Pattern, qualified []store.Memory) *store.Pattern {
+	archived, err := ca.store.SearchArchivedPatternsByEmbedding(ctx, pattern.Embedding, 5)
+	if err != nil || len(archived) == 0 {
+		return nil
+	}
+
+	for i := range archived {
+		ep := &archived[i]
+		if len(ep.Embedding) == 0 {
+			continue
+		}
+		embSim := agentutil.CosineSimilarity(pattern.Embedding, ep.Embedding)
+		titleSim := normalizedTitleSimilarity(pattern.Title, ep.Title)
+		if titleSim < resurrectionTitleSimThreshold || embSim < resurrectionEmbSimThreshold {
+			continue
+		}
+
+		// Merge new evidence into the resurrected pattern.
+		for _, mem := range qualified {
+			if !containsString(ep.EvidenceIDs, mem.ID) {
+				ep.EvidenceIDs = append(ep.EvidenceIDs, mem.ID)
+			}
+		}
+
+		priorState := ep.State
+		priorStrength := ep.Strength
+		ep.State = "active"
+		if ep.Strength < resurrectionStrengthFloor {
+			ep.Strength = resurrectionStrengthFloor
+		}
+		ep.AccessCount++
+		ep.LastAccessed = time.Now()
+		ep.UpdatedAt = time.Now()
+
+		if err := ca.store.UpdatePattern(ctx, *ep); err != nil {
+			ca.log.Warn("failed to resurrect archived pattern",
+				"pattern_id", ep.ID, "error", err)
+			continue
+		}
+
+		ca.log.Info("pattern resurrected from archive",
+			"pattern_id", ep.ID, "title", ep.Title,
+			"prior_state", priorState, "prior_strength", priorStrength,
+			"new_strength", ep.Strength,
+			"emb_sim", embSim, "title_sim", titleSim,
+			"evidence_count", len(ep.EvidenceIDs))
+		return ep
+	}
+
+	return nil
 }
 
 // findSecondStageDuplicate scans candidate patterns (returned by
