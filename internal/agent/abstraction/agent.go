@@ -519,7 +519,7 @@ Set has_principle to false if:
 			{Role: "system", Content: "You are a senior software engineer identifying recurring practices in a codebase. Extract concrete engineering principles from patterns. Output JSON only."},
 			{Role: "user", Content: prompt},
 		},
-		MaxTokens:   200,
+		MaxTokens:   500,
 		Temperature: 0.3,
 		ResponseFormat: &llm.ResponseFormat{
 			Type: "json_schema",
@@ -630,7 +630,7 @@ Set has_axiom to false if:
 			{Role: "system", Content: "You are a senior software engineer synthesizing team engineering standards from observed principles. Output JSON only."},
 			{Role: "user", Content: prompt},
 		},
-		MaxTokens:   200,
+		MaxTokens:   500,
 		Temperature: 0.3,
 		ResponseFormat: &llm.ResponseFormat{
 			Type: "json_schema",
