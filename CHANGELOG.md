@@ -4,6 +4,82 @@ All notable changes to Mnemonic will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.36.0](https://github.com/AppSprout-dev/mnemonic/compare/v0.35.0...v0.36.0) (2026-04-18)
+
+
+### Features
+
+* **abstraction:** archive escape hatch for chronically-demoted abstractions ([18ec2c5](https://github.com/AppSprout-dev/mnemonic/commit/18ec2c5597f33d82f202825b26735ce92dbd889f))
+* **abstraction:** archive escape hatch for chronically-demoted abstractions ([45b61a9](https://github.com/AppSprout-dev/mnemonic/commit/45b61a97e0503611955a2a7004306518e2c19018))
+* **abstraction:** gate synthesis on substrate-change fingerprint ([2b92ead](https://github.com/AppSprout-dev/mnemonic/commit/2b92ead14686cb01f3b76f9ec03595478311bd9f))
+* **abstraction:** gate synthesis on substrate-change fingerprint ([209020b](https://github.com/AppSprout-dev/mnemonic/commit/209020b93ff0af80f7ea8e54a1d46b81295c72c9))
+* **abstraction:** streak-based archive supersedes age-based decay exit ([917edb3](https://github.com/AppSprout-dev/mnemonic/commit/917edb37994a1c5c20cc0e87a2abc4ea03772712))
+* **abstraction:** streak-based archive supersedes age-based decay exit ([083d0c1](https://github.com/AppSprout-dev/mnemonic/commit/083d0c1a923f17ce7766171c840849cb51e6ba5b))
+* add Gemma 4 E2B spoke inference server ([6a3c409](https://github.com/AppSprout-dev/mnemonic/commit/6a3c40976810325bdf88e1cb7eddbdf91ca016c3))
+* **consolidation:** resurrect archived patterns on re-emergence ([24c9943](https://github.com/AppSprout-dev/mnemonic/commit/24c99434df8a05b628badc279344244cf06d8112))
+* **consolidation:** resurrect archived patterns on re-emergence ([0c27890](https://github.com/AppSprout-dev/mnemonic/commit/0c278909655d3d5937abd05b4125e00659b254bd))
+* continuous learning Phase B — curriculum generation ([#391](https://github.com/AppSprout-dev/mnemonic/issues/391)) ([e5a5d59](https://github.com/AppSprout-dev/mnemonic/commit/e5a5d595836c0abc2d07dad4f47c9083361886e7))
+* continuous learning Phase C — training trigger & orchestration ([#391](https://github.com/AppSprout-dev/mnemonic/issues/391)) ([5bb0094](https://github.com/AppSprout-dev/mnemonic/commit/5bb0094952ed98e54702aa7b61d2549a4925bf9b))
+* continuous learning Phases B+C — curriculum generation & training trigger ([#391](https://github.com/AppSprout-dev/mnemonic/issues/391)) ([28860cf](https://github.com/AppSprout-dev/mnemonic/commit/28860cf753e50ebafe70b13a33cb874acdd49c60))
+* **dreaming:** INFO logs for four silent-drop gates ([865a71d](https://github.com/AppSprout-dev/mnemonic/commit/865a71dc5232f6da32fb831051dbd0e639bde44b))
+* **dreaming:** INFO logs for four silent-drop gates ([c9f40bd](https://github.com/AppSprout-dev/mnemonic/commit/c9f40bd6654fc53aa97617397a4f9d7d97bc68bf))
+* **dreaming:** rotate replay sample via recent-ID ring buffer ([1a97250](https://github.com/AppSprout-dev/mnemonic/commit/1a9725001bdcc4ef10d9cc87ddd3279583f89437))
+* **dreaming:** rotate replay sample via recent-ID ring buffer ([b8ae0a7](https://github.com/AppSprout-dev/mnemonic/commit/b8ae0a7fa6384e72ebfc9edd7c4bc66bc2e236d6))
+* enable continuous learning by default ([#391](https://github.com/AppSprout-dev/mnemonic/issues/391)) ([ac2bf1b](https://github.com/AppSprout-dev/mnemonic/commit/ac2bf1bcb6bb7b213450759943241029be361741))
+* Gemma 4 E2B spoke training — 25/25 schema compliance ([ab6ba40](https://github.com/AppSprout-dev/mnemonic/commit/ab6ba404c00b130d6c06ab1357053ab4db8977b5))
+* SetSpokeTensorF32 — push F32 weights with auto-quantization to native type ([780808f](https://github.com/AppSprout-dev/mnemonic/commit/780808fec656291fe3b608308071375a3c65c25e))
+* SPLICE API for CRISPR-LM (edit/status/tensor/complete) + Gemma 4 template fix ([c77f749](https://github.com/AppSprout-dev/mnemonic/commit/c77f749239a8c343c886f6e43ce8be0984af801e))
+* SPLICE API for CRISPR-LM + Gemma 4 chat template fix ([79289a6](https://github.com/AppSprout-dev/mnemonic/commit/79289a66cd8130549c0c484d6f14a6a8483487a0))
+* training data assembly for continuous learning ([#391](https://github.com/AppSprout-dev/mnemonic/issues/391)) ([99d3c28](https://github.com/AppSprout-dev/mnemonic/commit/99d3c28a788105d335183323ae53d6a46331457c))
+
+
+### Bug Fixes
+
+* **abstraction:** bump MaxTokens 200 -&gt; 500 for principle/axiom synthesis ([252d14c](https://github.com/AppSprout-dev/mnemonic/commit/252d14c80722fa342f4d204ade5b54209f677fdd))
+* **abstraction:** bump MaxTokens 200→500 for principle/axiom synthesis ([ef0ffd4](https://github.com/AppSprout-dev/mnemonic/commit/ef0ffd40d4ed91a1bcb70c5a9c1fc0565c0a57be))
+* **abstraction:** concept-overlap gate on findSimilarAbstraction ([604bf33](https://github.com/AppSprout-dev/mnemonic/commit/604bf33907927cdd694d3799de0feff722cf06d4))
+* **abstraction:** concept-overlap gate on findSimilarAbstraction ([cbabbbd](https://github.com/AppSprout-dev/mnemonic/commit/cbabbbd90d2a066cd45e2933c5ac2b52e5c90dde))
+* **abstraction:** lower MinStrength default 0.7 → 0.5 to unblock principle synthesis ([d89fa4a](https://github.com/AppSprout-dev/mnemonic/commit/d89fa4a5051a159a0908a80faf0180eb72379129))
+* **abstraction:** lower MinStrength default 0.7 → 0.5 to unblock principle synthesis ([98a8408](https://github.com/AppSprout-dev/mnemonic/commit/98a84082b5ae511fa01f558909e693c786bf7dad))
+* add GBNF grammar for episode synthesis ([588f802](https://github.com/AppSprout-dev/mnemonic/commit/588f8020a931d96c4cfc6dbfb1749140fc8e2686))
+* add GBNF grammar for episode synthesis to fix "Untitled session" failures ([151296c](https://github.com/AppSprout-dev/mnemonic/commit/151296ca18e4da2a20963e0fb1175594e8fa8db6))
+* address all PR [#397](https://github.com/AppSprout-dev/mnemonic/issues/397) review items from Caleb ([e52ee2a](https://github.com/AppSprout-dev/mnemonic/commit/e52ee2abaa7bf688f5134108372bea21aa8f3b0c))
+* **agents:** axiom grounding, pattern dedup, forum transition reporting ([1b7ba03](https://github.com/AppSprout-dev/mnemonic/commit/1b7ba03dec438ec3b0a3ddda3faa13a3302a54cc))
+* **agents:** axiom grounding, pattern dedup, forum transition reporting ([0cff8b5](https://github.com/AppSprout-dev/mnemonic/commit/0cff8b59a23964911e7a60c9890c93aaf3fccd6c))
+* **consolidation:** bound salience with a 1.0 ceiling in decay ([d80e297](https://github.com/AppSprout-dev/mnemonic/commit/d80e2977845dd436c15ff3a894013ed6b3e3b4d9))
+* **consolidation:** bound salience with a 1.0 ceiling in decay ([daff51e](https://github.com/AppSprout-dev/mnemonic/commit/daff51ed2059101e7363c551f6538881d625e9cb))
+* **consolidation:** break pattern-dedup super-attractor via concept-overlap gate ([c1a3a39](https://github.com/AppSprout-dev/mnemonic/commit/c1a3a393ec26a3b45a00cf9d6b04b052251cbcc8))
+* **consolidation:** break pattern-dedup super-attractor via concept-overlap gate ([d50c860](https://github.com/AppSprout-dev/mnemonic/commit/d50c860808d14739bfba9e2ab3ab9f858d71e8f3))
+* **consolidation:** concept-overlap gate on second-stage dedup ([3372dc9](https://github.com/AppSprout-dev/mnemonic/commit/3372dc9cdaef2f0b3b8d0d4283fac584a7c48f5c))
+* **consolidation:** concept-overlap gate on second-stage dedup ([f9135fd](https://github.com/AppSprout-dev/mnemonic/commit/f9135fdca591a75d1e9fc208e35690fe429f19eb))
+* **consolidation:** sample large clusters + raise MaxTokens for identifyPattern ([cfae847](https://github.com/AppSprout-dev/mnemonic/commit/cfae847ad5e719da66e79f4af6b4bd9c96999f9f))
+* **consolidation:** sample large clusters + raise MaxTokens for identifyPattern ([cbb5434](https://github.com/AppSprout-dev/mnemonic/commit/cbb54348c3f024d928538715d124f9d4daacba89))
+* correct bool array type in Gemma GGUF export + update EXP-30 verdict ([45515b2](https://github.com/AppSprout-dev/mnemonic/commit/45515b24f6bf4bbeea09b49c571d03b7af6326e8))
+* curriculum_runs stored time.Time.String() output, unparseable on read ([1266e46](https://github.com/AppSprout-dev/mnemonic/commit/1266e469fb7b43c4cd7b6ea471e000c759ed2243))
+* curriculum_runs stored time.Time.String() output, unparseable on read ([f1eec70](https://github.com/AppSprout-dev/mnemonic/commit/f1eec7091e5dabc639f796fab5993bbe463dafa0))
+* Gemma 4 spoke training produces garbage due to use_cache=False ([b1eaa8e](https://github.com/AppSprout-dev/mnemonic/commit/b1eaa8e2b12ae4db2878d838530f55b9cc861157))
+* **llm:** drop misleading "busy" prefix on embedded provider cancel ([48b3b19](https://github.com/AppSprout-dev/mnemonic/commit/48b3b19d1b85efa6ec984904b04bf3f30dc5b937))
+* **llm:** drop misleading "busy" prefix on embedded provider cancel ([450c886](https://github.com/AppSprout-dev/mnemonic/commit/450c8862bfd4b009773afe2c2726c2d61ac9cbd8))
+* move advisory board personas from local memory to .claude/skills/ ([2dd06b0](https://github.com/AppSprout-dev/mnemonic/commit/2dd06b04a19129b8c28df28396ce57ccddf3bc8b)), closes [#398](https://github.com/AppSprout-dev/mnemonic/issues/398)
+* move advisory board personas into repo ([5c4e5bb](https://github.com/AppSprout-dev/mnemonic/commit/5c4e5bb7c2a345930de642d9e7f2b359615283d3))
+* prevent MCP processes from loading GPU models into VRAM ([8bd86a8](https://github.com/AppSprout-dev/mnemonic/commit/8bd86a8e460dac44f252251da13bdda200a0a055))
+* prevent MCP processes from loading GPU models into VRAM ([a575622](https://github.com/AppSprout-dev/mnemonic/commit/a57562221ef4485401aa8b4b69e9e8ab07fc5b3c))
+* **store:** age-bound training breaker so stale failures expire ([0198153](https://github.com/AppSprout-dev/mnemonic/commit/0198153f739e4f594611a27376750cee617d1bad))
+* **store:** age-bound training circuit breaker so stale failures expire ([6e76dc2](https://github.com/AppSprout-dev/mnemonic/commit/6e76dc262610c6161803faa0cbc47d3e0440db44))
+* Task Scheduler is logon-only, manual start uses PID-file daemon ([07a605f](https://github.com/AppSprout-dev/mnemonic/commit/07a605f408b621a19f705e42c987f5cd394a3364))
+* training crash loop safety + episode synthesis quality ([f0a8a95](https://github.com/AppSprout-dev/mnemonic/commit/f0a8a954c09ccd510abbf72ae13656c0471f22d3))
+* training crash loop safety + episode synthesis quality ([#391](https://github.com/AppSprout-dev/mnemonic/issues/391)) ([75dc713](https://github.com/AppSprout-dev/mnemonic/commit/75dc713d0b9929bfc899aceb047409c54957e8c0))
+* type-filtered recall surfaces recent memories first ([86673ea](https://github.com/AppSprout-dev/mnemonic/commit/86673eafd9e9aa900ef4cc71a5ea46575d4d8d40))
+* type-filtered recall surfaces recent memories first ([#394](https://github.com/AppSprout-dev/mnemonic/issues/394)) ([5af04de](https://github.com/AppSprout-dev/mnemonic/commit/5af04de93625587659d64e11f319a79b3129a31a))
+* use gemma-4-E2B-it (not base) in stress test, add EXP-31 results ([845c9cb](https://github.com/AppSprout-dev/mnemonic/commit/845c9cb3793980ede1b9479f06139e5a97e6d005))
+* Windows daemon survives reboots, add dashboard update button ([b73424f](https://github.com/AppSprout-dev/mnemonic/commit/b73424f863dda3bceff23f462ef0aee59041cf9c))
+* Windows daemon survives reboots, add dashboard update button ([356c570](https://github.com/AppSprout-dev/mnemonic/commit/356c5700f550acb3dc263461a7b0ee4345b1746b))
+
+
+### Performance Improvements
+
+* BetaQ all-RQ4 101 tok/s, embedded Gemma 4 deployment ([578313a](https://github.com/AppSprout-dev/mnemonic/commit/578313a12fda9cac19d6f1bd815857f75f6a30ca))
+
 ## [0.35.0](https://github.com/AppSprout-dev/mnemonic/compare/v0.34.1...v0.35.0) (2026-04-10)
 
 
