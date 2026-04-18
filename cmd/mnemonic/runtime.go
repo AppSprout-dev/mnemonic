@@ -190,6 +190,7 @@ func toConsolidationConfig(cfg *config.Config) consolidation.ConsolidationConfig
 		RecencyProtection168h:         cfg.Consolidation.RecencyProtection168h,
 		AccessResistanceCap:           cfg.Consolidation.AccessResistanceCap,
 		AccessResistanceScale:         cfg.Consolidation.AccessResistanceScale,
+		SalienceCeiling:               float32(cfg.Consolidation.SalienceCeiling),
 		MergeSimilarityThreshold:      cfg.Consolidation.MergeSimilarityThreshold,
 		PatternMatchThreshold:         cfg.Consolidation.PatternMatchThreshold,
 		PatternMatchMinConceptOverlap: cfg.Consolidation.PatternMatchMinConceptOverlap,
