@@ -40,8 +40,15 @@ func ComposePost(evt events.Event) (content string, agentKey string, project str
 		if e.MemoriesProcessed > 0 {
 			parts = append(parts, fmt.Sprintf("%d memories reviewed", e.MemoriesProcessed))
 		}
-		if e.MemoriesDecayed > 0 {
-			parts = append(parts, fmt.Sprintf("%d faded out", e.MemoriesDecayed))
+		// Report actual state transitions instead of MemoriesDecayed. The latter
+		// is the size of the decay band (steady for runs in a row), which made
+		// every consolidation cycle announce the same "X faded out" count even
+		// when nothing new actually transitioned.
+		if e.TransitionedFading > 0 {
+			parts = append(parts, fmt.Sprintf("%d moved to fading", e.TransitionedFading))
+		}
+		if e.TransitionedArchived > 0 {
+			parts = append(parts, fmt.Sprintf("%d archived", e.TransitionedArchived))
 		}
 		if e.MergedClusters > 0 {
 			parts = append(parts, fmt.Sprintf("%d merged into tighter clusters", e.MergedClusters))
