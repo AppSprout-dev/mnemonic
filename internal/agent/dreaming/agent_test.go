@@ -2,6 +2,7 @@ package dreaming
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"testing"
@@ -412,6 +413,128 @@ func TestCrossProjectLinkEmbeddingGateCounter(t *testing.T) {
 // mockStore embeds the shared base mock and has no overrides.
 type mockStore struct {
 	storetest.MockStore
+}
+
+// replayRotationMockStore returns a fixed pool and records IncrementAccess calls
+// so tests can verify which memories the replay phase selected.
+type replayRotationMockStore struct {
+	storetest.MockStore
+	pool     []store.Memory
+	accessed []string
+}
+
+func (m *replayRotationMockStore) ListMemories(_ context.Context, _ string, limit, offset int) ([]store.Memory, error) {
+	if offset >= len(m.pool) {
+		return nil, nil
+	}
+	end := offset + limit
+	if end > len(m.pool) {
+		end = len(m.pool)
+	}
+	return m.pool[offset:end], nil
+}
+
+func (m *replayRotationMockStore) IncrementAccess(_ context.Context, id string) error {
+	m.accessed = append(m.accessed, id)
+	return nil
+}
+
+// TestReplayMemoriesRotatesAcrossCycles verifies that consecutive replay cycles
+// pick different memories from a large enough pool, instead of replaying the
+// same top-N every cycle.
+func TestReplayMemoriesRotatesAcrossCycles(t *testing.T) {
+	const batchSize = 5
+	// Pool large enough that replayRingCycles*batchSize < poolSize, so the
+	// second cycle can find fresh picks.
+	poolSize := batchSize * (replayRingCycles + 2)
+	pool := make([]store.Memory, poolSize)
+	for i := range pool {
+		pool[i] = store.Memory{
+			ID:       fmt.Sprintf("mem-%02d", i),
+			Salience: 0.9,
+			State:    "active",
+		}
+	}
+
+	ms := &replayRotationMockStore{pool: pool}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	agent := NewDreamingAgent(ms, nil, DreamingConfig{
+		BatchSize:         batchSize,
+		SalienceThreshold: 0.3,
+	}, logger)
+
+	// Cycle 1
+	rep1 := &DreamReport{}
+	out1, err := agent.replayMemories(context.Background(), rep1)
+	if err != nil {
+		t.Fatalf("cycle 1 replay failed: %v", err)
+	}
+	if len(out1) != batchSize {
+		t.Fatalf("cycle 1: expected %d replayed, got %d", batchSize, len(out1))
+	}
+
+	// Cycle 2 — must share no IDs with cycle 1 given pool is large enough.
+	rep2 := &DreamReport{}
+	out2, err := agent.replayMemories(context.Background(), rep2)
+	if err != nil {
+		t.Fatalf("cycle 2 replay failed: %v", err)
+	}
+	if len(out2) != batchSize {
+		t.Fatalf("cycle 2: expected %d replayed, got %d", batchSize, len(out2))
+	}
+
+	cycle1 := make(map[string]struct{}, len(out1))
+	for _, m := range out1 {
+		cycle1[m.ID] = struct{}{}
+	}
+	for _, m := range out2 {
+		if _, repeat := cycle1[m.ID]; repeat {
+			t.Fatalf("cycle 2 replayed memory %q that was in cycle 1 — rotation failed", m.ID)
+		}
+	}
+}
+
+// TestReplayMemoriesFallsBackWhenPoolSmallerThanRing verifies that when the
+// active pool is smaller than the ring buffer, the replay phase still delivers
+// a full batch instead of starving.
+func TestReplayMemoriesFallsBackWhenPoolSmallerThanRing(t *testing.T) {
+	const batchSize = 5
+	// Pool smaller than one batch — forces fallback.
+	pool := make([]store.Memory, batchSize-1)
+	for i := range pool {
+		pool[i] = store.Memory{
+			ID:       fmt.Sprintf("mem-%02d", i),
+			Salience: 0.9,
+			State:    "active",
+		}
+	}
+
+	ms := &replayRotationMockStore{pool: pool}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	agent := NewDreamingAgent(ms, nil, DreamingConfig{
+		BatchSize:         batchSize,
+		SalienceThreshold: 0.3,
+	}, logger)
+
+	// First cycle replays all available memories.
+	rep1 := &DreamReport{}
+	out1, err := agent.replayMemories(context.Background(), rep1)
+	if err != nil {
+		t.Fatalf("cycle 1 replay failed: %v", err)
+	}
+	if len(out1) != len(pool) {
+		t.Fatalf("cycle 1: expected %d replayed, got %d", len(pool), len(out1))
+	}
+
+	// Second cycle: ring excludes all of them, but fallback should still pick them.
+	rep2 := &DreamReport{}
+	out2, err := agent.replayMemories(context.Background(), rep2)
+	if err != nil {
+		t.Fatalf("cycle 2 replay failed: %v", err)
+	}
+	if len(out2) != len(pool) {
+		t.Fatalf("cycle 2: expected fallback to pick %d, got %d", len(pool), len(out2))
+	}
 }
 
 // crossProjectMockStore tracks associations created and returns configured embedding results.

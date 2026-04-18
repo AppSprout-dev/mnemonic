@@ -42,7 +42,18 @@ type DreamingAgent struct {
 	wg          sync.WaitGroup
 	stopOnce    sync.Once
 	triggerCh   chan struct{}
+
+	// recentReplayIDs is a FIFO of memory IDs replayed in recent cycles. The
+	// next cycle's replay sample is drawn from the active pool *minus* this set,
+	// rotating through the memory base instead of Groundhog-Day'ing the same
+	// high-created_at window. Holds ~replayRingCycles * BatchSize entries.
+	recentReplayIDs []string
+	recentReplayMu  sync.Mutex
 }
+
+// replayRingCycles is how many cycles' worth of replay IDs to exclude from the
+// next cycle's sample. Higher = wider rotation but faster pool exhaustion.
+const replayRingCycles = 3
 
 type DreamReport struct {
 	Duration                 time.Duration
@@ -254,25 +265,87 @@ func (da *DreamingAgent) runCycle(ctx context.Context) (*DreamReport, error) {
 	return report, nil
 }
 
-// replayMemories performs Phase 1: get top memories by salience and increment their access.
+// replayMemories performs Phase 1: select the next sample of salience-qualifying
+// memories and increment their access. Rotates across cycles by excluding IDs
+// replayed in the last replayRingCycles cycles, so dream phases see fresh
+// substrate instead of re-evaluating the same top-N created_at window. Falls
+// back to previously-excluded memories if the active pool is smaller than the
+// ring, preserving throughput when the DB is small.
 func (da *DreamingAgent) replayMemories(ctx context.Context, report *DreamReport) ([]store.Memory, error) {
-	memories, err := da.store.ListMemories(ctx, "active", da.config.BatchSize, 0)
+	target := da.config.BatchSize
+	if target <= 0 {
+		return nil, nil
+	}
+
+	// Pull a pool wider than the ring so there's always room for fresh picks.
+	poolSize := target * (replayRingCycles + 1)
+	pool, err := da.store.ListMemories(ctx, "active", poolSize, 0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list active memories: %w", err)
 	}
 
-	var replayed []store.Memory
+	da.recentReplayMu.Lock()
+	excluded := make(map[string]struct{}, len(da.recentReplayIDs))
+	for _, id := range da.recentReplayIDs {
+		excluded[id] = struct{}{}
+	}
+	da.recentReplayMu.Unlock()
 
-	for _, mem := range memories {
-		if mem.Salience >= da.config.SalienceThreshold {
-			if err := da.store.IncrementAccess(ctx, mem.ID); err != nil {
-				da.log.Warn("failed to increment access for memory", "memory_id", mem.ID, "error", err)
+	replayed := make([]store.Memory, 0, target)
+	picked := make(map[string]struct{}, target)
+	newIDs := make([]string, 0, target)
+
+	take := func(mem store.Memory) bool {
+		if err := da.store.IncrementAccess(ctx, mem.ID); err != nil {
+			da.log.Warn("failed to increment access for memory", "memory_id", mem.ID, "error", err)
+			return false
+		}
+		replayed = append(replayed, mem)
+		picked[mem.ID] = struct{}{}
+		newIDs = append(newIDs, mem.ID)
+		report.MemoriesReplayed++
+		return true
+	}
+
+	// Pass 1: fresh picks — salient and not in the recent-replay ring.
+	for _, mem := range pool {
+		if len(replayed) >= target {
+			break
+		}
+		if mem.Salience < da.config.SalienceThreshold {
+			continue
+		}
+		if _, seen := excluded[mem.ID]; seen {
+			continue
+		}
+		take(mem)
+	}
+
+	// Pass 2: fallback — if the pool was smaller than the ring, relax the
+	// rotation filter rather than starve the cycle.
+	if len(replayed) < target {
+		for _, mem := range pool {
+			if len(replayed) >= target {
+				break
+			}
+			if mem.Salience < da.config.SalienceThreshold {
 				continue
 			}
-			replayed = append(replayed, mem)
-			report.MemoriesReplayed++
+			if _, already := picked[mem.ID]; already {
+				continue
+			}
+			take(mem)
 		}
 	}
+
+	// Roll the ring forward: append this cycle's picks, trim to the window.
+	ringCapacity := target * replayRingCycles
+	da.recentReplayMu.Lock()
+	da.recentReplayIDs = append(da.recentReplayIDs, newIDs...)
+	if overflow := len(da.recentReplayIDs) - ringCapacity; overflow > 0 {
+		da.recentReplayIDs = da.recentReplayIDs[overflow:]
+	}
+	da.recentReplayMu.Unlock()
 
 	return replayed, nil
 }
