@@ -32,13 +32,16 @@ type AbstractionConfig struct {
 	// behavior fixed for consolidation in PRs #412 and #414. Default: 2.
 	DedupMinConceptOverlap int
 	// ArchiveDecayConfidence is the confidence threshold below which a
-	// sufficiently-old abstraction with low grounding is archived instead of
-	// cycled through demotion indefinitely. Default: 0.2.
+	// chronically-demoted abstraction is archived instead of cycled through
+	// demotion indefinitely. Default: 0.2.
 	ArchiveDecayConfidence float32
-	// ArchiveDecayMinAge is the minimum age for an abstraction to be eligible
-	// for decay-driven archival. Protects young abstractions that haven't had
-	// time to re-ground. Default: 14 days.
-	ArchiveDecayMinAge time.Duration
+	// ArchiveDemotionStreak is the number of consecutive grounding-verification
+	// cycles in which the abstraction's grounding ratio must stay below the
+	// "healthy" threshold (0.5) before decay-driven archival fires. Counted
+	// via the DemotionStreak field on the abstraction and reset to 0 on any
+	// healthy cycle. Robust to adaptive scheduler cadence in a way that a
+	// wall-clock age threshold is not. Default: 10.
+	ArchiveDemotionStreak int
 }
 
 type AbstractionAgent struct {
@@ -443,12 +446,28 @@ func (aa *AbstractionAgent) verifyGrounding(ctx context.Context, report *CycleRe
 				groundingFloor = 0.5
 			}
 
+			// Healthy grounding: reset any accumulated streak and skip.
+			// Only write when there is something to reset, to avoid
+			// touching thriving abstractions on every cycle.
+			if groundingRatio >= 0.5 {
+				if abs.DemotionStreak > 0 {
+					abs.DemotionStreak = 0
+					abs.UpdatedAt = time.Now()
+					if err := aa.store.UpdateAbstraction(ctx, abs); err != nil {
+						aa.log.Warn("failed to reset demotion streak", "id", abs.ID, "error", err)
+					}
+				}
+				continue
+			}
+
+			// Any non-healthy cycle is a strike on the streak, regardless of
+			// which decay band the ratio lands in. The streak is the durable
+			// "this abstraction has been failing" signal used for archival.
+			abs.DemotionStreak++
+
 			// Graduated grounding response
 			demotedThisCycle := false
 			switch {
-			case groundingRatio >= 0.5:
-				// Healthy grounding, no action needed
-				continue
 			case groundingRatio >= 0.3:
 				// Moderate decay: reduce confidence slightly
 				abs.Confidence *= moderateDecay
@@ -472,21 +491,22 @@ func (aa *AbstractionAgent) verifyGrounding(ctx context.Context, report *CycleRe
 				abs.Confidence = groundingFloor
 			}
 
-			// Archive escape hatch: abstractions that are old, chronically
-			// under-grounded, and have decayed past the archive threshold
-			// should be archived so they stop cycling through demotion every
-			// pass. Without this, grounding-starved abstractions in the
-			// 0.1-0.3 ratio band shrink toward zero confidence but never
-			// transition out of "active", producing a stuck demotion loop.
+			// Archive escape hatch: any "active" abstraction that has been
+			// non-healthy for N consecutive cycles AND has decayed past the
+			// archive confidence threshold is moved to archived. This is the
+			// only exit from the demote-forever loop for abstractions stuck
+			// in the 0.1-0.3 ratio band that never fall far enough to fade.
+			// Young abstractions (< 7d) are protected via isYoung so newly
+			// created abstractions get time to re-ground.
 			archiveConf := aa.config.ArchiveDecayConfidence
 			if archiveConf <= 0 {
 				archiveConf = 0.2
 			}
-			archiveMinAge := aa.config.ArchiveDecayMinAge
-			if archiveMinAge <= 0 {
-				archiveMinAge = 14 * 24 * time.Hour
+			archiveStreak := aa.config.ArchiveDemotionStreak
+			if archiveStreak <= 0 {
+				archiveStreak = 10
 			}
-			if abs.State == "active" && !isYoung && ageHours >= archiveMinAge.Hours() && abs.Confidence < archiveConf {
+			if abs.State == "active" && !isYoung && abs.DemotionStreak >= archiveStreak && abs.Confidence < archiveConf {
 				abs.State = "archived"
 				report.AbstractionsArchived++
 				if demotedThisCycle {
@@ -500,7 +520,12 @@ func (aa *AbstractionAgent) verifyGrounding(ctx context.Context, report *CycleRe
 				continue
 			}
 			aa.log.Info("abstraction grounding adjusted",
-				"id", abs.ID, "title", abs.Title, "grounding_ratio", groundingRatio, "new_confidence", abs.Confidence, "state", abs.State)
+				"id", abs.ID, "title", abs.Title,
+				"grounding_ratio", groundingRatio,
+				"new_confidence", abs.Confidence,
+				"state", abs.State,
+				"demotion_streak", abs.DemotionStreak,
+			)
 		}
 	}
 

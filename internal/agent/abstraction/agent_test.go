@@ -120,14 +120,18 @@ func TestFindSimilarAbstraction_TitleMatchStillNeedsConcepts(t *testing.T) {
 	}
 }
 
-// groundingMockStore fakes ListAbstractions/GetPattern/GetMemory/UpdateAbstraction
-// so we can exercise verifyGrounding without a real database. The only thing
-// that matters for archival tests is: what state is the abstraction in after
-// the cycle? — which we capture via the updates map.
+// groundingMockStore fakes ListAbstractions / GetMemory / GetPattern /
+// UpdateAbstraction so we can exercise verifyGrounding without a real
+// database. Memories are returned as "archived" by default (grounding ratio
+// drops to 0). Memories whose ID matches activeMemoryID are returned as
+// "active" — letting a test dial groundingRatio via the source-memory list
+// size. The updates map captures the resulting abstraction state after the
+// cycle.
 type groundingMockStore struct {
 	storetest.MockStore
-	abstractions []store.Abstraction
-	updates      map[string]store.Abstraction
+	abstractions   []store.Abstraction
+	activeMemoryID string
+	updates        map[string]store.Abstraction
 }
 
 func (m *groundingMockStore) ListAbstractions(_ context.Context, level, _ int) ([]store.Abstraction, error) {
@@ -140,10 +144,10 @@ func (m *groundingMockStore) ListAbstractions(_ context.Context, level, _ int) (
 	return out, nil
 }
 
-// GetMemory and GetPattern both return ErrNotFound so the grounding ratio is
-// computed entirely from the abstraction's SourceMemoryIDs / SourcePatternIDs
-// counts vs. what we return as active. We want groundingRatio = 0 here.
-func (m *groundingMockStore) GetMemory(_ context.Context, _ string) (store.Memory, error) {
+func (m *groundingMockStore) GetMemory(_ context.Context, id string) (store.Memory, error) {
+	if m.activeMemoryID != "" && id == m.activeMemoryID {
+		return store.Memory{State: "active"}, nil
+	}
 	return store.Memory{State: "archived"}, nil
 }
 
@@ -159,42 +163,124 @@ func (m *groundingMockStore) UpdateAbstraction(_ context.Context, a store.Abstra
 	return nil
 }
 
-// TestVerifyGrounding_ArchivesDecayedOldAbstraction verifies that an abstraction
-// which is (a) old enough, (b) has low grounding, and (c) has already decayed
-// below the archive-confidence threshold is moved to "archived" state instead
-// of being demoted again. Fixes the stuck "abstractions_demoted=8" loop where
-// grounding-starved abstractions would cycle through demotion forever without
-// any archival exit.
-func TestVerifyGrounding_ArchivesDecayedOldAbstraction(t *testing.T) {
-	oldDecayed := store.Abstraction{
-		ID:              "old-decayed",
-		Level:           2,
-		State:           "active",
-		Confidence:      0.25, // will drop to 0.175 after 0.7× decay, below 0.2 threshold
-		AccessCount:     0,
-		CreatedAt:       time.Now().Add(-30 * 24 * time.Hour), // 30 days old
-		SourceMemoryIDs: []string{"mem-a", "mem-b", "mem-c"},  // all will resolve as archived
-	}
-
-	ms := &groundingMockStore{abstractions: []store.Abstraction{oldDecayed}}
-	agent := NewAbstractionAgent(ms, nil, AbstractionConfig{
+// standardStreakConfig is the archival-relevant config used by the streak tests.
+func standardStreakConfig() AbstractionConfig {
+	return AbstractionConfig{
+		ConfidenceModerateDecay:    0.9,
 		ConfidenceSignificantDecay: 0.7,
+		ConfidenceSevereDecay:      0.5,
 		GroundingFloor:             0.5,
 		ArchiveDecayConfidence:     0.2,
-		ArchiveDecayMinAge:         14 * 24 * time.Hour,
-	}, silentLogger())
+		ArchiveDemotionStreak:      3,
+	}
+}
+
+// TestVerifyGrounding_IncrementsStreakOnDemote verifies that a cycle where
+// grounding is below the healthy threshold bumps DemotionStreak by 1 without
+// (yet) archiving, when the streak is still below the archive threshold.
+func TestVerifyGrounding_IncrementsStreakOnDemote(t *testing.T) {
+	a := store.Abstraction{
+		ID:              "streak-1",
+		Level:           2,
+		State:           "active",
+		Confidence:      0.4,
+		DemotionStreak:  0,
+		CreatedAt:       time.Now().Add(-30 * 24 * time.Hour),
+		SourceMemoryIDs: []string{"mem-a", "mem-b"}, // all archived → ratio 0 (severe)
+	}
+
+	ms := &groundingMockStore{abstractions: []store.Abstraction{a}}
+	agent := NewAbstractionAgent(ms, nil, standardStreakConfig(), silentLogger())
 
 	report := &CycleReport{}
 	if err := agent.verifyGrounding(context.Background(), report); err != nil {
 		t.Fatalf("verifyGrounding failed: %v", err)
 	}
 
-	got, ok := ms.updates[oldDecayed.ID]
+	got, ok := ms.updates[a.ID]
+	if !ok {
+		t.Fatalf("expected abstraction update, got none")
+	}
+	if got.DemotionStreak != 1 {
+		t.Errorf("expected DemotionStreak=1, got %d", got.DemotionStreak)
+	}
+	if got.State != "active" {
+		t.Errorf("expected state=active (streak below threshold), got %s", got.State)
+	}
+	if report.AbstractionsArchived != 0 {
+		t.Errorf("expected AbstractionsArchived=0, got %d", report.AbstractionsArchived)
+	}
+}
+
+// TestVerifyGrounding_ResetsStreakOnHealthy verifies that when an abstraction
+// is healthy (ratio >= 0.5), a previously accumulated streak is reset to 0 and
+// the abstraction is left in state=active. The reset must be persisted.
+func TestVerifyGrounding_ResetsStreakOnHealthy(t *testing.T) {
+	a := store.Abstraction{
+		ID:              "streak-reset",
+		Level:           2,
+		State:           "active",
+		Confidence:      0.4,
+		DemotionStreak:  5, // previously accumulated
+		CreatedAt:       time.Now().Add(-30 * 24 * time.Hour),
+		SourceMemoryIDs: []string{"mem-active"}, // 1/1 active → ratio 1.0 (healthy)
+	}
+
+	ms := &groundingMockStore{
+		abstractions:   []store.Abstraction{a},
+		activeMemoryID: "mem-active",
+	}
+	agent := NewAbstractionAgent(ms, nil, standardStreakConfig(), silentLogger())
+
+	report := &CycleReport{}
+	if err := agent.verifyGrounding(context.Background(), report); err != nil {
+		t.Fatalf("verifyGrounding failed: %v", err)
+	}
+
+	got, ok := ms.updates[a.ID]
+	if !ok {
+		t.Fatalf("expected abstraction update (streak reset must persist), got none")
+	}
+	if got.DemotionStreak != 0 {
+		t.Errorf("expected DemotionStreak=0 after healthy cycle, got %d", got.DemotionStreak)
+	}
+	if got.State != "active" {
+		t.Errorf("expected state=active, got %s", got.State)
+	}
+}
+
+// TestVerifyGrounding_ArchivesWhenStreakAndConfidenceThresholdsMet verifies
+// the escape hatch fires when an abstraction is old, below the confidence
+// threshold, and at/past the streak threshold. This is the fix for the stuck
+// "abstractions_demoted=8" loop.
+func TestVerifyGrounding_ArchivesWhenStreakAndConfidenceThresholdsMet(t *testing.T) {
+	a := store.Abstraction{
+		ID:              "ready-to-archive",
+		Level:           2,
+		State:           "active",
+		Confidence:      0.25, // 0.25 * 0.7 = 0.175 < 0.2 after this cycle's decay
+		DemotionStreak:  2,    // +1 this cycle = 3, matches ArchiveDemotionStreak
+		CreatedAt:       time.Now().Add(-30 * 24 * time.Hour),
+		SourceMemoryIDs: []string{"mem-a", "mem-b", "mem-c", "mem-d", "mem-e"}, // 1/5 active → 0.2 ratio (significant)
+	}
+
+	ms := &groundingMockStore{
+		abstractions:   []store.Abstraction{a},
+		activeMemoryID: "mem-a",
+	}
+	agent := NewAbstractionAgent(ms, nil, standardStreakConfig(), silentLogger())
+
+	report := &CycleReport{}
+	if err := agent.verifyGrounding(context.Background(), report); err != nil {
+		t.Fatalf("verifyGrounding failed: %v", err)
+	}
+
+	got, ok := ms.updates[a.ID]
 	if !ok {
 		t.Fatalf("expected abstraction update, got none")
 	}
 	if got.State != "archived" {
-		t.Errorf("expected state=archived, got state=%s (confidence=%v)", got.State, got.Confidence)
+		t.Errorf("expected state=archived (streak=%d, conf=%v), got %s", got.DemotionStreak, got.Confidence, got.State)
 	}
 	if report.AbstractionsArchived != 1 {
 		t.Errorf("expected AbstractionsArchived=1, got %d", report.AbstractionsArchived)
@@ -204,41 +290,33 @@ func TestVerifyGrounding_ArchivesDecayedOldAbstraction(t *testing.T) {
 	}
 }
 
-// TestVerifyGrounding_YoungAbstractionNotArchived verifies the grace-period
-// protection: an abstraction younger than ArchiveDecayMinAge must not be
-// archived even if its confidence is below the threshold. Young abstractions
-// get their confidence floored to GroundingFloor on decay.
+// TestVerifyGrounding_YoungAbstractionNotArchived verifies the isYoung
+// grace period (< 7 days): even with a high streak and low confidence, a
+// young abstraction must not be archived. Young abstractions get a
+// GroundingFloor on confidence.
 func TestVerifyGrounding_YoungAbstractionNotArchived(t *testing.T) {
-	youngDecayed := store.Abstraction{
-		ID:              "young-decayed",
+	young := store.Abstraction{
+		ID:              "young",
 		Level:           2,
 		State:           "active",
 		Confidence:      0.15,
-		AccessCount:     0,
-		CreatedAt:       time.Now().Add(-2 * 24 * time.Hour), // 2 days old, isYoung
-		SourceMemoryIDs: []string{"mem-a", "mem-b"},
+		DemotionStreak:  99,                                    // way past threshold
+		CreatedAt:       time.Now().Add(-2 * 24 * time.Hour),   // 2 days — isYoung
+		SourceMemoryIDs: []string{"mem-a", "mem-b", "mem-c"},
 	}
 
-	ms := &groundingMockStore{abstractions: []store.Abstraction{youngDecayed}}
-	agent := NewAbstractionAgent(ms, nil, AbstractionConfig{
-		ConfidenceSignificantDecay: 0.7,
-		GroundingFloor:             0.5,
-		ArchiveDecayConfidence:     0.2,
-		ArchiveDecayMinAge:         14 * 24 * time.Hour,
-	}, silentLogger())
+	ms := &groundingMockStore{abstractions: []store.Abstraction{young}}
+	agent := NewAbstractionAgent(ms, nil, standardStreakConfig(), silentLogger())
 
 	report := &CycleReport{}
 	if err := agent.verifyGrounding(context.Background(), report); err != nil {
 		t.Fatalf("verifyGrounding failed: %v", err)
 	}
 
-	got, ok := ms.updates[youngDecayed.ID]
+	got, ok := ms.updates[young.ID]
 	if !ok {
 		t.Fatalf("expected abstraction update, got none")
 	}
-	// The young abstraction may still transition to "fading" via existing
-	// severe-decay logic — that is unchanged. What MUST hold: it is not
-	// archived by the new decay-driven archival path.
 	if got.State == "archived" {
 		t.Errorf("expected young abstraction NOT to be archived, got state=%s", got.State)
 	}

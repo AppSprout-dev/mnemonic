@@ -10,7 +10,7 @@ import (
 // migration is added. It is written to PRAGMA user_version after InitSchema
 // completes, and read by the pre-migration backup logic to skip backups when
 // the schema is already current.
-const SchemaVersion = 18
+const SchemaVersion = 19
 
 const schema = `
 -- Raw observations before encoding
@@ -665,6 +665,15 @@ INSERT OR IGNORE INTO forum_categories (id, name, slug, description, icon, color
 	}
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_training_runs_status ON training_runs(status)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_training_runs_started_at ON training_runs(started_at)`)
+
+	// Migration 019: demotion_streak for abstractions — counts consecutive cycles
+	// in which grounding fell below the "healthy" threshold. Replaces the
+	// earlier wall-clock age heuristic for deciding when to archive a
+	// chronically-decayed abstraction. Reset to 0 on any healthy cycle.
+	_, err = db.Exec(`ALTER TABLE abstractions ADD COLUMN demotion_streak INTEGER NOT NULL DEFAULT 0`)
+	if err != nil && !isAlterTableDuplicateColumn(err) {
+		return fmt.Errorf("failed to add abstractions.demotion_streak column: %w", err)
+	}
 
 	// Record the schema version so pre-migration backups can skip when current.
 	if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", SchemaVersion)); err != nil {
