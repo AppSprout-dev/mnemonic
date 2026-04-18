@@ -293,7 +293,7 @@ func (p *EmbeddedProvider) Complete(ctx context.Context, req CompletionRequest) 
 	}
 
 	if err := p.acquire(ctx); err != nil {
-		return CompletionResponse{}, fmt.Errorf("embedded provider busy: %w", err)
+		return CompletionResponse{}, fmt.Errorf("embedded provider: %w", err)
 	}
 	defer p.release()
 
@@ -409,7 +409,7 @@ func (p *EmbeddedProvider) BatchEmbed(ctx context.Context, texts []string) ([][]
 	}
 
 	if err := p.acquire(ctx); err != nil {
-		return nil, fmt.Errorf("embedded provider busy: %w", err)
+		return nil, fmt.Errorf("embedded provider: %w", err)
 	}
 	defer p.release()
 
