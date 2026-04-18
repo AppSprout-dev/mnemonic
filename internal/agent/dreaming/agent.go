@@ -53,6 +53,14 @@ type DreamReport struct {
 	PatternLinks             int
 	InsightsGenerated        int
 	NoisyMemoriesDemoted     int
+
+	// Observability counters — rejections by silent gates. Used to characterize
+	// whether dreaming phases are under- or over-filtering candidates.
+	CrossPollinateRejectedConcept int
+	CrossProjectRejectedEmbedding int
+	CrossProjectRejectedConcept   int
+	PatternLinkRejectedConcept    int
+	InsightRejectedLLM            int
 }
 
 func NewDreamingAgent(s store.Store, llmProv llm.Provider, cfg DreamingConfig, log *slog.Logger) *DreamingAgent {
@@ -127,6 +135,11 @@ func (da *DreamingAgent) loop() {
 				"pattern_links", report.PatternLinks,
 				"insights_generated", report.InsightsGenerated,
 				"noisy_memories_demoted", report.NoisyMemoriesDemoted,
+				"cross_pollinate_rejected_concept", report.CrossPollinateRejectedConcept,
+				"cross_project_rejected_embedding", report.CrossProjectRejectedEmbedding,
+				"cross_project_rejected_concept", report.CrossProjectRejectedConcept,
+				"pattern_link_rejected_concept", report.PatternLinkRejectedConcept,
+				"insight_rejected_llm", report.InsightRejectedLLM,
 			)
 		}
 	}
@@ -325,23 +338,36 @@ func (da *DreamingAgent) crossPollinate(ctx context.Context, replayed []store.Me
 		}
 
 		for _, candidate := range related {
-			if !linkedIDs[candidate.ID] && countSharedConcepts(mem.Concepts, candidate.Concepts) >= 2 {
-				newAssoc := store.Association{
-					SourceID:      mem.ID,
-					TargetID:      candidate.ID,
-					Strength:      0.3,
-					RelationType:  "similar",
-					CreatedAt:     time.Now(),
-					LastActivated: time.Now(),
-				}
-
-				if err := da.store.CreateAssociation(ctx, newAssoc); err != nil {
-					da.log.Warn("failed to create association", "source_id", mem.ID, "target_id", candidate.ID, "error", err)
-					continue
-				}
-
-				report.NewAssociationsCreated++
+			if linkedIDs[candidate.ID] {
+				continue
 			}
+			overlap := countSharedConcepts(mem.Concepts, candidate.Concepts)
+			if overlap < 2 {
+				da.log.Info("dreaming.crossPollinate concept-gate reject",
+					"memory_id", mem.ID,
+					"candidate_id", candidate.ID,
+					"overlap", overlap,
+					"required", 2,
+				)
+				report.CrossPollinateRejectedConcept++
+				continue
+			}
+
+			newAssoc := store.Association{
+				SourceID:      mem.ID,
+				TargetID:      candidate.ID,
+				Strength:      0.3,
+				RelationType:  "similar",
+				CreatedAt:     time.Now(),
+				LastActivated: time.Now(),
+			}
+
+			if err := da.store.CreateAssociation(ctx, newAssoc); err != nil {
+				da.log.Warn("failed to create association", "source_id", mem.ID, "target_id", candidate.ID, "error", err)
+				continue
+			}
+
+			report.NewAssociationsCreated++
 		}
 	}
 
@@ -431,11 +457,29 @@ func (da *DreamingAgent) crossProjectLink(ctx context.Context, replayed []store.
 				continue
 			}
 			if result.Score < 0.75 {
+				da.log.Info("dreaming.crossProjectLink embedding-gate reject",
+					"memory_id", mem.ID,
+					"candidate_id", result.Memory.ID,
+					"candidate_project", result.Memory.Project,
+					"score", result.Score,
+					"required", 0.75,
+				)
+				report.CrossProjectRejectedEmbedding++
 				continue
 			}
 
 			// Require at least 1 shared concept to avoid spurious embedding-only links
-			if countSharedConcepts(mem.Concepts, result.Memory.Concepts) < 1 {
+			overlap := countSharedConcepts(mem.Concepts, result.Memory.Concepts)
+			if overlap < 1 {
+				da.log.Info("dreaming.crossProjectLink concept-gate reject",
+					"memory_id", mem.ID,
+					"candidate_id", result.Memory.ID,
+					"candidate_project", result.Memory.Project,
+					"score", result.Score,
+					"overlap", overlap,
+					"required", 1,
+				)
+				report.CrossProjectRejectedConcept++
 				continue
 			}
 
@@ -487,7 +531,16 @@ func (da *DreamingAgent) linkToPatterns(ctx context.Context, replayed []store.Me
 			}
 
 			// Require at least 1 shared concept to validate pattern relevance
-			if countSharedConcepts(mem.Concepts, pattern.Concepts) < 1 {
+			overlap := countSharedConcepts(mem.Concepts, pattern.Concepts)
+			if overlap < 1 {
+				da.log.Info("dreaming.linkToPatterns concept-gate reject",
+					"memory_id", mem.ID,
+					"pattern_id", pattern.ID,
+					"pattern_title", pattern.Title,
+					"overlap", overlap,
+					"required", 1,
+				)
+				report.PatternLinkRejectedConcept++
 				continue
 			}
 
@@ -555,6 +608,7 @@ func (da *DreamingAgent) generateInsights(ctx context.Context, replayed []store.
 			continue
 		}
 		if insight == nil {
+			report.InsightRejectedLLM++
 			continue
 		}
 
@@ -673,6 +727,13 @@ Only share an insight if it's genuinely illuminating — something that makes yo
 	}
 
 	if !result.HasInsight || result.Title == "" || result.Insight == "" {
+		da.log.Info("dreaming.synthesizeInsight LLM-gate reject",
+			"cluster_size", len(cluster),
+			"memory_ids", memoryIDs,
+			"has_insight", result.HasInsight,
+			"title_empty", result.Title == "",
+			"insight_empty", result.Insight == "",
+		)
 		return nil, nil
 	}
 
