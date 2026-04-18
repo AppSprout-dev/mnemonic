@@ -431,3 +431,150 @@ func TestFindSimilarAbstraction_StrongTitleMatchBypassesConceptGate(t *testing.T
 		t.Errorf("expected strong title+embedding match to bypass concept gate, got %+v", match)
 	}
 }
+
+// patternMockStore is a minimal ListPatterns/ListAbstractions stub. The
+// fingerprint-gating tests only need to control what the two list calls
+// return; everything else falls through to MockStore's zero-value methods.
+type patternMockStore struct {
+	storetest.MockStore
+	patterns     []store.Pattern
+	abstractions []store.Abstraction
+}
+
+func (m *patternMockStore) ListPatterns(context.Context, string, int) ([]store.Pattern, error) {
+	return m.patterns, nil
+}
+
+func (m *patternMockStore) ListAbstractions(_ context.Context, level, _ int) ([]store.Abstraction, error) {
+	var out []store.Abstraction
+	for _, a := range m.abstractions {
+		if a.Level == level {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
+// TestFingerprintPatterns_StableAndSensitive verifies fingerprintPatterns is
+// deterministic under reordering and float-wobble-below-quantum, and changes
+// when a pattern's strength crosses the 0.01 quantum or an ID shifts.
+func TestFingerprintPatterns_StableAndSensitive(t *testing.T) {
+	base := []store.Pattern{
+		{ID: "p1", Strength: 0.80},
+		{ID: "p2", Strength: 0.72},
+		{ID: "p3", Strength: 0.65},
+	}
+	fpBase := fingerprintPatterns(base)
+
+	reordered := []store.Pattern{base[2], base[0], base[1]}
+	if got := fingerprintPatterns(reordered); got != fpBase {
+		t.Errorf("fingerprint should be order-independent, got %x want %x", got, fpBase)
+	}
+
+	wobble := []store.Pattern{
+		{ID: "p1", Strength: 0.803}, // still 0.80 at 2dp
+		{ID: "p2", Strength: 0.724},
+		{ID: "p3", Strength: 0.651},
+	}
+	if got := fingerprintPatterns(wobble); got != fpBase {
+		t.Errorf("sub-quantum wobble must not change fingerprint, got %x want %x", got, fpBase)
+	}
+
+	strengthened := []store.Pattern{
+		{ID: "p1", Strength: 0.82}, // crosses 0.01 quantum
+		{ID: "p2", Strength: 0.72},
+		{ID: "p3", Strength: 0.65},
+	}
+	if got := fingerprintPatterns(strengthened); got == fpBase {
+		t.Errorf("strength change of 0.02 must change fingerprint, got %x == baseline", got)
+	}
+
+	added := append([]store.Pattern{}, base...)
+	added = append(added, store.Pattern{ID: "p4", Strength: 0.70})
+	if got := fingerprintPatterns(added); got == fpBase {
+		t.Errorf("adding a pattern must change fingerprint, got %x == baseline", got)
+	}
+}
+
+// TestSynthesizePrinciples_SkipsWhenSubstrateUnchanged verifies that a second
+// call on an identical strong-pattern set short-circuits before clustering.
+// Proxy for skipping: report.PrinciplesSkippedNoChange must be true on the
+// second call and false on the first.
+func TestSynthesizePrinciples_SkipsWhenSubstrateUnchanged(t *testing.T) {
+	// Orthogonal embeddings across patterns → no cluster of 2+ forms →
+	// cluster loop skips all entries → no LLM call needed (nil provider is fine).
+	patterns := []store.Pattern{
+		{ID: "p1", Strength: 0.9, State: "active", Embedding: []float32{1, 0, 0}},
+		{ID: "p2", Strength: 0.9, State: "active", Embedding: []float32{0, 1, 0}},
+		{ID: "p3", Strength: 0.9, State: "active", Embedding: []float32{0, 0, 1}},
+	}
+	ms := &patternMockStore{patterns: patterns}
+	cfg := AbstractionConfig{MinStrength: 0.5, MaxLLMCalls: 0} // LLM budget 0 so no LLM call is attempted
+	agent := NewAbstractionAgent(ms, nil, cfg, silentLogger())
+
+	r1 := &CycleReport{}
+	if err := agent.synthesizePrinciples(context.Background(), r1); err != nil {
+		t.Fatalf("first cycle: %v", err)
+	}
+	if r1.PrinciplesSkippedNoChange {
+		t.Errorf("first cycle should NOT be skipped (empty baseline fingerprint)")
+	}
+	if r1.PatternsEvaluated != 3 {
+		t.Errorf("first cycle should evaluate 3 patterns, got %d", r1.PatternsEvaluated)
+	}
+
+	r2 := &CycleReport{}
+	if err := agent.synthesizePrinciples(context.Background(), r2); err != nil {
+		t.Fatalf("second cycle: %v", err)
+	}
+	if !r2.PrinciplesSkippedNoChange {
+		t.Errorf("second cycle should be skipped (substrate unchanged)")
+	}
+}
+
+// TestSynthesizePrinciples_GateOpensOnStrengthChange verifies that mutating a
+// pattern's strength between calls invalidates the fingerprint and re-runs.
+func TestSynthesizePrinciples_GateOpensOnStrengthChange(t *testing.T) {
+	ms := &patternMockStore{patterns: []store.Pattern{
+		{ID: "p1", Strength: 0.9, State: "active", Embedding: []float32{1, 0, 0}},
+		{ID: "p2", Strength: 0.9, State: "active", Embedding: []float32{0, 1, 0}},
+	}}
+	cfg := AbstractionConfig{MinStrength: 0.5, MaxLLMCalls: 0}
+	agent := NewAbstractionAgent(ms, nil, cfg, silentLogger())
+
+	r1 := &CycleReport{}
+	_ = agent.synthesizePrinciples(context.Background(), r1)
+
+	ms.patterns[0].Strength = 0.75 // mutate — fingerprint must change
+
+	r2 := &CycleReport{}
+	if err := agent.synthesizePrinciples(context.Background(), r2); err != nil {
+		t.Fatalf("second cycle: %v", err)
+	}
+	if r2.PrinciplesSkippedNoChange {
+		t.Errorf("second cycle should NOT be skipped after strength change")
+	}
+}
+
+// TestSynthesizeAxioms_SkipsWhenSubstrateUnchanged is the level-2 analogue.
+func TestSynthesizeAxioms_SkipsWhenSubstrateUnchanged(t *testing.T) {
+	principles := []store.Abstraction{
+		{ID: "a1", Level: 2, State: "active", Confidence: 0.8, Embedding: []float32{1, 0, 0}},
+		{ID: "a2", Level: 2, State: "active", Confidence: 0.8, Embedding: []float32{0, 1, 0}},
+	}
+	ms := &patternMockStore{abstractions: principles}
+	cfg := AbstractionConfig{MaxLLMCalls: 0}
+	agent := NewAbstractionAgent(ms, nil, cfg, silentLogger())
+
+	r1 := &CycleReport{}
+	_ = agent.synthesizeAxioms(context.Background(), r1)
+	if r1.AxiomsSkippedNoChange {
+		t.Errorf("first cycle should NOT be skipped")
+	}
+
+	r2 := &CycleReport{}
+	_ = agent.synthesizeAxioms(context.Background(), r2)
+	if !r2.AxiomsSkippedNoChange {
+		t.Errorf("second cycle should be skipped (principle substrate unchanged)")
+	}
+}

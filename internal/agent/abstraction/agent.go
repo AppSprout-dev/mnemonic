@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -55,15 +57,25 @@ type AbstractionAgent struct {
 	wg          sync.WaitGroup
 	stopOnce    sync.Once
 	triggerCh   chan struct{} // allows on-demand abstraction when patterns are discovered
+
+	// Substrate-change fingerprints — skip the cluster+LLM loop when the input
+	// set is identical to the last cycle's. Resets on process restart so the
+	// first post-restart cycle always runs (cold-start-is-correct, matches the
+	// dream replay rotation design). See RC#2 in feat/abstraction-fingerprint-gating.
+	fingerprintMu            sync.Mutex
+	lastPrincipleFingerprint uint64
+	lastAxiomFingerprint     uint64
 }
 
 type CycleReport struct {
-	Duration             time.Duration
-	PatternsEvaluated    int
-	PrinciplesCreated    int
-	AxiomsCreated        int
-	AbstractionsDemoted  int
-	AbstractionsArchived int
+	Duration                  time.Duration
+	PatternsEvaluated         int
+	PrinciplesCreated         int
+	AxiomsCreated             int
+	AbstractionsDemoted       int
+	AbstractionsArchived      int
+	PrinciplesSkippedNoChange bool
+	AxiomsSkippedNoChange     bool
 }
 
 func NewAbstractionAgent(s store.Store, llmProv llm.Provider, cfg AbstractionConfig, log *slog.Logger) *AbstractionAgent {
@@ -140,6 +152,8 @@ func (aa *AbstractionAgent) loop() {
 				"axioms_created", report.AxiomsCreated,
 				"abstractions_demoted", report.AbstractionsDemoted,
 				"abstractions_archived", report.AbstractionsArchived,
+				"principles_skipped_no_change", report.PrinciplesSkippedNoChange,
+				"axioms_skipped_no_change", report.AxiomsSkippedNoChange,
 			)
 		}
 	}
@@ -213,6 +227,22 @@ func (aa *AbstractionAgent) synthesizePrinciples(ctx context.Context, report *Cy
 	if len(strong) < 2 {
 		return nil
 	}
+
+	// Substrate-change gate: if the strong-pattern set is identical to the last
+	// cycle's (same IDs at same quantized strengths), skip the cluster+LLM loop.
+	// Same-input cycles repeat the same dedup hits and waste LLM budget.
+	fingerprint := fingerprintPatterns(strong)
+	aa.fingerprintMu.Lock()
+	if aa.lastPrincipleFingerprint == fingerprint {
+		aa.fingerprintMu.Unlock()
+		report.PrinciplesSkippedNoChange = true
+		aa.log.Info("abstraction.principles skipped — strong-pattern substrate unchanged",
+			"fingerprint", fmt.Sprintf("%016x", fingerprint),
+			"strong_patterns", len(strong))
+		return nil
+	}
+	aa.lastPrincipleFingerprint = fingerprint
+	aa.fingerprintMu.Unlock()
 
 	// Cluster patterns by embedding similarity
 	clusters := clusterPatterns(strong, 0.8)
@@ -311,6 +341,20 @@ func (aa *AbstractionAgent) synthesizeAxioms(ctx context.Context, report *CycleR
 	if len(active) < 2 {
 		return nil
 	}
+
+	// Substrate-change gate on level-2 principles. See synthesizePrinciples for rationale.
+	fingerprint := fingerprintAbstractions(active)
+	aa.fingerprintMu.Lock()
+	if aa.lastAxiomFingerprint == fingerprint {
+		aa.fingerprintMu.Unlock()
+		report.AxiomsSkippedNoChange = true
+		aa.log.Info("abstraction.axioms skipped — principle substrate unchanged",
+			"fingerprint", fmt.Sprintf("%016x", fingerprint),
+			"active_principles", len(active))
+		return nil
+	}
+	aa.lastAxiomFingerprint = fingerprint
+	aa.fingerprintMu.Unlock()
 
 	clusters := clusterAbstractions(active, 0.85)
 
@@ -769,6 +813,41 @@ Set has_axiom to false if:
 // --- Helper functions ---
 
 // clusterPatterns groups patterns by embedding similarity (greedy clustering).
+// fingerprintPatterns returns an fnv64 hash of the sorted (id|quantizedStrength)
+// tuples of the input patterns. Strength is quantized to 2 decimals so minor
+// float wobble (AccessCount-driven updates, for example) does not churn the
+// fingerprint. A stable fingerprint means the cluster+LLM loop would produce
+// the same output as last cycle and can be skipped.
+func fingerprintPatterns(patterns []store.Pattern) uint64 {
+	parts := make([]string, len(patterns))
+	for i, p := range patterns {
+		parts[i] = fmt.Sprintf("%s|%.2f", p.ID, p.Strength)
+	}
+	sort.Strings(parts)
+	h := fnv.New64a()
+	for _, s := range parts {
+		_, _ = h.Write([]byte(s))
+		_, _ = h.Write([]byte{0})
+	}
+	return h.Sum64()
+}
+
+// fingerprintAbstractions is the axiom-synthesis analogue of fingerprintPatterns.
+// Uses Confidence as the salience field.
+func fingerprintAbstractions(abs []store.Abstraction) uint64 {
+	parts := make([]string, len(abs))
+	for i, a := range abs {
+		parts[i] = fmt.Sprintf("%s|%.2f", a.ID, a.Confidence)
+	}
+	sort.Strings(parts)
+	h := fnv.New64a()
+	for _, s := range parts {
+		_, _ = h.Write([]byte(s))
+		_, _ = h.Write([]byte{0})
+	}
+	return h.Sum64()
+}
+
 func clusterPatterns(patterns []store.Pattern, threshold float32) [][]store.Pattern {
 	if len(patterns) == 0 {
 		return nil
