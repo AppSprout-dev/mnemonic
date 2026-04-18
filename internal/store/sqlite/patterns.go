@@ -316,6 +316,63 @@ func (s *SQLiteStore) SearchPatternsByEmbeddingInProject(ctx context.Context, em
 	return patterns, nil
 }
 
+// SearchArchivedPatternsByEmbedding returns the top-k patterns in fading or
+// archived state ranked by cosine similarity to the given embedding. Used by
+// the consolidation pipeline to detect re-emergence of a previously-archived
+// canonical and resurrect it rather than write a duplicate. Mirrors the
+// in-memory search pattern of SearchPatternsByEmbedding; the state filter is
+// the only meaningful difference.
+func (s *SQLiteStore) SearchArchivedPatternsByEmbedding(ctx context.Context, embedding []float32, limit int) ([]store.Pattern, error) {
+	if len(embedding) == 0 {
+		return nil, fmt.Errorf("embedding cannot be empty")
+	}
+
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, embedding FROM patterns WHERE state IN ('fading', 'archived') AND embedding IS NOT NULL AND length(embedding) > 0`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query archived pattern embeddings: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	type candidate struct {
+		id    string
+		score float32
+	}
+	var candidates []candidate
+
+	for rows.Next() {
+		var id string
+		var blob []byte
+		if err := rows.Scan(&id, &blob); err != nil {
+			continue
+		}
+		emb := decodeEmbedding(blob)
+		if len(emb) == 0 {
+			continue
+		}
+		score := mathutil.CosineSimilarity(embedding, emb)
+		candidates = append(candidates, candidate{id: id, score: score})
+	}
+
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].score > candidates[j].score
+	})
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+
+	var patterns []store.Pattern
+	for _, c := range candidates {
+		p, err := s.GetPattern(ctx, c.id)
+		if err != nil {
+			continue
+		}
+		patterns = append(patterns, p)
+	}
+
+	return patterns, nil
+}
+
 // ArchivePattern archives a single pattern by ID.
 func (s *SQLiteStore) ArchivePattern(ctx context.Context, id string) error {
 	result, err := s.db.ExecContext(ctx,
