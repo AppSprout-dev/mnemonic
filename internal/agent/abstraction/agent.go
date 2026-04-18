@@ -31,6 +31,14 @@ type AbstractionConfig struct {
 	// of an existing abstraction. Prevents the same embedding-only attractor
 	// behavior fixed for consolidation in PRs #412 and #414. Default: 2.
 	DedupMinConceptOverlap int
+	// ArchiveDecayConfidence is the confidence threshold below which a
+	// sufficiently-old abstraction with low grounding is archived instead of
+	// cycled through demotion indefinitely. Default: 0.2.
+	ArchiveDecayConfidence float32
+	// ArchiveDecayMinAge is the minimum age for an abstraction to be eligible
+	// for decay-driven archival. Protects young abstractions that haven't had
+	// time to re-ground. Default: 14 days.
+	ArchiveDecayMinAge time.Duration
 }
 
 type AbstractionAgent struct {
@@ -47,11 +55,12 @@ type AbstractionAgent struct {
 }
 
 type CycleReport struct {
-	Duration            time.Duration
-	PatternsEvaluated   int
-	PrinciplesCreated   int
-	AxiomsCreated       int
-	AbstractionsDemoted int
+	Duration             time.Duration
+	PatternsEvaluated    int
+	PrinciplesCreated    int
+	AxiomsCreated        int
+	AbstractionsDemoted  int
+	AbstractionsArchived int
 }
 
 func NewAbstractionAgent(s store.Store, llmProv llm.Provider, cfg AbstractionConfig, log *slog.Logger) *AbstractionAgent {
@@ -127,6 +136,7 @@ func (aa *AbstractionAgent) loop() {
 				"principles_created", report.PrinciplesCreated,
 				"axioms_created", report.AxiomsCreated,
 				"abstractions_demoted", report.AbstractionsDemoted,
+				"abstractions_archived", report.AbstractionsArchived,
 			)
 		}
 	}
@@ -434,6 +444,7 @@ func (aa *AbstractionAgent) verifyGrounding(ctx context.Context, report *CycleRe
 			}
 
 			// Graduated grounding response
+			demotedThisCycle := false
 			switch {
 			case groundingRatio >= 0.5:
 				// Healthy grounding, no action needed
@@ -445,6 +456,7 @@ func (aa *AbstractionAgent) verifyGrounding(ctx context.Context, report *CycleRe
 				// Significant decay: reduce confidence more
 				abs.Confidence *= significantDecay
 				report.AbstractionsDemoted++
+				demotedThisCycle = true
 			default:
 				// Nearly all evidence gone
 				abs.Confidence *= severeDecay
@@ -452,11 +464,34 @@ func (aa *AbstractionAgent) verifyGrounding(ctx context.Context, report *CycleRe
 					abs.State = "fading"
 				}
 				report.AbstractionsDemoted++
+				demotedThisCycle = true
 			}
 
 			// Enforce grace period floor for young abstractions
 			if isYoung && abs.Confidence < groundingFloor {
 				abs.Confidence = groundingFloor
+			}
+
+			// Archive escape hatch: abstractions that are old, chronically
+			// under-grounded, and have decayed past the archive threshold
+			// should be archived so they stop cycling through demotion every
+			// pass. Without this, grounding-starved abstractions in the
+			// 0.1-0.3 ratio band shrink toward zero confidence but never
+			// transition out of "active", producing a stuck demotion loop.
+			archiveConf := aa.config.ArchiveDecayConfidence
+			if archiveConf <= 0 {
+				archiveConf = 0.2
+			}
+			archiveMinAge := aa.config.ArchiveDecayMinAge
+			if archiveMinAge <= 0 {
+				archiveMinAge = 14 * 24 * time.Hour
+			}
+			if abs.State == "active" && !isYoung && ageHours >= archiveMinAge.Hours() && abs.Confidence < archiveConf {
+				abs.State = "archived"
+				report.AbstractionsArchived++
+				if demotedThisCycle {
+					report.AbstractionsDemoted-- // don't double-count: archive replaces demote
+				}
 			}
 
 			abs.UpdatedAt = time.Now()
