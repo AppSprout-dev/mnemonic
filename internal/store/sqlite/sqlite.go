@@ -1011,6 +1011,20 @@ func (s *SQLiteStore) UpdateState(ctx context.Context, id string, state string) 
 	return nil
 }
 
+// DeleteMemory hard-deletes a memory by ID. Associations, memory_resolutions,
+// concept_sets, and memory_attributes cascade via FK; FTS rows are removed via trigger.
+func (s *SQLiteStore) DeleteMemory(ctx context.Context, id string) error {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM memories WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("deleting memory %s: %w", id, err)
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("memory %s: %w", id, store.ErrNotFound)
+	}
+	return nil
+}
+
 // AmendMemory updates a memory's content, summary, concepts, and embedding in place,
 // preserving its ID, associations, and lifecycle metadata. Records the amendment for audit.
 func (s *SQLiteStore) AmendMemory(ctx context.Context, id string, newContent string, newSummary string, newConcepts []string, newEmbedding []float32) error {

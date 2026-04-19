@@ -352,6 +352,42 @@ func (s *SQLiteStore) UpdateForumPostState(ctx context.Context, id string, state
 	return nil
 }
 
+// UpdateForumPostContent rewrites a post's content body.
+func (s *SQLiteStore) UpdateForumPostContent(ctx context.Context, id string, content string) error {
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE forum_posts SET content = ?, updated_at = datetime('now') WHERE id = ?`, content, id)
+	if err != nil {
+		return fmt.Errorf("updating forum post content %s: %w", id, err)
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("forum post %s: %w", id, store.ErrNotFound)
+	}
+	return nil
+}
+
+// DeleteForumPost hard-deletes a forum post by ID. Returns an error if the post
+// has child replies (callers must delete descendants first).
+func (s *SQLiteStore) DeleteForumPost(ctx context.Context, id string) error {
+	var childCount int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM forum_posts WHERE parent_id = ?`, id).Scan(&childCount); err != nil {
+		return fmt.Errorf("checking forum post children %s: %w", id, err)
+	}
+	if childCount > 0 {
+		return fmt.Errorf("forum post %s has %d replies — delete those first", id, childCount)
+	}
+	result, err := s.db.ExecContext(ctx, `DELETE FROM forum_posts WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("deleting forum post %s: %w", id, err)
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("forum post %s: %w", id, store.ErrNotFound)
+	}
+	return nil
+}
+
 // CountForumPosts returns the total number of active forum posts.
 func (s *SQLiteStore) CountForumPosts(ctx context.Context) (int, error) {
 	var count int

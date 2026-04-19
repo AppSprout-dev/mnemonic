@@ -96,6 +96,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/v1/memories", routes.HandleCreateMemory(s.deps.Store, s.deps.Bus, s.deps.Log))
 	s.mux.HandleFunc("GET /api/v1/memories", routes.HandleListMemories(s.deps.Store, s.deps.Log))
 	s.mux.HandleFunc("GET /api/v1/memories/{id}", routes.HandleGetMemory(s.deps.Store, s.deps.Log))
+	s.mux.HandleFunc("PATCH /api/v1/memories/{id}", routes.HandleUpdateMemory(s.deps.Store, s.deps.Log))
+	s.mux.HandleFunc("DELETE /api/v1/memories/{id}", routes.HandleDeleteMemory(s.deps.Store, s.deps.Log))
 	s.mux.HandleFunc("GET /api/v1/memories/{id}/context", routes.HandleMemoryContext(s.deps.Store, s.deps.Log))
 
 	// Raw memory access
@@ -132,7 +134,10 @@ func (s *Server) registerRoutes() {
 	// Patterns and abstractions
 	s.mux.HandleFunc("GET /api/v1/patterns", routes.HandleListPatterns(s.deps.Store, s.deps.Log))
 	s.mux.HandleFunc("PATCH /api/v1/patterns/{id}", routes.HandleArchivePattern(s.deps.Store, s.deps.Log))
+	s.mux.HandleFunc("DELETE /api/v1/patterns/{id}", routes.HandleDeletePattern(s.deps.Store, s.deps.Log))
 	s.mux.HandleFunc("GET /api/v1/abstractions", routes.HandleListAbstractions(s.deps.Store, s.deps.Log))
+	s.mux.HandleFunc("PATCH /api/v1/abstractions/{id}", routes.HandleArchiveAbstraction(s.deps.Store, s.deps.Log))
+	s.mux.HandleFunc("DELETE /api/v1/abstractions/{id}", routes.HandleDeleteAbstraction(s.deps.Store, s.deps.Log))
 	s.mux.HandleFunc("GET /api/v1/projects", routes.HandleListProjects(s.deps.Store, s.deps.Log))
 
 	// Model management (control center)
@@ -183,6 +188,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/v1/forum/posts", routes.HandleCreateForumPost(s.deps.Store, s.deps.Bus, s.deps.Log))
 	s.mux.HandleFunc("GET /api/v1/forum/posts/{id}", routes.HandleGetForumPost(s.deps.Store, s.deps.Log))
 	s.mux.HandleFunc("PATCH /api/v1/forum/posts/{id}", routes.HandleUpdateForumPost(s.deps.Store, s.deps.Log))
+	s.mux.HandleFunc("DELETE /api/v1/forum/posts/{id}", routes.HandleDeleteForumPost(s.deps.Store, s.deps.Log))
 	s.mux.HandleFunc("POST /api/v1/forum/posts/{id}/internalize", routes.HandleInternalizeForumPost(s.deps.Store, s.deps.Bus, s.deps.Log))
 
 	// MCP over HTTP transport (shares daemon's LLM, store, agents — no subprocess needed)

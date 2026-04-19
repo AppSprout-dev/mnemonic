@@ -1169,3 +1169,28 @@ func TestRetrievalFeedbackAccessSnapshot(t *testing.T) {
 		}
 	})
 }
+
+// TestDeleteMemory verifies hard-delete and cascade behavior.
+func TestDeleteMemory(t *testing.T) {
+	s := createTestStore(t)
+	defer func() { _ = s.Close() }()
+	ctx := context.Background()
+
+	mem := store.Memory{
+		ID: "del-m1", RawID: "raw-del-m1", Summary: "to delete", Content: "body", State: "active",
+		Salience: 0.5, CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	writeRawForMemory(t, s, mem.RawID)
+	if err := s.WriteMemory(ctx, mem); err != nil {
+		t.Fatalf("write memory: %v", err)
+	}
+	if err := s.DeleteMemory(ctx, mem.ID); err != nil {
+		t.Fatalf("delete memory: %v", err)
+	}
+	if _, err := s.GetMemory(ctx, mem.ID); err == nil {
+		t.Fatalf("expected error fetching deleted memory, got nil")
+	}
+	if err := s.DeleteMemory(ctx, "does-not-exist"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for missing id, got %v", err)
+	}
+}

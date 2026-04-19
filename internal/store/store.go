@@ -439,6 +439,7 @@ type MemoryStore interface {
 	ListMemories(ctx context.Context, state string, limit, offset int) ([]Memory, error)
 	CountMemories(ctx context.Context) (int, error)
 	AmendMemory(ctx context.Context, id string, newContent string, newSummary string, newConcepts []string, newEmbedding []float32) error
+	DeleteMemory(ctx context.Context, id string) error
 	BatchUpdateSalience(ctx context.Context, updates map[string]float32) error
 	BatchMergeMemories(ctx context.Context, sourceIDs []string, gist Memory) error
 	DeleteOldArchived(ctx context.Context, olderThan time.Time) (int, error)
@@ -508,6 +509,7 @@ type PatternStore interface {
 	SearchArchivedPatternsByEmbedding(ctx context.Context, embedding []float32, limit int) ([]Pattern, error)
 	ArchivePattern(ctx context.Context, id string) error
 	ArchiveAllPatterns(ctx context.Context) (int, error)
+	DeletePattern(ctx context.Context, id string) error
 }
 
 // AbstractionStore handles abstraction persistence (principles, axioms).
@@ -520,6 +522,7 @@ type AbstractionStore interface {
 	SearchAbstractionsByEmbedding(ctx context.Context, embedding []float32, limit int) ([]Abstraction, error)
 	ArchiveAbstraction(ctx context.Context, id string) error
 	ArchiveAllAbstractions(ctx context.Context) (int, error)
+	DeleteAbstraction(ctx context.Context, id string) error
 }
 
 // MetacognitionStore handles self-reflection and observation data.
@@ -582,6 +585,8 @@ type ForumStore interface {
 	ListForumThreadsByCategory(ctx context.Context, categoryID string, limit, offset int) ([]ForumThread, error)
 	ListForumPostsByThread(ctx context.Context, threadID string, limit int) ([]ForumPost, error)
 	UpdateForumPostState(ctx context.Context, id string, state string) error
+	UpdateForumPostContent(ctx context.Context, id string, content string) error
+	DeleteForumPost(ctx context.Context, id string) error
 	CountForumPosts(ctx context.Context) (int, error)
 	GetDailyDigestThread(ctx context.Context, categoryID string, date time.Time) (ForumPost, error)
 }

@@ -124,6 +124,7 @@ export async function loadForumIndex() {
         var memSections = [
             { id: 'episodes', name: 'Episodes', desc: 'Temporal groupings of observations', icon: 'EP', color: 'var(--accent-violet)', countId: 'epCount' },
             { id: 'memories', name: 'Recent Memories', desc: 'Encoded knowledge from all sources', icon: 'MM', color: 'var(--accent-cyan)', countId: 'memCount' },
+            { id: 'handoffs', name: 'Session Handoffs', desc: 'Handoff memories from prior sessions', icon: 'HO', color: 'var(--accent-yellow)', countId: 'handoffCount' },
             { id: 'patterns', name: 'Discovered Patterns', desc: 'Recurring patterns across memories', icon: 'PT', color: 'var(--accent-orange)', countId: 'patCount' },
             { id: 'abstractions', name: 'Abstractions & Principles', desc: 'Higher-order knowledge and axioms', icon: 'AB', color: 'var(--accent-green)', countId: 'absCount' },
         ];
@@ -152,7 +153,7 @@ export async function loadForumIndex() {
             var row = e.target.closest('[id^="memsec-"]');
             if (row) {
                 var secId = row.id.replace('memsec-', '');
-                var secNames = { episodes: 'Episodes', memories: 'Recent Memories', patterns: 'Discovered Patterns', abstractions: 'Abstractions & Principles' };
+                var secNames = { episodes: 'Episodes', memories: 'Recent Memories', handoffs: 'Session Handoffs', patterns: 'Discovered Patterns', abstractions: 'Abstractions & Principles' };
                 if (secNames[secId]) loadMemorySection(secId, secNames[secId]);
             }
         });
@@ -164,9 +165,300 @@ export async function loadForumIndex() {
 }
 
 window._loadMemSec = function(id) {
-    var names = { episodes: 'Episodes', memories: 'Recent Memories', patterns: 'Discovered Patterns', abstractions: 'Abstractions & Principles' };
+    var names = { episodes: 'Episodes', memories: 'Recent Memories', handoffs: 'Session Handoffs', patterns: 'Discovered Patterns', abstractions: 'Abstractions & Principles' };
     loadMemorySection(id, names[id] || id);
 };
+// Per-section cache + sort state. Cleared on reload.
+var _memSectionState = {};
+
+function _memCompare(a, b, dir) {
+    if (a == null && b == null) return 0;
+    if (a == null) return dir === 'asc' ? 1 : -1;
+    if (b == null) return dir === 'asc' ? -1 : 1;
+    if (typeof a === 'number' && typeof b === 'number') return dir === 'asc' ? a - b : b - a;
+    var sa = String(a).toLowerCase(), sb = String(b).toLowerCase();
+    if (sa < sb) return dir === 'asc' ? -1 : 1;
+    if (sa > sb) return dir === 'asc' ? 1 : -1;
+    return 0;
+}
+
+function _memSortedRows(sectionId) {
+    var st = _memSectionState[sectionId];
+    if (!st || !st.rows) return [];
+    var rows = st.rows.slice();
+    if (st.sort && st.sort.col && st.cfg.columns) {
+        var col = st.cfg.columns.find(function(c) { return c.key === st.sort.col; });
+        if (col && col.accessor) {
+            rows.sort(function(a, b) { return _memCompare(col.accessor(a), col.accessor(b), st.sort.dir); });
+        }
+    }
+    return rows;
+}
+
+window._memSortToggle = function(sectionId, col) {
+    var st = _memSectionState[sectionId];
+    if (!st) return;
+    if (st.sort && st.sort.col === col) {
+        st.sort.dir = st.sort.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+        st.sort = { col: col, dir: 'desc' };
+    }
+    _memRenderSection(sectionId);
+};
+
+window._memAction = async function(sectionId, id, action) {
+    if (typeof event !== 'undefined' && event.stopPropagation) event.stopPropagation();
+    var st = _memSectionState[sectionId];
+    if (!st) return;
+    var cfg = st.cfg;
+    try {
+        if (action === 'delete') {
+            var label = cfg.itemLabel || 'item';
+            if (!confirm('Permanently delete this ' + label + '? This cannot be undone.')) return;
+            var resp = await fetch(cfg.apiBase + '/' + encodeURIComponent(id), { method: 'DELETE' });
+            if (!resp.ok) {
+                var msg = 'HTTP ' + resp.status;
+                try { var d = await resp.json(); if (d.error) msg = d.error; } catch(e) { /* ignore parse */ }
+                showToast('Delete failed: ' + msg, 'error');
+                return;
+            }
+            st.rows = st.rows.filter(function(r) { return r[cfg.idKey || 'id'] !== id; });
+            _memRenderSection(sectionId);
+            showToast(label + ' deleted', 'success');
+        } else if (action === 'edit') {
+            var row = st.rows.find(function(r) { return r[cfg.idKey || 'id'] === id; });
+            if (!row) return;
+            if (!cfg.editFields) { showToast('Editing not supported for this section', 'info'); return; }
+            var updates = {};
+            for (var i = 0; i < cfg.editFields.length; i++) {
+                var field = cfg.editFields[i];
+                var current = row[field];
+                if (Array.isArray(current)) current = current.join(', ');
+                var val = prompt('Edit ' + field + ':', current == null ? '' : String(current));
+                if (val === null) return;
+                if (field === 'concepts') updates[field] = val.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+                else updates[field] = val;
+            }
+            var resp2 = await fetch(cfg.apiBase + '/' + encodeURIComponent(id), {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updates),
+            });
+            if (!resp2.ok) {
+                var msg2 = 'HTTP ' + resp2.status;
+                try { var d2 = await resp2.json(); if (d2.error) msg2 = d2.error; } catch(e) { /* ignore parse */ }
+                showToast('Edit failed: ' + msg2, 'error');
+                return;
+            }
+            Object.assign(row, updates);
+            _memRenderSection(sectionId);
+            showToast((cfg.itemLabel || 'item') + ' updated', 'success');
+        }
+    } catch (e) {
+        console.error('Memory section action failed:', e);
+        showToast('Action failed: ' + e.message, 'error');
+    }
+};
+
+function _memRenderHeader(sectionId) {
+    var st = _memSectionState[sectionId];
+    var cols = st.cfg.columns;
+    var sort = st.sort || {};
+    var h = '<ul class="topiclist"><li class="header"><dl class="row-item">';
+    for (var i = 0; i < cols.length; i++) {
+        var c = cols[i];
+        var arrow = sort.col === c.key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+        var labelHtml = c.sortable === false
+            ? escapeHtml(c.label)
+            : '<span style="cursor:pointer;user-select:none" onclick="event.stopPropagation(); window._memSortToggle(\'' + sectionId + '\', \'' + c.key + '\')">' + escapeHtml(c.label) + arrow + '</span>';
+        if (i === 0) h += '<dt><div class="list-inner">' + labelHtml + '</div></dt>';
+        else if (i === cols.length - 1) h += '<dd class="lastpost">' + labelHtml + '</dd>';
+        else h += '<dd class="posts">' + labelHtml + '</dd>';
+    }
+    if (st.cfg.editFields || st.cfg.deletable !== false) {
+        h += '<dd class="posts" style="min-width:70px">Actions</dd>';
+    }
+    h += '</dl></li></ul>';
+    return h;
+}
+
+function _memRowActions(sectionId, id) {
+    var cfg = _memSectionState[sectionId].cfg;
+    var parts = [];
+    if (cfg.editFields) {
+        parts.push('<button type="button" class="recall-btn" style="font-size:0.7rem;padding:2px 6px" onclick="window._memAction(\'' + sectionId + '\', \'' + id + '\', \'edit\')" title="Edit">✎</button>');
+    }
+    if (cfg.deletable !== false) {
+        parts.push('<button type="button" class="recall-btn" style="font-size:0.7rem;padding:2px 6px;color:var(--accent-red);border-color:var(--accent-red)" onclick="window._memAction(\'' + sectionId + '\', \'' + id + '\', \'delete\')" title="Delete">🗑</button>');
+    }
+    return '<dd class="posts" style="min-width:70px;display:flex;gap:4px;align-items:center;justify-content:center">' + parts.join('') + '</dd>';
+}
+
+function _memRenderSection(sectionId) {
+    var st = _memSectionState[sectionId];
+    if (!st) return;
+    var container = document.getElementById('threadContent');
+    if (!container) return;
+    var rows = _memSortedRows(sectionId);
+    var html = '<div class="forabg" style="margin:0"><div class="forabg-head"><span class="forabg-title">' + escapeHtml(st.cfg.title) + '</span><span class="forabg-meta">' + rows.length + ' ' + (st.cfg.unit || 'items') + '</span></div>';
+    html += '<div class="inner">' + _memRenderHeader(sectionId);
+    html += '<ul class="topiclist forums">';
+    for (var i = 0; i < rows.length; i++) {
+        var bgClass = i % 2 === 0 ? 'bg1' : 'bg2';
+        var rowHtml = st.cfg.renderRow(rows[i], bgClass);
+        if (st.cfg.editFields || st.cfg.deletable !== false) {
+            var id = rows[i][st.cfg.idKey || 'id'];
+            var actionsCell = _memRowActions(sectionId, id);
+            rowHtml = rowHtml.replace('</dl></li>', actionsCell + '</dl></li>');
+        }
+        html += rowHtml;
+    }
+    html += '</ul></div></div>';
+    container.innerHTML = html;
+}
+
+function _buildMemoriesConfig(title, unit, typeFilter) {
+    var url = '/memories?state=active&limit=' + (typeFilter ? 1000 : 50) + (typeFilter ? '&type=' + encodeURIComponent(typeFilter) : '');
+    return {
+        title: title, unit: unit, itemLabel: typeFilter === 'handoff' ? 'handoff' : 'memory',
+        fetch: function() { return fetchJSON(url).then(function(d) { return d.memories || []; }); },
+        apiBase: '/api/v1/memories',
+        editFields: ['summary', 'content', 'concepts'],
+        columns: [
+            { label: typeFilter === 'handoff' ? 'Handoff' : 'Memory', key: 'summary', accessor: function(r) { return r.summary || ''; } },
+            { label: 'Salience', key: 'salience', accessor: function(r) { return r.salience || 0; } },
+            { label: 'Type', key: 'type', accessor: function(r) { return r.type || ''; } },
+            { label: 'Created', key: 'created_at', accessor: function(r) { return r.created_at || ''; } },
+        ],
+        renderRow: function(m, bgClass) {
+            var time = new Date(m.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+            var typeColor = { decision: 'var(--accent-orange)', error: 'var(--accent-red)', insight: 'var(--accent-violet)', learning: 'var(--accent-blue)', handoff: 'var(--accent-yellow)' }[m.type] || 'var(--text-dim)';
+            var iconLabel = m.type === 'handoff' ? 'HO' : (m.type || 'G').charAt(0).toUpperCase();
+            var summaryLimit = typeFilter === 'handoff' ? 160 : 100;
+            var h = '<li class="row ' + bgClass + '" style="cursor:pointer" onclick="this.querySelector(\'.expand-zone\').classList.toggle(\'open\')">';
+            h += '<dl class="row-item"><dt>';
+            h += '<span class="status-icon" style="width:26px;height:26px;font-size:0.6rem;flex-shrink:0;background:color-mix(in srgb, ' + typeColor + ' 15%, transparent);color:' + typeColor + ';border:1px solid color-mix(in srgb, ' + typeColor + ' 25%, transparent)">' + iconLabel + '</span>';
+            h += '<div class="list-inner">';
+            h += '<a class="topictitle" style="color:var(--link)">' + escapeHtml(m.summary || '').slice(0, summaryLimit) + '</a>';
+            if (m.concepts && m.concepts.length) h += '<br><span style="font-size:0.72rem;color:var(--text-dim)">' + m.concepts.slice(0, 5).map(function(c) { return escapeHtml(c); }).join(' · ') + '</span>';
+            h += '<div class="expand-zone" style="margin-top:6px;padding:8px;background:var(--bg-row-alt);border-radius:4px;font-size:0.82rem;color:var(--text-secondary);white-space:pre-wrap">';
+            h += escapeHtml(m.content || '');
+            if (m.source) h += '<br><span style="color:var(--text-dim)">Source: ' + escapeHtml(m.source) + '</span>';
+            if (m.project) h += ' · <span style="color:var(--text-dim)">Project: ' + escapeHtml(m.project) + '</span>';
+            if (m.episode_id) h += '<br><a onclick="event.stopPropagation(); window.loadThread(\'' + m.episode_id + '\')" style="color:var(--accent-cyan);cursor:pointer">View episode thread →</a>';
+            h += '</div>';
+            h += '</div></dt>';
+            h += '<dd class="posts" style="color:' + typeColor + '">' + (m.salience || 0).toFixed(2) + '</dd>';
+            h += '<dd class="posts" style="font-size:0.72rem">' + escapeHtml(m.type || 'general') + '</dd>';
+            h += '<dd class="lastpost"><span style="font-size:0.75rem;color:var(--text-dim)">' + time + '</span></dd>';
+            h += '</dl></li>';
+            return h;
+        },
+    };
+}
+
+function _memSectionConfigs() {
+    return {
+        episodes: {
+            title: 'Episodes', unit: 'episodes', itemLabel: 'episode',
+            fetch: function() { return fetchJSON('/episodes?limit=50').then(function(d) { return d.episodes || []; }); },
+            apiBase: '/api/v1/episodes',
+            deletable: false,
+            columns: [
+                { label: 'Episode', key: 'title', accessor: function(r) { return r.title || ''; } },
+                { label: 'Obs', key: 'obs', accessor: function(r) { return (r.raw_memory_ids || []).length; } },
+                { label: 'Files', key: 'files', accessor: function(r) { return (r.files_modified || []).length; } },
+                { label: 'Activity', key: 'activity', accessor: function(r) { return r.end_time || r.start_time || ''; } },
+            ],
+            renderRow: function(ep, bgClass) {
+                var mems = (ep.raw_memory_ids || []).length;
+                var files = (ep.files_modified || []).length;
+                var time = ep.end_time ? new Date(ep.end_time).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+                var stateLabel = ep.state === 'open' ? '<span style="color:var(--accent-green)">open</span>' : '';
+                var h = '<li class="row ' + bgClass + '" onclick="window.loadThread(\'' + ep.id + '\')" style="cursor:pointer">';
+                h += '<dl class="row-item"><dt>';
+                h += '<span class="status-icon" style="width:26px;height:26px;font-size:0.6rem;flex-shrink:0;background:color-mix(in srgb, var(--accent-violet) 15%, transparent);color:var(--accent-violet);border:1px solid color-mix(in srgb, var(--accent-violet) 25%, transparent)">EP</span>';
+                h += '<div class="list-inner">';
+                h += '<a class="topictitle" style="color:var(--link)">' + escapeHtml(ep.title || 'Untitled episode') + '</a> ' + stateLabel;
+                if (ep.summary) h += '<br><span style="font-size:0.75rem;color:var(--text-dim)">' + escapeHtml(ep.summary).slice(0, 120) + '</span>';
+                h += '</div></dt>';
+                h += '<dd class="posts">' + mems + '</dd><dd class="posts">' + files + '</dd>';
+                h += '<dd class="lastpost"><span style="font-size:0.75rem;color:var(--text-dim)">' + time + '</span></dd>';
+                h += '</dl></li>';
+                return h;
+            },
+        },
+        memories: _buildMemoriesConfig('Recent Memories', 'memories', null),
+        handoffs: _buildMemoriesConfig('Session Handoffs', 'handoffs', 'handoff'),
+        patterns: {
+            title: 'Discovered Patterns', unit: 'patterns', itemLabel: 'pattern',
+            fetch: function() { return fetchJSON('/patterns?limit=50').then(function(d) { return d.patterns || []; }); },
+            apiBase: '/api/v1/patterns',
+            columns: [
+                { label: 'Pattern', key: 'title', accessor: function(r) { return r.title || ''; } },
+                { label: 'Strength', key: 'strength', accessor: function(r) { return r.strength || 0; } },
+                { label: 'Evidence', key: 'evidence', accessor: function(r) { return (r.evidence_ids || []).length; } },
+                { label: 'Discovered', key: 'created_at', accessor: function(r) { return r.created_at || ''; } },
+            ],
+            renderRow: function(p, bgClass) {
+                var time = new Date(p.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                var h = '<li class="row ' + bgClass + '" style="cursor:pointer" onclick="this.querySelector(\'.expand-zone\').classList.toggle(\'open\')">';
+                h += '<dl class="row-item"><dt>';
+                h += '<span class="status-icon" style="width:26px;height:26px;font-size:0.6rem;flex-shrink:0;background:color-mix(in srgb, var(--accent-orange) 15%, transparent);color:var(--accent-orange);border:1px solid color-mix(in srgb, var(--accent-orange) 25%, transparent)">PT</span>';
+                h += '<div class="list-inner">';
+                h += '<a class="topictitle" style="color:var(--link)">' + escapeHtml(p.title || '') + '</a>';
+                h += '<br><span style="font-size:0.75rem;color:var(--text-dim)">' + escapeHtml(p.description || '').slice(0, 120) + '</span>';
+                h += '<div class="expand-zone" style="margin-top:6px;padding:8px;background:var(--bg-row-alt);border-radius:4px;font-size:0.82rem;color:var(--text-secondary)">';
+                h += '<strong>Type:</strong> ' + escapeHtml(p.pattern_type || '') + '<br>';
+                h += '<strong>Description:</strong> ' + escapeHtml(p.description || '') + '<br>';
+                if (p.project) h += '<strong>Project:</strong> ' + escapeHtml(p.project) + '<br>';
+                if (p.concepts && p.concepts.length) h += '<strong>Concepts:</strong> ' + p.concepts.map(function(c) { return escapeHtml(c); }).join(', ') + '<br>';
+                h += '<strong>Evidence:</strong> ' + (p.evidence_ids || []).length + ' memories';
+                h += '</div>';
+                h += '</div></dt>';
+                h += '<dd class="posts" style="color:var(--accent-orange)">' + (p.strength || 0).toFixed(2) + '</dd>';
+                h += '<dd class="posts">' + (p.evidence_ids || []).length + '</dd>';
+                h += '<dd class="lastpost"><span style="font-size:0.75rem;color:var(--text-dim)">' + time + '</span></dd>';
+                h += '</dl></li>';
+                return h;
+            },
+        },
+        abstractions: {
+            title: 'Abstractions & Principles', unit: 'abstractions', itemLabel: 'abstraction',
+            fetch: function() { return fetchJSON('/abstractions?limit=50').then(function(d) { return d.abstractions || []; }); },
+            apiBase: '/api/v1/abstractions',
+            columns: [
+                { label: 'Abstraction', key: 'title', accessor: function(r) { return r.title || ''; } },
+                { label: 'Confidence', key: 'confidence', accessor: function(r) { return r.confidence || 0; } },
+                { label: 'Level', key: 'level', accessor: function(r) { return r.level || 1; } },
+                { label: 'Created', key: 'created_at', accessor: function(r) { return r.created_at || ''; } },
+            ],
+            renderRow: function(a, bgClass) {
+                var time = new Date(a.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                var level = a.level === 3 ? 'Axiom' : a.level === 2 ? 'Principle' : 'Pattern';
+                var levelColor = a.level === 3 ? 'var(--accent-yellow)' : 'var(--accent-green)';
+                var h = '<li class="row ' + bgClass + '" style="cursor:pointer" onclick="this.querySelector(\'.expand-zone\').classList.toggle(\'open\')">';
+                h += '<dl class="row-item"><dt>';
+                h += '<span class="status-icon" style="width:26px;height:26px;font-size:0.6rem;flex-shrink:0;background:color-mix(in srgb, ' + levelColor + ' 15%, transparent);color:' + levelColor + ';border:1px solid color-mix(in srgb, ' + levelColor + ' 25%, transparent)">AB</span>';
+                h += '<div class="list-inner">';
+                h += '<a class="topictitle" style="color:var(--link)">' + escapeHtml(a.title || '') + '</a>';
+                h += '<br><span style="font-size:0.75rem;color:var(--text-dim)">' + escapeHtml(a.description || '').slice(0, 120) + '</span>';
+                h += '<div class="expand-zone" style="margin-top:6px;padding:8px;background:var(--bg-row-alt);border-radius:4px;font-size:0.82rem;color:var(--text-secondary)">';
+                h += '<strong>Level:</strong> ' + level + '<br>';
+                h += '<strong>Description:</strong> ' + escapeHtml(a.description || '') + '<br>';
+                h += '<strong>Sources:</strong> ' + (a.source_pattern_ids || []).length + ' patterns, ' + (a.source_memory_ids || []).length + ' memories';
+                h += '</div>';
+                h += '</div></dt>';
+                h += '<dd class="posts" style="color:' + levelColor + '">' + (a.confidence || 0).toFixed(2) + '</dd>';
+                h += '<dd class="posts" style="font-size:0.72rem">' + level + '</dd>';
+                h += '<dd class="lastpost"><span style="font-size:0.75rem;color:var(--text-dim)">' + time + '</span></dd>';
+                h += '</dl></li>';
+                return h;
+            },
+        },
+    };
+}
+
 export async function loadMemorySection(sectionId, sectionName) {
     state.currentView = 'thread';
     document.querySelectorAll('.view').forEach(function(v) { v.classList.remove('active'); });
@@ -182,139 +474,25 @@ export async function loadMemorySection(sectionId, sectionName) {
     if (!container) return;
     container.innerHTML = '<div style="padding:16px;color:var(--text-dim)">Loading ' + escapeHtml(sectionId) + '...</div>';
 
+    var cfgs = _memSectionConfigs();
+    var cfg = cfgs[sectionId];
+    if (!cfg) {
+        container.innerHTML = '<div style="padding:16px;color:var(--accent-red)">Unknown section: ' + escapeHtml(sectionId) + '</div>';
+        return;
+    }
     try {
-        if (sectionId === 'episodes') {
-            var data = await fetchJSON('/episodes?limit=50');
-            var eps = data.episodes || [];
-            var html = '<div class="forabg" style="margin:0"><div class="forabg-head"><span class="forabg-title">Episodes</span><span class="forabg-meta">' + eps.length + ' episodes</span></div>';
-            html += '<div class="inner"><ul class="topiclist"><li class="header"><dl class="row-item">';
-            html += '<dt><div class="list-inner">Episode</div></dt>';
-            html += '<dd class="posts">Obs</dd><dd class="posts">Files</dd><dd class="lastpost">Activity</dd>';
-            html += '</dl></li></ul><ul class="topiclist forums">';
-            for (var i = 0; i < eps.length; i++) {
-                var ep = eps[i];
-                var bgClass = i % 2 === 0 ? 'bg1' : 'bg2';
-                var mems = (ep.raw_memory_ids || []).length;
-                var files = (ep.files_modified || []).length;
-                var time = ep.end_time ? new Date(ep.end_time).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
-                var stateLabel = ep.state === 'open' ? '<span style="color:var(--accent-green)">open</span>' : '';
-                html += '<li class="row ' + bgClass + '" onclick="window.loadThread(\'' + ep.id + '\')" style="cursor:pointer">';
-                html += '<dl class="row-item"><dt>';
-                html += '<span class="status-icon" style="width:26px;height:26px;font-size:0.6rem;flex-shrink:0;background:color-mix(in srgb, var(--accent-violet) 15%, transparent);color:var(--accent-violet);border:1px solid color-mix(in srgb, var(--accent-violet) 25%, transparent)">EP</span>';
-                html += '<div class="list-inner">';
-                html += '<a class="topictitle" style="color:var(--link)">' + escapeHtml(ep.title || 'Untitled episode') + '</a> ' + stateLabel;
-                if (ep.summary) html += '<br><span style="font-size:0.75rem;color:var(--text-dim)">' + escapeHtml(ep.summary).slice(0, 120) + '</span>';
-                html += '</div></dt>';
-                html += '<dd class="posts">' + mems + '</dd><dd class="posts">' + files + '</dd>';
-                html += '<dd class="lastpost"><span style="font-size:0.75rem;color:var(--text-dim)">' + time + '</span></dd>';
-                html += '</dl></li>';
-            }
-            html += '</ul></div></div>';
-            container.innerHTML = html;
-
-        } else if (sectionId === 'memories') {
-            var data = await fetchJSON('/memories?state=active&limit=50');
-            var mems = data.memories || [];
-            var html = '<div class="forabg" style="margin:0"><div class="forabg-head"><span class="forabg-title">Recent Memories</span><span class="forabg-meta">' + mems.length + ' shown</span></div>';
-            html += '<div class="inner"><ul class="topiclist"><li class="header"><dl class="row-item">';
-            html += '<dt><div class="list-inner">Memory</div></dt>';
-            html += '<dd class="posts">Salience</dd><dd class="posts">Type</dd><dd class="lastpost">Created</dd>';
-            html += '</dl></li></ul><ul class="topiclist forums">';
-            for (var i = 0; i < mems.length; i++) {
-                var m = mems[i];
-                var bgClass = i % 2 === 0 ? 'bg1' : 'bg2';
-                var time = new Date(m.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-                var typeColor = { decision: 'var(--accent-orange)', error: 'var(--accent-red)', insight: 'var(--accent-violet)', learning: 'var(--accent-blue)' }[m.type] || 'var(--text-dim)';
-                html += '<li class="row ' + bgClass + '" style="cursor:pointer" onclick="this.querySelector(\'.expand-zone\').classList.toggle(\'open\')">';
-                html += '<dl class="row-item"><dt>';
-                html += '<span class="status-icon" style="width:26px;height:26px;font-size:0.6rem;flex-shrink:0;background:color-mix(in srgb, ' + typeColor + ' 15%, transparent);color:' + typeColor + ';border:1px solid color-mix(in srgb, ' + typeColor + ' 25%, transparent)">' + (m.type || 'G').charAt(0).toUpperCase() + '</span>';
-                html += '<div class="list-inner">';
-                html += '<a class="topictitle" style="color:var(--link)">' + escapeHtml(m.summary || '').slice(0, 100) + '</a>';
-                if (m.concepts && m.concepts.length) html += '<br><span style="font-size:0.72rem;color:var(--text-dim)">' + m.concepts.slice(0, 5).map(function(c) { return escapeHtml(c); }).join(' · ') + '</span>';
-                html += '<div class="expand-zone" style="margin-top:6px;padding:8px;background:var(--bg-row-alt);border-radius:4px;font-size:0.82rem;color:var(--text-secondary)">';
-                html += escapeHtml(m.content || '');
-                if (m.source) html += '<br><span style="color:var(--text-dim)">Source: ' + escapeHtml(m.source) + '</span>';
-                if (m.project) html += ' · <span style="color:var(--text-dim)">Project: ' + escapeHtml(m.project) + '</span>';
-                if (m.episode_id) html += '<br><a onclick="event.stopPropagation(); window.loadThread(\'' + m.episode_id + '\')" style="color:var(--accent-cyan);cursor:pointer">View episode thread →</a>';
-                html += '</div>';
-                html += '</div></dt>';
-                html += '<dd class="posts" style="color:' + typeColor + '">' + (m.salience || 0).toFixed(2) + '</dd>';
-                html += '<dd class="posts" style="font-size:0.72rem">' + escapeHtml(m.type || 'general') + '</dd>';
-                html += '<dd class="lastpost"><span style="font-size:0.75rem;color:var(--text-dim)">' + time + '</span></dd>';
-                html += '</dl></li>';
-            }
-            html += '</ul></div></div>';
-            container.innerHTML = html;
-
-        } else if (sectionId === 'patterns') {
-            var data = await fetchJSON('/patterns?limit=50');
-            var pats = data.patterns || [];
-            var html = '<div class="forabg" style="margin:0"><div class="forabg-head"><span class="forabg-title">Discovered Patterns</span><span class="forabg-meta">' + pats.length + ' patterns</span></div>';
-            html += '<div class="inner"><ul class="topiclist"><li class="header"><dl class="row-item">';
-            html += '<dt><div class="list-inner">Pattern</div></dt>';
-            html += '<dd class="posts">Strength</dd><dd class="posts">Evidence</dd><dd class="lastpost">Discovered</dd>';
-            html += '</dl></li></ul><ul class="topiclist forums">';
-            for (var i = 0; i < pats.length; i++) {
-                var p = pats[i];
-                var bgClass = i % 2 === 0 ? 'bg1' : 'bg2';
-                var time = new Date(p.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-                html += '<li class="row ' + bgClass + '" style="cursor:pointer" onclick="this.querySelector(\'.expand-zone\').classList.toggle(\'open\')">';
-                html += '<dl class="row-item"><dt>';
-                html += '<span class="status-icon" style="width:26px;height:26px;font-size:0.6rem;flex-shrink:0;background:color-mix(in srgb, var(--accent-orange) 15%, transparent);color:var(--accent-orange);border:1px solid color-mix(in srgb, var(--accent-orange) 25%, transparent)">PT</span>';
-                html += '<div class="list-inner">';
-                html += '<a class="topictitle" style="color:var(--link)">' + escapeHtml(p.title) + '</a>';
-                html += '<br><span style="font-size:0.75rem;color:var(--text-dim)">' + escapeHtml(p.description || '').slice(0, 120) + '</span>';
-                html += '<div class="expand-zone" style="margin-top:6px;padding:8px;background:var(--bg-row-alt);border-radius:4px;font-size:0.82rem;color:var(--text-secondary)">';
-                html += '<strong>Type:</strong> ' + escapeHtml(p.pattern_type || '') + '<br>';
-                html += '<strong>Description:</strong> ' + escapeHtml(p.description || '') + '<br>';
-                if (p.project) html += '<strong>Project:</strong> ' + escapeHtml(p.project) + '<br>';
-                if (p.concepts && p.concepts.length) html += '<strong>Concepts:</strong> ' + p.concepts.map(function(c) { return escapeHtml(c); }).join(', ') + '<br>';
-                html += '<strong>Evidence:</strong> ' + (p.evidence_ids || []).length + ' memories';
-                html += '</div>';
-                html += '</div></dt>';
-                html += '<dd class="posts" style="color:var(--accent-orange)">' + (p.strength || 0).toFixed(2) + '</dd>';
-                html += '<dd class="posts">' + (p.evidence_ids || []).length + '</dd>';
-                html += '<dd class="lastpost"><span style="font-size:0.75rem;color:var(--text-dim)">' + time + '</span></dd>';
-                html += '</dl></li>';
-            }
-            html += '</ul></div></div>';
-            container.innerHTML = html;
-
-        } else if (sectionId === 'abstractions') {
-            var data = await fetchJSON('/abstractions?limit=50');
-            var abs = data.abstractions || [];
-            var html = '<div class="forabg" style="margin:0"><div class="forabg-head"><span class="forabg-title">Abstractions & Principles</span><span class="forabg-meta">' + abs.length + ' abstractions</span></div>';
-            html += '<div class="inner"><ul class="topiclist"><li class="header"><dl class="row-item">';
-            html += '<dt><div class="list-inner">Abstraction</div></dt>';
-            html += '<dd class="posts">Confidence</dd><dd class="posts">Level</dd><dd class="lastpost">Created</dd>';
-            html += '</dl></li></ul><ul class="topiclist forums">';
-            for (var i = 0; i < abs.length; i++) {
-                var a = abs[i];
-                var bgClass = i % 2 === 0 ? 'bg1' : 'bg2';
-                var time = new Date(a.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-                var level = a.level === 3 ? 'Axiom' : a.level === 2 ? 'Principle' : 'Pattern';
-                var levelColor = a.level === 3 ? 'var(--accent-yellow)' : 'var(--accent-green)';
-                html += '<li class="row ' + bgClass + '" style="cursor:pointer" onclick="this.querySelector(\'.expand-zone\').classList.toggle(\'open\')">';
-                html += '<dl class="row-item"><dt>';
-                html += '<span class="status-icon" style="width:26px;height:26px;font-size:0.6rem;flex-shrink:0;background:color-mix(in srgb, ' + levelColor + ' 15%, transparent);color:' + levelColor + ';border:1px solid color-mix(in srgb, ' + levelColor + ' 25%, transparent)">AB</span>';
-                html += '<div class="list-inner">';
-                html += '<a class="topictitle" style="color:var(--link)">' + escapeHtml(a.title) + '</a>';
-                html += '<br><span style="font-size:0.75rem;color:var(--text-dim)">' + escapeHtml(a.description || '').slice(0, 120) + '</span>';
-                html += '<div class="expand-zone" style="margin-top:6px;padding:8px;background:var(--bg-row-alt);border-radius:4px;font-size:0.82rem;color:var(--text-secondary)">';
-                html += '<strong>Level:</strong> ' + level + '<br>';
-                html += '<strong>Description:</strong> ' + escapeHtml(a.description || '') + '<br>';
-                html += '<strong>Sources:</strong> ' + (a.source_pattern_ids || []).length + ' patterns, ' + (a.source_memory_ids || []).length + ' memories';
-                html += '</div>';
-                html += '</div></dt>';
-                html += '<dd class="posts" style="color:' + levelColor + '">' + (a.confidence || 0).toFixed(2) + '</dd>';
-                html += '<dd class="posts" style="font-size:0.72rem">' + level + '</dd>';
-                html += '<dd class="lastpost"><span style="font-size:0.75rem;color:var(--text-dim)">' + time + '</span></dd>';
-                html += '</dl></li>';
-            }
-            html += '</ul></div></div>';
-            container.innerHTML = html;
-        }
-    } catch (e) { console.error('Failed to load memory section:', e); container.innerHTML = '<div style="padding:16px;color:var(--accent-red)">Failed to load: ' + e.message + '</div>'; }
+        var rows = await cfg.fetch();
+        var hasCreatedAt = cfg.columns.find(function(c) { return c.key === 'created_at'; });
+        var defaultSort = hasCreatedAt
+            ? { col: 'created_at', dir: 'desc' }
+            : (cfg.columns.find(function(c) { return c.key === 'strength' || c.key === 'salience' || c.key === 'confidence'; }) ? { col: cfg.columns[1].key, dir: 'desc' } : null);
+        _memSectionState[sectionId] = { cfg: cfg, rows: rows, sort: defaultSort };
+        _memRenderSection(sectionId);
+        return;
+    } catch (e) {
+        console.error('Failed to load memory section:', e);
+        container.innerHTML = '<div style="padding:16px;color:var(--accent-red)">Failed to load: ' + escapeHtml(e.message) + '</div>';
+    }
 }
 
 export async function loadForumGroup(type) {
@@ -481,6 +659,8 @@ export async function loadForumThread(threadId) {
             if (action === 'quote') quotePostById(btn.getAttribute('data-target'));
             else if (action === 'internalize') internalizePost(btn.getAttribute('data-post-id'), btn);
             else if (action === 'insert-tag') insertTagInReply(btn.getAttribute('data-agent-key'));
+            else if (action === 'edit-post') editForumPost(btn.getAttribute('data-post-id'));
+            else if (action === 'delete-post') deleteForumPost(btn.getAttribute('data-post-id'));
         };
     } catch (e) {
         console.error('Failed to load forum thread:', e);
@@ -572,9 +752,58 @@ export function renderForumPost(post, index) {
     } else {
         html += '<button data-action="internalize" data-post-id="' + escapeHtml(post.id) + '" style="font-size:0.7rem;padding:1px 8px;background:transparent;border:1px solid var(--border-subtle);color:var(--text-dim);border-radius:3px;cursor:pointer">internalize</button>';
     }
+    html += '<button data-action="edit-post" data-post-id="' + escapeHtml(post.id) + '" style="font-size:0.7rem;padding:1px 8px;background:transparent;border:1px solid var(--border-subtle);color:var(--text-dim);border-radius:3px;cursor:pointer">edit</button>';
+    html += '<button data-action="delete-post" data-post-id="' + escapeHtml(post.id) + '" style="font-size:0.7rem;padding:1px 8px;background:transparent;border:1px solid var(--accent-red);color:var(--accent-red);border-radius:3px;cursor:pointer">delete</button>';
     html += '</div>';
     html += '</div></div></div>';
     return html;
+}
+
+async function editForumPost(postId) {
+    var postEl = document.getElementById('forum-post-' + postId);
+    if (!postEl) return;
+    var current = postEl.getAttribute('data-content') || '';
+    var next = prompt('Edit post content:', current);
+    if (next === null || next === current) return;
+    try {
+        var resp = await fetch('/api/v1/forum/posts/' + encodeURIComponent(postId), {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content: next }),
+        });
+        if (!resp.ok) {
+            var msg = 'HTTP ' + resp.status;
+            try { var d = await resp.json(); if (d.error) msg = d.error; } catch(e) { /* ignore parse */ }
+            showToast('Edit failed: ' + msg, 'error');
+            return;
+        }
+        postEl.setAttribute('data-content', next);
+        var body = postEl.querySelector('.content');
+        if (body) body.innerHTML = formatForumContent(next);
+        showToast('Post updated', 'success');
+    } catch (e) {
+        console.error('edit post failed', e);
+        showToast('Edit failed: ' + e.message, 'error');
+    }
+}
+
+async function deleteForumPost(postId) {
+    if (!confirm('Permanently delete this post? This cannot be undone. Posts with replies cannot be deleted.')) return;
+    try {
+        var resp = await fetch('/api/v1/forum/posts/' + encodeURIComponent(postId), { method: 'DELETE' });
+        if (!resp.ok) {
+            var msg = 'HTTP ' + resp.status;
+            try { var d = await resp.json(); if (d.error) msg = d.error; } catch(e) { /* ignore parse */ }
+            showToast('Delete failed: ' + msg, 'error');
+            return;
+        }
+        var postEl = document.getElementById('forum-post-' + postId);
+        if (postEl) postEl.remove();
+        showToast('Post deleted', 'success');
+    } catch (e) {
+        console.error('delete post failed', e);
+        showToast('Delete failed: ' + e.message, 'error');
+    }
 }
 
 export function appendForumPostToThread(payload) {
