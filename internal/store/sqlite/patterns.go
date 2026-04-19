@@ -387,6 +387,19 @@ func (s *SQLiteStore) ArchivePattern(ctx context.Context, id string) error {
 	return nil
 }
 
+// DeletePattern hard-deletes a pattern by ID.
+func (s *SQLiteStore) DeletePattern(ctx context.Context, id string) error {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM patterns WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("deleting pattern %s: %w", id, err)
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("pattern %s: %w", id, store.ErrNotFound)
+	}
+	return nil
+}
+
 // ArchiveAllPatterns transitions all active patterns to archived state.
 func (s *SQLiteStore) ArchiveAllPatterns(ctx context.Context) (int, error) {
 	result, err := s.db.ExecContext(ctx,

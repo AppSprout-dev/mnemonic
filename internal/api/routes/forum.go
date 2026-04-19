@@ -268,10 +268,11 @@ func HandleGetForumPost(s store.Store, log *slog.Logger) http.HandlerFunc {
 
 // UpdateForumPostRequest is the JSON body for updating a forum post state.
 type UpdateForumPostRequest struct {
-	State string `json:"state"` // "active", "archived", "internalized"
+	State   string  `json:"state,omitempty"`   // "active", "archived", "internalized"
+	Content *string `json:"content,omitempty"` // pointer so callers can distinguish unset vs empty
 }
 
-// HandleUpdateForumPost updates a forum post's state.
+// HandleUpdateForumPost updates a forum post's state and/or content.
 // PATCH /api/v1/forum/posts/{id}
 func HandleUpdateForumPost(s store.Store, log *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -290,26 +291,72 @@ func HandleUpdateForumPost(s store.Store, log *slog.Logger) http.HandlerFunc {
 			return
 		}
 
-		validStates := map[string]bool{"active": true, "archived": true, "internalized": true}
-		if !validStates[req.State] {
-			writeError(w, http.StatusBadRequest, "state must be active, archived, or internalized", "INVALID_STATE")
+		if req.State == "" && req.Content == nil {
+			writeError(w, http.StatusBadRequest, "at least one of state or content is required", "INVALID_REQUEST")
 			return
 		}
 
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 
-		if err := s.UpdateForumPostState(ctx, id, req.State); err != nil {
+		if req.State != "" {
+			validStates := map[string]bool{"active": true, "archived": true, "internalized": true}
+			if !validStates[req.State] {
+				writeError(w, http.StatusBadRequest, "state must be active, archived, or internalized", "INVALID_STATE")
+				return
+			}
+			if err := s.UpdateForumPostState(ctx, id, req.State); err != nil {
+				if errors.Is(err, store.ErrNotFound) {
+					writeError(w, http.StatusNotFound, "post not found", "NOT_FOUND")
+					return
+				}
+				log.Error("failed to update forum post state", "error", err, "id", id)
+				writeError(w, http.StatusInternalServerError, "failed to update post", "STORE_ERROR")
+				return
+			}
+		}
+		if req.Content != nil {
+			if err := s.UpdateForumPostContent(ctx, id, *req.Content); err != nil {
+				if errors.Is(err, store.ErrNotFound) {
+					writeError(w, http.StatusNotFound, "post not found", "NOT_FOUND")
+					return
+				}
+				log.Error("failed to update forum post content", "error", err, "id", id)
+				writeError(w, http.StatusInternalServerError, "failed to update post", "STORE_ERROR")
+				return
+			}
+		}
+
+		writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+	}
+}
+
+// HandleDeleteForumPost hard-deletes a forum post.
+// DELETE /api/v1/forum/posts/{id}
+func HandleDeleteForumPost(s store.Store, log *slog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if id == "" {
+			writeError(w, http.StatusBadRequest, "post id is required", "MISSING_ID")
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		if err := s.DeleteForumPost(ctx, id); err != nil {
 			if errors.Is(err, store.ErrNotFound) {
 				writeError(w, http.StatusNotFound, "post not found", "NOT_FOUND")
 				return
 			}
-			log.Error("failed to update forum post", "error", err, "id", id)
-			writeError(w, http.StatusInternalServerError, "failed to update post", "STORE_ERROR")
+			// Reply-count conflict surfaces as a non-ErrNotFound error from the store.
+			log.Warn("failed to delete forum post", "error", err, "id", id)
+			writeError(w, http.StatusConflict, err.Error(), "DELETE_CONFLICT")
 			return
 		}
 
-		writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+		log.Info("forum post deleted", "id", id)
+		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 	}
 }
 

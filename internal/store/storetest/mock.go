@@ -363,8 +363,13 @@ func (MockStore) ListForumThreadsByCategory(context.Context, string, int, int) (
 func (MockStore) ListForumPostsByThread(context.Context, string, int) ([]store.ForumPost, error) {
 	return nil, nil
 }
-func (MockStore) UpdateForumPostState(context.Context, string, string) error { return nil }
-func (MockStore) CountForumPosts(context.Context) (int, error)               { return 0, nil }
+func (MockStore) UpdateForumPostState(context.Context, string, string) error   { return nil }
+func (MockStore) UpdateForumPostContent(context.Context, string, string) error { return nil }
+func (MockStore) DeleteForumPost(context.Context, string) error                { return nil }
+func (MockStore) DeleteMemory(context.Context, string) error                   { return nil }
+func (MockStore) DeletePattern(context.Context, string) error                  { return nil }
+func (MockStore) DeleteAbstraction(context.Context, string) error              { return nil }
+func (MockStore) CountForumPosts(context.Context) (int, error)                 { return 0, nil }
 func (MockStore) GetDailyDigestThread(context.Context, string, time.Time) (store.ForumPost, error) {
 	return store.ForumPost{}, store.ErrNotFound
 }

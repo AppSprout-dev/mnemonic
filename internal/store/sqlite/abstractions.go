@@ -253,6 +253,20 @@ func scanAbstractionRows(rows *sql.Rows) ([]store.Abstraction, error) {
 	return abstractions, nil
 }
 
+// DeleteAbstraction hard-deletes an abstraction by ID. Children that reference
+// this abstraction via parent_id are left intact (their parent_id will dangle).
+func (s *SQLiteStore) DeleteAbstraction(ctx context.Context, id string) error {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM abstractions WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("deleting abstraction %s: %w", id, err)
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("abstraction %s: %w", id, store.ErrNotFound)
+	}
+	return nil
+}
+
 // ArchiveAbstraction archives a single abstraction by ID.
 func (s *SQLiteStore) ArchiveAbstraction(ctx context.Context, id string) error {
 	result, err := s.db.ExecContext(ctx,

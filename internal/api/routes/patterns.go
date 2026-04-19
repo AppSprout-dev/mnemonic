@@ -133,6 +133,101 @@ func HandleArchivePattern(s store.Store, log *slog.Logger) http.HandlerFunc {
 	}
 }
 
+// HandleDeletePattern hard-deletes a pattern by ID.
+// DELETE /api/v1/patterns/{id}
+func HandleDeletePattern(s store.Store, log *slog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if id == "" {
+			writeError(w, http.StatusBadRequest, "pattern id is required", "MISSING_ID")
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		if err := s.DeletePattern(ctx, id); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "pattern not found", "NOT_FOUND")
+				return
+			}
+			log.Error("failed to delete pattern", "error", err, "id", id)
+			writeError(w, http.StatusInternalServerError, "failed to delete pattern", "STORE_ERROR")
+			return
+		}
+
+		log.Info("pattern deleted via dashboard", "id", id)
+		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted", "id": id})
+	}
+}
+
+// HandleArchiveAbstraction archives a single abstraction.
+// PATCH /api/v1/abstractions/{id}  body: {"state": "archived"}
+func HandleArchiveAbstraction(s store.Store, log *slog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if id == "" {
+			writeError(w, http.StatusBadRequest, "abstraction id is required", "MISSING_ID")
+			return
+		}
+
+		var body struct {
+			State string `json:"state"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.State == "" {
+			writeError(w, http.StatusBadRequest, "state field is required", "INVALID_REQUEST")
+			return
+		}
+		if body.State != "archived" {
+			writeError(w, http.StatusBadRequest, "state must be \"archived\"", "INVALID_REQUEST")
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		if err := s.ArchiveAbstraction(ctx, id); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "abstraction not found", "NOT_FOUND")
+				return
+			}
+			log.Error("failed to archive abstraction", "error", err, "id", id)
+			writeError(w, http.StatusInternalServerError, "failed to archive abstraction", "STORE_ERROR")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]string{"id": id, "state": "archived"})
+	}
+}
+
+// HandleDeleteAbstraction hard-deletes an abstraction by ID.
+// DELETE /api/v1/abstractions/{id}
+func HandleDeleteAbstraction(s store.Store, log *slog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if id == "" {
+			writeError(w, http.StatusBadRequest, "abstraction id is required", "MISSING_ID")
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		if err := s.DeleteAbstraction(ctx, id); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "abstraction not found", "NOT_FOUND")
+				return
+			}
+			log.Error("failed to delete abstraction", "error", err, "id", id)
+			writeError(w, http.StatusInternalServerError, "failed to delete abstraction", "STORE_ERROR")
+			return
+		}
+
+		log.Info("abstraction deleted via dashboard", "id", id)
+		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted", "id": id})
+	}
+}
+
 // HandleListProjects returns all known projects.
 // GET /api/v1/projects
 func HandleListProjects(s store.Store, log *slog.Logger) http.HandlerFunc {

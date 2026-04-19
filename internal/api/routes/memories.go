@@ -2,6 +2,7 @@ package routes
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -210,6 +211,17 @@ func HandleListMemories(s store.Store, log *slog.Logger) http.HandlerFunc {
 			memories = epFiltered
 		}
 
+		// Optional type filter (e.g. ?type=handoff)
+		if typeFilter := r.URL.Query().Get("type"); typeFilter != "" {
+			typeFiltered := make([]store.Memory, 0)
+			for _, m := range memories {
+				if m.Type == typeFilter {
+					typeFiltered = append(typeFiltered, m)
+				}
+			}
+			memories = typeFiltered
+		}
+
 		// Strip embeddings from list response (saves ~42KB per memory)
 		for i := range memories {
 			memories[i].Embedding = nil
@@ -223,6 +235,107 @@ func HandleListMemories(s store.Store, log *slog.Logger) http.HandlerFunc {
 		}
 
 		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
+// UpdateMemoryRequest is the JSON body for amending a memory.
+type UpdateMemoryRequest struct {
+	Content  *string  `json:"content,omitempty"`
+	Summary  *string  `json:"summary,omitempty"`
+	Concepts []string `json:"concepts,omitempty"`
+}
+
+// HandleUpdateMemory amends a memory's content/summary/concepts in place.
+// PATCH /api/v1/memories/{id}
+//
+// Uses AmendMemory under the hood (same path the MCP `amend` tool takes) so
+// associations and access history are preserved. Embedding is NOT recomputed —
+// the dashboard is a curation surface, not a re-encoding pipeline.
+func HandleUpdateMemory(s store.Store, log *slog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if id == "" {
+			writeError(w, http.StatusBadRequest, "memory id is required", "MISSING_ID")
+			return
+		}
+
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+		defer func() { _ = r.Body.Close() }()
+
+		var req UpdateMemoryRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body", "INVALID_REQUEST")
+			return
+		}
+		if req.Content == nil && req.Summary == nil && req.Concepts == nil {
+			writeError(w, http.StatusBadRequest, "at least one of content, summary, or concepts is required", "INVALID_REQUEST")
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		mem, err := s.GetMemory(ctx, id)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) || errors.Is(err, sql.ErrNoRows) {
+				writeError(w, http.StatusNotFound, "memory not found", "NOT_FOUND")
+				return
+			}
+			log.Error("failed to get memory for amend", "error", err, "id", id)
+			writeError(w, http.StatusInternalServerError, "failed to load memory", "STORE_ERROR")
+			return
+		}
+
+		newContent := mem.Content
+		if req.Content != nil {
+			newContent = *req.Content
+		}
+		newSummary := mem.Summary
+		if req.Summary != nil {
+			newSummary = *req.Summary
+		}
+		newConcepts := mem.Concepts
+		if req.Concepts != nil {
+			newConcepts = req.Concepts
+		}
+
+		if err := s.AmendMemory(ctx, id, newContent, newSummary, newConcepts, nil); err != nil {
+			log.Error("failed to amend memory", "error", err, "id", id)
+			writeError(w, http.StatusInternalServerError, "failed to amend memory", "STORE_ERROR")
+			return
+		}
+
+		log.Info("memory amended via dashboard", "id", id)
+		writeJSON(w, http.StatusOK, map[string]string{"status": "updated", "id": id})
+	}
+}
+
+// HandleDeleteMemory hard-deletes a memory. Cascades to associations,
+// memory_resolutions, concept_sets, memory_attributes via FK; FTS is handled by trigger.
+// DELETE /api/v1/memories/{id}
+func HandleDeleteMemory(s store.Store, log *slog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if id == "" {
+			writeError(w, http.StatusBadRequest, "memory id is required", "MISSING_ID")
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		if err := s.DeleteMemory(ctx, id); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "memory not found", "NOT_FOUND")
+				return
+			}
+			log.Error("failed to delete memory", "error", err, "id", id)
+			writeError(w, http.StatusInternalServerError, "failed to delete memory", "STORE_ERROR")
+			return
+		}
+
+		log.Info("memory deleted via dashboard", "id", id)
+		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted", "id": id})
 	}
 }
 
