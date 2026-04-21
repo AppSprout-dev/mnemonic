@@ -45,6 +45,11 @@ type BackendCompletionRequest struct {
 	TopP        float32  // nucleus sampling threshold
 	Stop        []string // stop sequences
 	Grammar     string   // GBNF grammar string for constrained decoding (empty = unconstrained)
+
+	// AblateLayers, when non-empty, asks the backend to zero the gate_bias
+	// on the listed spoke layers for the duration of this single call and
+	// restore the prior values afterwards. See ApplyAblation.
+	AblateLayers []int
 }
 
 // BackendCompletionResponse is the output of a backend completion call.
@@ -54,6 +59,10 @@ type BackendCompletionResponse struct {
 	CompletionTokens int     // tokens generated
 	MeanProb         float32 // mean probability of chosen tokens (0-1)
 	MinProb          float32 // minimum probability of any chosen token (0-1)
+
+	// AblatedLayers echoes the layers the backend zeroed during this call.
+	// Empty when the request did not set AblateLayers.
+	AblatedLayers []int
 }
 
 // AvailableModel describes a GGUF model available for loading.
@@ -359,12 +368,13 @@ func (p *EmbeddedProvider) Complete(ctx context.Context, req CompletionRequest) 
 	}
 
 	backendReq := BackendCompletionRequest{
-		Prompt:      prompt,
-		MaxTokens:   maxTokens,
-		Temperature: temp,
-		TopP:        req.TopP,
-		Stop:        stop,
-		Grammar:     grammar,
+		Prompt:       prompt,
+		MaxTokens:    maxTokens,
+		Temperature:  temp,
+		TopP:         req.TopP,
+		Stop:         stop,
+		Grammar:      grammar,
+		AblateLayers: req.AblateLayers,
 	}
 
 	backendResp, err := backend.Complete(ctx, backendReq)
@@ -383,6 +393,7 @@ func (p *EmbeddedProvider) Complete(ctx context.Context, req CompletionRequest) 
 		CompletionTokens: backendResp.CompletionTokens,
 		MeanProb:         backendResp.MeanProb,
 		MinProb:          backendResp.MinProb,
+		AblatedLayers:    backendResp.AblatedLayers,
 	}, nil
 }
 

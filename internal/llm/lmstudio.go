@@ -230,6 +230,13 @@ func derefString(s *string) string {
 
 // Complete sends a completion request to LM Studio and returns the response.
 func (p *LMStudioProvider) Complete(ctx context.Context, req CompletionRequest) (CompletionResponse, error) {
+	// AblateLayers is meaningless for a cloud backend — the spoke stack
+	// lives in the embedded llama.cpp provider. Fail loud rather than
+	// silently drop the request's intent.
+	if len(req.AblateLayers) > 0 {
+		return CompletionResponse{}, fmt.Errorf("lmstudio: ablate_layers not supported (use embedded provider)")
+	}
+
 	if err := p.acquire(ctx); err != nil {
 		return CompletionResponse{}, &ErrProviderUnavailable{
 			Endpoint: p.endpoint + "/chat/completions",

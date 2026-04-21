@@ -556,3 +556,99 @@ func TestEagerLoadSkipsEnsureLoaded(t *testing.T) {
 func writeTestFile(dir, name string) error {
 	return os.WriteFile(dir+"/"+name, []byte("fake gguf data"), 0600)
 }
+
+// TestEmbeddedProvider_PlumbsAblateLayers verifies the EmbeddedProvider
+// passes AblateLayers through to the Backend and echoes AblatedLayers
+// back in the response. Feature #4 / EXP-039.
+func TestEmbeddedProvider_PlumbsAblateLayers(t *testing.T) {
+	dir := t.TempDir()
+	chatFile := "chat.gguf"
+	if err := writeTestFile(dir, chatFile); err != nil {
+		t.Fatal(err)
+	}
+
+	var captured BackendCompletionRequest
+	mb := &mockBackend{
+		completeFunc: func(_ context.Context, req BackendCompletionRequest) (BackendCompletionResponse, error) {
+			captured = req
+			return BackendCompletionResponse{
+				Text:             "answer",
+				PromptTokens:     4,
+				CompletionTokens: 1,
+				// Mock echoes back the layers it ablated — mirrors the real
+				// llamacpp Backend's behavior after the ablate envelope runs.
+				AblatedLayers: append([]int(nil), req.AblateLayers...),
+			}, nil
+		},
+	}
+
+	p := NewEmbeddedProvider(EmbeddedProviderConfig{
+		ModelsDir:     dir,
+		ChatModelFile: chatFile,
+		ContextSize:   512,
+		MaxTokens:     32,
+		MaxConcurrent: 1,
+	})
+	if err := p.LoadModels(func() Backend { return mb }); err != nil {
+		t.Fatalf("LoadModels: %v", err)
+	}
+
+	resp, err := p.Complete(context.Background(), CompletionRequest{
+		Messages:     []Message{{Role: "user", Content: "hi"}},
+		AblateLayers: []int{4, 5, 6},
+	})
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	// Backend received the ablate layers.
+	if len(captured.AblateLayers) != 3 || captured.AblateLayers[0] != 4 {
+		t.Fatalf("backend did not see AblateLayers, got %v", captured.AblateLayers)
+	}
+	// Provider echoed AblatedLayers up.
+	if len(resp.AblatedLayers) != 3 || resp.AblatedLayers[0] != 4 {
+		t.Fatalf("response missing AblatedLayers, got %v", resp.AblatedLayers)
+	}
+}
+
+// TestEmbeddedProvider_NoAblateByDefault verifies plain completions don't
+// send AblateLayers to the backend (the envelope must stay dormant).
+func TestEmbeddedProvider_NoAblateByDefault(t *testing.T) {
+	dir := t.TempDir()
+	chatFile := "chat.gguf"
+	if err := writeTestFile(dir, chatFile); err != nil {
+		t.Fatal(err)
+	}
+
+	var captured BackendCompletionRequest
+	mb := &mockBackend{
+		completeFunc: func(_ context.Context, req BackendCompletionRequest) (BackendCompletionResponse, error) {
+			captured = req
+			return BackendCompletionResponse{Text: "answer"}, nil
+		},
+	}
+
+	p := NewEmbeddedProvider(EmbeddedProviderConfig{
+		ModelsDir:     dir,
+		ChatModelFile: chatFile,
+		ContextSize:   512,
+		MaxTokens:     32,
+		MaxConcurrent: 1,
+	})
+	if err := p.LoadModels(func() Backend { return mb }); err != nil {
+		t.Fatalf("LoadModels: %v", err)
+	}
+
+	resp, err := p.Complete(context.Background(), CompletionRequest{
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if len(captured.AblateLayers) != 0 {
+		t.Fatalf("plain completion should not set AblateLayers, got %v", captured.AblateLayers)
+	}
+	if len(resp.AblatedLayers) != 0 {
+		t.Fatalf("plain response should not include AblatedLayers, got %v", resp.AblatedLayers)
+	}
+}

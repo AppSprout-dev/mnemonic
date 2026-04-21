@@ -39,6 +39,14 @@ type CompletionRequest struct {
 	Tools           []Tool          `json:"tools,omitempty"`
 	ResponseFormat  *ResponseFormat `json:"response_format,omitempty"`
 	DisableThinking bool            `json:"-"` // if true, set reasoning_effort=none on thinking models
+
+	// AblateLayers, when non-empty, asks the provider to zero the
+	// gate_bias on the listed spoke layers for the duration of this
+	// single completion and restore the prior values afterwards. Used by
+	// CRISPR-LM Feature #4 (EXP-039) to probe whether the spoke stack
+	// altered an answer relative to the base model. Embedded provider
+	// only — other providers return an error when set.
+	AblateLayers []int `json:"ablate_layers,omitempty"`
 }
 
 // CompletionResponse is the output of a completion call.
@@ -51,6 +59,10 @@ type CompletionResponse struct {
 	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
 	MeanProb         float32    `json:"mean_prob,omitempty"` // mean token probability (embedded provider only)
 	MinProb          float32    `json:"min_prob,omitempty"`  // min token probability (embedded provider only)
+
+	// AblatedLayers echoes the layers that were zeroed for this
+	// completion. Empty when the request did not set AblateLayers.
+	AblatedLayers []int `json:"ablated_layers,omitempty"`
 }
 
 // Tool defines a function the LLM can call during completion.
