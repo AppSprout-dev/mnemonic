@@ -282,3 +282,28 @@ func TestAuthHeader_NotSetWhenEmpty(t *testing.T) {
 		t.Errorf("Authorization = %q, want empty (no key configured)", gotAuth)
 	}
 }
+
+// TestLMStudio_RejectsAblateLayers: the cloud backend can't honor ablate
+// (the spoke stack lives in the embedded llamacpp provider). Fail loud
+// rather than silently dropping the caller's intent. Feature #4 / EXP-039.
+func TestLMStudio_RejectsAblateLayers(t *testing.T) {
+	// Server should never be hit — the provider must reject upfront.
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+	}))
+	defer srv.Close()
+
+	p := NewLMStudioProvider(srv.URL, "chat", "embed", "", 5*time.Second, 2)
+
+	_, err := p.Complete(context.Background(), CompletionRequest{
+		Messages:     []Message{{Role: "user", Content: "hi"}},
+		AblateLayers: []int{4, 5},
+	})
+	if err == nil {
+		t.Fatal("expected rejection error, got nil")
+	}
+	if hits != 0 {
+		t.Fatalf("LMStudio provider shouldn't have reached the server, got %d hits", hits)
+	}
+}

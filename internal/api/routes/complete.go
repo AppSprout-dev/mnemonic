@@ -17,6 +17,12 @@ type completeRequest struct {
 	MaxTokens      int                 `json:"max_tokens,omitempty"`
 	Temperature    float32             `json:"temperature,omitempty"`
 	ResponseFormat *llm.ResponseFormat `json:"response_format,omitempty"`
+
+	// AblateLayers, when non-empty, asks the provider to zero the
+	// gate_bias on the listed spoke layers for this single call and
+	// restore them afterwards. Used by CRISPR-LM Feature #4 (EXP-039).
+	// Embedded provider only — cloud providers reject the flag.
+	AblateLayers []int `json:"ablate_layers,omitempty"`
 }
 
 // HandleComplete handles POST /api/v1/complete
@@ -64,6 +70,7 @@ func HandleComplete(provider llm.Provider, log *slog.Logger) http.HandlerFunc {
 			MaxTokens:      maxTokens,
 			Temperature:    temperature,
 			ResponseFormat: req.ResponseFormat,
+			AblateLayers:   req.AblateLayers,
 		})
 		if err != nil {
 			log.Error("complete failed", "error", err)
@@ -72,9 +79,9 @@ func HandleComplete(provider llm.Provider, log *slog.Logger) http.HandlerFunc {
 		}
 
 		elapsed := time.Since(start)
-		log.Info("complete", "tokens", resp.CompletionTokens, "elapsed", elapsed)
+		log.Info("complete", "tokens", resp.CompletionTokens, "elapsed", elapsed, "ablated_layers", len(resp.AblatedLayers))
 
-		writeJSON(w, http.StatusOK, map[string]any{
+		body := map[string]any{
 			"content":           resp.Content,
 			"stop_reason":       resp.StopReason,
 			"tokens_used":       resp.TokensUsed,
@@ -83,6 +90,10 @@ func HandleComplete(provider llm.Provider, log *slog.Logger) http.HandlerFunc {
 			"mean_prob":         resp.MeanProb,
 			"min_prob":          resp.MinProb,
 			"elapsed_ms":        elapsed.Milliseconds(),
-		})
+		}
+		if len(resp.AblatedLayers) > 0 {
+			body["ablated_layers"] = resp.AblatedLayers
+		}
+		writeJSON(w, http.StatusOK, body)
 	}
 }

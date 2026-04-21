@@ -51,7 +51,7 @@ func (b *Backend) LoadModel(path string, opts llm.BackendOptions) error {
 	return nil
 }
 
-func (b *Backend) Complete(_ context.Context, req llm.BackendCompletionRequest) (llm.BackendCompletionResponse, error) {
+func (b *Backend) Complete(ctx context.Context, req llm.BackendCompletionRequest) (llm.BackendCompletionResponse, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -59,6 +59,28 @@ func (b *Backend) Complete(_ context.Context, req llm.BackendCompletionRequest) 
 		return llm.BackendCompletionResponse{}, fmt.Errorf("model not loaded")
 	}
 
+	// Ablate envelope (EXP-039 / Feature #4). When AblateLayers is non-empty
+	// we snapshot those layers' gate_biases, zero them, run the completion,
+	// and restore the prior values — all under the single b.mu acquisition
+	// so concurrent traffic never observes the zeroed state.
+	if len(req.AblateLayers) > 0 {
+		acc := unlockedGateAccessor{b: b}
+		resp, err := llm.ApplyAblation(acc, req.AblateLayers, func() (llm.BackendCompletionResponse, error) {
+			return b.completeLocked(ctx, req)
+		})
+		if err != nil {
+			return llm.BackendCompletionResponse{}, err
+		}
+		resp.AblatedLayers = append([]int(nil), req.AblateLayers...)
+		return resp, nil
+	}
+
+	return b.completeLocked(ctx, req)
+}
+
+// completeLocked runs a completion against the loaded model. Caller must
+// hold b.mu. Extracted from Complete so the ablate envelope can wrap it.
+func (b *Backend) completeLocked(_ context.Context, req llm.BackendCompletionRequest) (llm.BackendCompletionResponse, error) {
 	cprompt := C.CString(req.Prompt)
 	defer C.free(unsafe.Pointer(cprompt))
 
@@ -157,11 +179,15 @@ func (b *Backend) Close() error {
 func (b *Backend) SetSpokeGateBias(layer int, value float32) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	return b.setSpokeGateBiasLocked(layer, value)
+}
 
+// setSpokeGateBiasLocked mutates the gate bias with b.mu already held.
+// Used by the ablate envelope inside Complete.
+func (b *Backend) setSpokeGateBiasLocked(layer int, value float32) error {
 	if b.model == nil {
 		return fmt.Errorf("model not loaded")
 	}
-
 	rc := C.mnm_set_spoke_gate_bias(b.model, C.int(layer), C.float(value))
 	if rc != 0 {
 		return fmt.Errorf("set spoke gate bias failed (layer=%d, rc=%d)", layer, rc)
@@ -216,7 +242,12 @@ func (b *Backend) SetSpokeTensorF32(name string, data []float32) error {
 func (b *Backend) GetSpokeGateBias(layer int) (float32, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	return b.getSpokeGateBiasLocked(layer)
+}
 
+// getSpokeGateBiasLocked reads the gate bias with b.mu already held.
+// Used by the ablate envelope inside Complete.
+func (b *Backend) getSpokeGateBiasLocked(layer int) (float32, error) {
 	if b.model == nil {
 		return 0, fmt.Errorf("model not loaded")
 	}
@@ -231,4 +262,19 @@ func (b *Backend) GetSpokeGateBias(layer int) (float32, error) {
 		return 0, fmt.Errorf("get spoke gate bias failed (layer=%d, rc=%d)", layer, int(rc))
 	}
 	return value, nil
+}
+
+// unlockedGateAccessor adapts Backend's *locked helpers to llm.GateBiasAccessor.
+// The ablate envelope passes this in while already holding b.mu so the whole
+// snapshot / zero / complete / restore sequence is one critical section.
+type unlockedGateAccessor struct {
+	b *Backend
+}
+
+func (a unlockedGateAccessor) GetGateBias(layer int) (float32, error) {
+	return a.b.getSpokeGateBiasLocked(layer)
+}
+
+func (a unlockedGateAccessor) SetGateBias(layer int, value float32) error {
+	return a.b.setSpokeGateBiasLocked(layer, value)
 }
