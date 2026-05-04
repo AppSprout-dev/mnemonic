@@ -63,6 +63,17 @@ type ConsolidationConfig struct {
 	// both a "Session Handoff Workflow" pattern and a "Tokenizer boundary"
 	// pattern). Real recurring patterns easily exceed this floor. Default: 10.
 	PatternEvidenceJaccardMinCount int
+	// AbstractionEvidenceJaccardMin is the analogue of PatternEvidenceJaccardMin
+	// for level-2 abstractions (principles + dreaming insights, both stored at
+	// level=2 with different source fields). Two abstractions whose source-set
+	// Jaccard is at least this high are duplicates regardless of title or
+	// embedding wording. Default: 0.5.
+	AbstractionEvidenceJaccardMin float32
+	// AbstractionEvidenceJaccardMinCount is the lower-bound safeguard for the
+	// abstraction evidence-Jaccard path. Abstractions have smaller evidence
+	// sets than patterns (typical 2-14), so the safeguard is set lower than the
+	// pattern-side default. Default: 3.
+	AbstractionEvidenceJaccardMinCount int
 	// PatternMatchEvidenceCoverageMin is the directional ratio
 	// |cluster ∩ pattern.evidence| / |cluster| above which findMatchingPattern
 	// treats a cluster as a re-extraction of an existing pattern (skipping the
@@ -117,9 +128,11 @@ func DefaultConfig() ConsolidationConfig {
 		MergeSimilarityThreshold:        0.85,
 		PatternMatchThreshold:           0.70,
 		PatternMatchMinConceptOverlap:   2,
-		PatternEvidenceJaccardMin:       0.5,
-		PatternEvidenceJaccardMinCount:  10,
-		PatternMatchEvidenceCoverageMin: 0.7,
+		PatternEvidenceJaccardMin:          0.5,
+		PatternEvidenceJaccardMinCount:     10,
+		PatternMatchEvidenceCoverageMin:    0.7,
+		AbstractionEvidenceJaccardMin:      0.5,
+		AbstractionEvidenceJaccardMinCount: 3,
 		MaxClusterSampleForLLM:          10,
 		PatternStrengthIncrement:        0.03,
 		PatternIncrementCap:             0.15,
@@ -1687,6 +1700,40 @@ func evidenceCoverage(clusterIDs, patternEvidence []string) float32 {
 	return float32(hit) / float32(len(clusterIDs))
 }
 
+// abstractionEvidenceJaccard returns the evidence-set Jaccard between two
+// abstractions. Level-2 abstractions can come from two paths:
+//   - abstraction-agent's synthesizePrinciple → uses SourcePatternIDs
+//   - dreaming-agent's synthesizeInsight       → uses SourceMemoryIDs
+//
+// Level-3 axiom synthesis re-uses SourcePatternIDs to point at source principles.
+//
+// We compare whichever source field is populated on each side. If the two
+// abstractions have different populated fields (one principle, one insight),
+// they're not comparable in this signal — different evidence types — and we
+// return 0.
+func abstractionEvidenceJaccard(a, b store.Abstraction) float32 {
+	aHasPat, aHasMem := len(a.SourcePatternIDs) > 0, len(a.SourceMemoryIDs) > 0
+	bHasPat, bHasMem := len(b.SourcePatternIDs) > 0, len(b.SourceMemoryIDs) > 0
+	switch {
+	case aHasPat && bHasPat:
+		return evidenceJaccard(a.SourcePatternIDs, b.SourcePatternIDs)
+	case aHasMem && bHasMem:
+		return evidenceJaccard(a.SourceMemoryIDs, b.SourceMemoryIDs)
+	default:
+		// Mixed types or both empty — not comparable via this signal.
+		return 0
+	}
+}
+
+// abstractionEvidenceCounts returns the evidence count of whichever source
+// field is populated. Used by dedup to apply the min-count safeguard.
+func abstractionEvidenceCounts(a store.Abstraction) int {
+	if len(a.SourcePatternIDs) > 0 {
+		return len(a.SourcePatternIDs)
+	}
+	return len(a.SourceMemoryIDs)
+}
+
 // isDuplicate returns true if two items are near-duplicates based on title Jaccard and embedding cosine.
 // For short titles (<=4 words in either), requires BOTH signals to exceed thresholds to avoid false positives.
 func isDuplicate(titleA, titleB string, embA, embB []float32, titleThresh, embThresh float32) bool {
@@ -1771,7 +1818,35 @@ func (ca *ConsolidationAgent) dedupAbstractions(ctx context.Context) (int, error
 					embSim = agentutil.CosineSimilarity(abstractions[i].Embedding, abstractions[j].Embedding)
 				}
 
-				if isDuplicate(abstractions[i].Title, abstractions[j].Title, abstractions[i].Embedding, abstractions[j].Embedding, 0.6, 0.75) {
+				// Two duplicate paths (mirrors dedupPatterns):
+				//   1. Title-or-embedding similarity (legacy isDuplicate behavior).
+				//   2. Evidence-set Jaccard >= threshold — abstractions sharing
+				//      most of their source items ARE duplicates regardless of
+				//      title/embedding wording. Catches the "iterative AI dev"
+				//      and "specialization-over-scale" variants surfaced by the
+				//      schema_rejection_sample diagnostic in PR #435.
+				//
+				// Note: level-2 abstractions come from two different agents:
+				// abstraction-agent populates SourcePatternIDs (principles), while
+				// dreaming-agent populates SourceMemoryIDs (insights). We compare
+				// whichever evidence field is populated on each side; if the two
+				// abstractions have different populated fields, no evidence-Jaccard
+				// signal applies (different evidence types are not comparable).
+				titleEmbDup := isDuplicate(abstractions[i].Title, abstractions[j].Title, abstractions[i].Embedding, abstractions[j].Embedding, 0.6, 0.75)
+				evJaccard := abstractionEvidenceJaccard(abstractions[i], abstractions[j])
+				abstractionEvidenceMin := agentutil.Float32Or(ca.config.AbstractionEvidenceJaccardMin, 0.5)
+				abstractionEvidenceMinCount := agentutil.IntOr(ca.config.AbstractionEvidenceJaccardMinCount, 3)
+				naMin, nbMin := abstractionEvidenceCounts(abstractions[i]), abstractionEvidenceCounts(abstractions[j])
+				evidenceDup := evJaccard >= abstractionEvidenceMin && naMin >= abstractionEvidenceMinCount && nbMin >= abstractionEvidenceMinCount
+				if titleEmbDup || evidenceDup {
+					if evidenceDup && !titleEmbDup {
+						ca.log.Info("abstraction dedup: matched via evidence-jaccard",
+							"keep_id", abstractions[i].ID, "keep_title", abstractions[i].Title,
+							"archive_id", abstractions[j].ID, "archive_title", abstractions[j].Title,
+							"evidence_jaccard", evJaccard,
+							"keep_evidence_n", naMin, "archive_evidence_n", nbMin,
+							"level", level)
+					}
 					// Archive the newer one (j), transfer unique source IDs to canonical (i)
 					canonical := &abstractions[i]
 					dup := &abstractions[j]

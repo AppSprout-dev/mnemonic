@@ -36,6 +36,8 @@ type mockStore struct {
 	writeConsolidationFn    func(ctx context.Context, record store.ConsolidationRecord) error
 	getMemoryAttributesFn   func(ctx context.Context, memoryID string) (store.MemoryAttributes, error)
 	listPatternsFn          func(ctx context.Context, project string, limit int) ([]store.Pattern, error)
+	listAbstractionsFn      func(ctx context.Context, level, limit int) ([]store.Abstraction, error)
+	updateAbstractionFn     func(ctx context.Context, a store.Abstraction) error
 	searchPatternsByEmbFn   func(ctx context.Context, emb []float32, limit int) ([]store.Pattern, error)
 	searchArchivedByEmbFn   func(ctx context.Context, emb []float32, limit int) ([]store.Pattern, error)
 	updatePatternFn         func(ctx context.Context, p store.Pattern) error
@@ -81,6 +83,18 @@ func (m *mockStore) ListPatterns(ctx context.Context, project string, limit int)
 		return m.listPatternsFn(ctx, project, limit)
 	}
 	return nil, nil
+}
+func (m *mockStore) ListAbstractions(ctx context.Context, level, limit int) ([]store.Abstraction, error) {
+	if m.listAbstractionsFn != nil {
+		return m.listAbstractionsFn(ctx, level, limit)
+	}
+	return nil, nil
+}
+func (m *mockStore) UpdateAbstraction(ctx context.Context, a store.Abstraction) error {
+	if m.updateAbstractionFn != nil {
+		return m.updateAbstractionFn(ctx, a)
+	}
+	return nil
 }
 func (m *mockStore) SearchPatternsByEmbedding(ctx context.Context, emb []float32, limit int) ([]store.Pattern, error) {
 	if m.searchPatternsByEmbFn != nil {
