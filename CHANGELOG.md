@@ -4,6 +4,29 @@ All notable changes to Mnemonic will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.37.0](https://github.com/AppSprout-dev/mnemonic/compare/v0.36.0...v0.37.0) (2026-05-04)
+
+
+### Features
+
+* **abstraction:** capture raw rejected output for principle/axiom soft-rejects ([07fafba](https://github.com/AppSprout-dev/mnemonic/commit/07fafba902c71a9b8a2d787c4ae6dd41a3d72c9f))
+* **abstraction:** capture raw rejected output on principle/axiom soft-rejects ([b65fc4b](https://github.com/AppSprout-dev/mnemonic/commit/b65fc4bc9bd543d313d7f227c37951ff3a167352))
+* **agents:** schema-health telemetry + metacognition aggregator + forum signal ([1912a48](https://github.com/AppSprout-dev/mnemonic/commit/1912a489a4f5773a6d10ee1da4b6cef949004d7f))
+* **complete:** per-request ablate_layers flag on /api/v1/complete ([610e032](https://github.com/AppSprout-dev/mnemonic/commit/610e032f276a3c8bdb258a5ee75b4ce98dce443e))
+* **complete:** per-request ablate_layers flag on /api/v1/complete ([e5e111e](https://github.com/AppSprout-dev/mnemonic/commit/e5e111e310728d1c1487e24b653218972f6a0d45))
+* schema-health telemetry + consolidation timeout fix + advisory board ([21c3576](https://github.com/AppSprout-dev/mnemonic/commit/21c35768703ecc0138d1c6139af2ac3603f48cd4))
+* **web:** admin edit/delete + sortable columns + handoffs section ([e807873](https://github.com/AppSprout-dev/mnemonic/commit/e8078730f1ab2030498213a9ccd55936d1a20a5d))
+* **web:** admin edit/delete + sortable columns + handoffs section ([09f974e](https://github.com/AppSprout-dev/mnemonic/commit/09f974e8f2b6c6066086e603caf6ab30d7a561d6))
+
+
+### Bug Fixes
+
+* **api:** raise consolidation route timeout from 60s to 5m ([3867b78](https://github.com/AppSprout-dev/mnemonic/commit/3867b78eeec7ad89b60d956e3840ec02f9fe79b5))
+* **consolidation:** catch level-2 abstraction duplicates via evidence-set Jaccard ([9d10626](https://github.com/AppSprout-dev/mnemonic/commit/9d106265ae652f12781237977fff4f16b11f202d))
+* **consolidation:** catch level-2 abstraction duplicates via evidence-set Jaccard ([2d41e6f](https://github.com/AppSprout-dev/mnemonic/commit/2d41e6f8a0e3c6b5c1715181770ddbc5529bccdc))
+* **consolidation:** catch pattern duplicates via evidence-set Jaccard ([6cacef0](https://github.com/AppSprout-dev/mnemonic/commit/6cacef031d1e3d9dc91b1d2aaafab3005ae68e7d))
+* **consolidation:** catch title-variant pattern duplicates via evidence-set Jaccard ([185c82a](https://github.com/AppSprout-dev/mnemonic/commit/185c82a400f48d9c9533111de3a7c078c3c93f53))
+
 ## [0.36.0](https://github.com/AppSprout-dev/mnemonic/compare/v0.35.0...v0.36.0) (2026-04-18)
 
 
