@@ -169,7 +169,13 @@ func HandleConsolidationRun(runner ConsolidationRunner, log *slog.Logger) http.H
 			return
 		}
 
-		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+		// Natural daemon cycles run with the agent's lifetime context (no deadline).
+		// API-triggered cycles inherit the request context but get a generous ceiling:
+		// a full cycle on ROCm hardware can exceed 60s with multiple pattern_identify
+		// LLM calls per cluster (surfaced by the schema-telemetry layer — pattern_identify
+		// hit "context deadline exceeded" at 24% rate under the previous 60s cap, which
+		// the cycle logged as WARN and the route still reported as "completed").
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 		defer cancel()
 
 		err := runner.RunConsolidation(ctx)
