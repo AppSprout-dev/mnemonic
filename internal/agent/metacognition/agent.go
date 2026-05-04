@@ -31,6 +31,12 @@ type MetacognitionAgent struct {
 	wg          sync.WaitGroup
 	stopOnce    sync.Once
 	triggerCh   chan struct{}
+
+	// schemaStats aggregates LLMSchemaCall events into per-schema rolling stats
+	// for the auditSchemaHealth audit. Populated via the bus subscription
+	// installed in Start().
+	schemaStats *schemaStats
+	schemaSubID string
 }
 
 func NewMetacognitionAgent(s store.Store, llmProv llm.Provider, cfg MetacognitionConfig, log *slog.Logger) *MetacognitionAgent {
@@ -50,6 +56,15 @@ func (ma *MetacognitionAgent) Name() string {
 func (ma *MetacognitionAgent) Start(ctx context.Context, bus events.Bus) error {
 	ma.ctx, ma.cancel = context.WithCancel(ctx)
 	ma.bus = bus
+	ma.schemaStats = newSchemaStats(100)
+	if bus != nil {
+		ma.schemaSubID = bus.Subscribe(events.TypeLLMSchemaCall, func(_ context.Context, evt events.Event) error {
+			if e, ok := evt.(events.LLMSchemaCall); ok {
+				ma.schemaStats.record(e)
+			}
+			return nil
+		})
+	}
 	ma.wg.Add(1)
 	go ma.loop()
 	return nil
@@ -57,6 +72,9 @@ func (ma *MetacognitionAgent) Start(ctx context.Context, bus events.Bus) error {
 
 func (ma *MetacognitionAgent) Stop() error {
 	ma.stopOnce.Do(func() {
+		if ma.bus != nil && ma.schemaSubID != "" {
+			ma.bus.Unsubscribe(ma.schemaSubID)
+		}
 		ma.cancel()
 	})
 	ma.wg.Wait()
@@ -161,6 +179,8 @@ func (ma *MetacognitionAgent) runCycle(ctx context.Context) (*CycleReport, error
 	if obs := ma.auditEncodingQuality(ctx); obs != nil {
 		observations = append(observations, *obs)
 	}
+
+	observations = append(observations, ma.auditSchemaHealth(ctx)...)
 
 	for i := range observations {
 		observations[i].ID = uuid.New().String()
@@ -772,6 +792,56 @@ func (ma *MetacognitionAgent) weakenMemories(ctx context.Context, memoryIDs []st
 	}
 
 	return adjusted
+}
+
+// auditSchemaHealth turns the in-memory schemaStats snapshot into one
+// MetaObservation per schema. Each observation carries the rolling outcome
+// breakdown so dashboards and the reactor can act on individual schema drift
+// rather than a single global signal. Also publishes a SchemaHealthObserved
+// event per warning/critical schema so the forum and reactor can react.
+func (ma *MetacognitionAgent) auditSchemaHealth(ctx context.Context) []store.MetaObservation {
+	if ma.schemaStats == nil {
+		return nil
+	}
+	aggs := ma.schemaStats.snapshot()
+	if len(aggs) == 0 {
+		return nil
+	}
+	out := make([]store.MetaObservation, 0, len(aggs))
+	for _, agg := range aggs {
+		severity := classifySeverity(agg)
+		out = append(out, store.MetaObservation{
+			ObservationType: "schema_health",
+			Severity:        severity,
+			Details: map[string]any{
+				"schema":              agg.Schema,
+				"agent":               agg.Agent,
+				"sample_count":        agg.SampleCount,
+				"ok_rate":             agg.OkRate,
+				"error_rate":          agg.ErrorRate,
+				"parse_failed_rate":   agg.ParseFailed,
+				"low_confidence_rate": agg.LowConf,
+				"soft_rejected_rate":  agg.SoftReject,
+				"mean_prob":           agg.MeanProb,
+				"p95_latency_ms":      agg.P95LatMs,
+			},
+		})
+		if (severity == "warning" || severity == "critical") && ma.bus != nil {
+			_ = ma.bus.Publish(ctx, events.SchemaHealthObserved{
+				Schema:      agg.Schema,
+				Severity:    severity,
+				OkRate:      agg.OkRate,
+				ParseFailed: agg.ParseFailed,
+				LowConf:     agg.LowConf,
+				SoftReject:  agg.SoftReject,
+				ErrorRate:   agg.ErrorRate,
+				MeanProb:    agg.MeanProb,
+				SampleCount: agg.SampleCount,
+				Ts:          time.Now(),
+			})
+		}
+	}
+	return out
 }
 
 // auditEncodingQuality checks rolling encoding quality metrics for drift.

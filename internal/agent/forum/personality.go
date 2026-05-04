@@ -113,9 +113,67 @@ func ComposePost(evt events.Event) (content string, agentKey string, project str
 		agentKey = "metacognition"
 		content = fmt.Sprintf("Quality audit complete. Logged %d observations this cycle.", e.ObservationsLogged)
 
+	case events.SchemaHealthObserved:
+		agentKey = "metacognition"
+		// Tone scales with severity. Critical drift gets called out; warnings are
+		// reported neutrally so the forum doesn't read like a panic log.
+		// The dominant non-ok bucket is highlighted so a reader can see WHY.
+		dominant, share := dominantNonOk(e)
+		bucket := schemaBucketLabel(dominant)
+		switch e.Severity {
+		case "critical":
+			content = fmt.Sprintf(
+				"Schema '%s' is drifting hard — %.0f%% %s, only %.0f%% clean over %d calls. The spoke isn't producing usable output for this task.",
+				e.Schema, share*100, bucket, e.OkRate*100, e.SampleCount,
+			)
+		case "warning":
+			content = fmt.Sprintf(
+				"Watching schema '%s' — %.0f%% %s in the last %d calls (ok_rate %.0f%%). Worth keeping an eye on.",
+				e.Schema, share*100, bucket, e.SampleCount, e.OkRate*100,
+			)
+		default:
+			content = fmt.Sprintf("Schema '%s' looks healthy: %.0f%% ok over %d calls.", e.Schema, e.OkRate*100, e.SampleCount)
+		}
+
 	default:
 		return "", "", ""
 	}
 
 	return content, agentKey, project
+}
+
+// dominantNonOk returns the largest non-ok bucket and its share. Used by the
+// forum template so posts focus on the actual failure mode (parse_failed vs
+// low_confidence vs error vs soft_rejected) rather than reporting all four.
+func dominantNonOk(e events.SchemaHealthObserved) (string, float64) {
+	buckets := map[string]float64{
+		"parse_failed":   e.ParseFailed,
+		"low_confidence": e.LowConf,
+		"soft_rejected":  e.SoftReject,
+		"error":          e.ErrorRate,
+	}
+	bestKey, bestShare := "", 0.0
+	for k, v := range buckets {
+		if v > bestShare {
+			bestShare = v
+			bestKey = k
+		}
+	}
+	return bestKey, bestShare
+}
+
+// schemaBucketLabel turns a bucket key into prose for the forum post.
+func schemaBucketLabel(bucket string) string {
+	switch bucket {
+	case "parse_failed":
+		return "unparseable JSON"
+	case "low_confidence":
+		return "low-confidence completions"
+	case "soft_rejected":
+		return "soft rejections (parsed but declined)"
+	case "error":
+		return "outright errors"
+	default:
+		return "non-ok outcomes"
+	}
 }

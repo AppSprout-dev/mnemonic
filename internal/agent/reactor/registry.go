@@ -324,6 +324,24 @@ func NewChainRegistry(deps ChainDeps) []*Chain {
 			Priority: 1,
 			Enabled:  true,
 		})
+
+		chains = append(chains, &Chain{
+			ID:          "forum_on_schema_health",
+			Name:        "Forum: Post Schema Drift Signal",
+			Description: "Post to forum when metacognition flags a schema as drifting",
+			Trigger:     EventTypeMatcher{EventType: events.TypeSchemaHealthObserved},
+			TriggerType: events.TypeSchemaHealthObserved,
+			Conditions: []Condition{
+				&CooldownCondition{
+					ChainID:  "forum_on_schema_health",
+					Duration: deps.cooldown("forum_on_schema_health", 1*time.Hour),
+				},
+			},
+			Actions:  []Action{forumAction},
+			Cooldown: deps.cooldown("forum_on_schema_health", 1*time.Hour),
+			Priority: 1,
+			Enabled:  true,
+		})
 	} // end if ForumAgentPosting
 
 	// Forum @mention response chain

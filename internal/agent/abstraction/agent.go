@@ -647,20 +647,30 @@ Set has_principle to false if:
 		},
 	}
 
+	report := agentutil.SchemaCallReport{Schema: "principle_synthesize", Agent: aa.Name()}
+	start := time.Now()
 	resp, err := aa.llmProvider.Complete(ctx, req)
+	report.Latency = time.Since(start)
+	report.MeanProb = resp.MeanProb
+	report.MinProb = resp.MinProb
+	defer func() { agentutil.PublishSchemaCall(ctx, aa.bus, report, aa.log) }()
 	if err != nil {
+		report.Outcome = events.SchemaCallError
 		return nil, fmt.Errorf("LLM principle synthesis failed: %w", err)
 	}
 
 	jsonStr := agentutil.ExtractJSON(resp.Content)
 	var result principleResponse
 	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		report.Outcome = events.SchemaCallParseFailed
 		return nil, fmt.Errorf("failed to parse principle response: %w", err)
 	}
 
 	if !result.HasPrinciple || result.Title == "" || result.Principle == "" {
+		report.Outcome = events.SchemaCallSoftRejected
 		return nil, nil
 	}
+	report.Outcome = events.SchemaCallOK
 
 	// Generate embedding from the principle's own text (more precise than averaged pattern embeddings)
 	principleText := result.Title + ": " + result.Principle
@@ -758,20 +768,30 @@ Set has_axiom to false if:
 		},
 	}
 
+	report := agentutil.SchemaCallReport{Schema: "axiom_synthesize", Agent: aa.Name()}
+	start := time.Now()
 	resp, err := aa.llmProvider.Complete(ctx, req)
+	report.Latency = time.Since(start)
+	report.MeanProb = resp.MeanProb
+	report.MinProb = resp.MinProb
+	defer func() { agentutil.PublishSchemaCall(ctx, aa.bus, report, aa.log) }()
 	if err != nil {
+		report.Outcome = events.SchemaCallError
 		return nil, fmt.Errorf("LLM axiom synthesis failed: %w", err)
 	}
 
 	jsonStr := agentutil.ExtractJSON(resp.Content)
 	var result axiomResponse
 	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		report.Outcome = events.SchemaCallParseFailed
 		return nil, fmt.Errorf("failed to parse axiom response: %w", err)
 	}
 
 	if !result.HasAxiom || result.Title == "" || result.Axiom == "" {
+		report.Outcome = events.SchemaCallSoftRejected
 		return nil, nil
 	}
+	report.Outcome = events.SchemaCallOK
 
 	// Generate embedding from the axiom's own text (more precise than averaged principle embeddings)
 	axiomText := result.Title + ": " + result.Axiom
