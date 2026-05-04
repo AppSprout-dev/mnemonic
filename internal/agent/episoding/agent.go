@@ -387,7 +387,8 @@ Output ONLY the JSON object. No explanation.
 EVENTS:
 %s`, eventsStr)
 
-	usedLLM := false
+	report := agentutil.SchemaCallReport{Schema: "episode_synthesis", Agent: ea.Name()}
+	start := time.Now()
 	resp, err := ea.llmProvider.Complete(ctx, llm.CompletionRequest{
 		Messages: []llm.Message{
 			{Role: "system", Content: "You are an episode summarizer. Output JSON only. Never explain, never apologize, never chat. Just fill in the JSON fields based on the events."},
@@ -404,19 +405,28 @@ EVENTS:
 			},
 		},
 	})
+	report.Latency = time.Since(start)
+	report.MeanProb = resp.MeanProb
+	report.MinProb = resp.MinProb
+	defer func() { agentutil.PublishSchemaCall(ctx, ea.bus, report, ea.log) }()
 
-	if err != nil {
+	usedLLM := false
+	switch {
+	case err != nil:
+		report.Outcome = events.SchemaCallError
 		ea.log.Warn("LLM episode synthesis failed, using heuristic fallback", "error", err)
-	} else if resp.MeanProb > 0 && resp.MeanProb < 0.10 {
+	case resp.MeanProb > 0 && resp.MeanProb < 0.10:
+		report.Outcome = events.SchemaCallLowConfidence
 		ea.log.Warn("LLM episode synthesis confidence too low, using heuristic fallback",
 			"mean_prob", resp.MeanProb, "min_prob", resp.MinProb)
-	} else {
+	default:
 		parsed := parseEpisodeSynthesis(resp.Content)
 		ep.Title = parsed.Title
 		ep.Summary = parsed.Summary
 		ep.Concepts = parsed.Concepts
 		ep.Salience = parsed.Salience
 		usedLLM = true
+		report.Outcome = events.SchemaCallOK
 	}
 
 	if !usedLLM {

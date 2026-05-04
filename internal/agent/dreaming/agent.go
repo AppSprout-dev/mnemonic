@@ -788,18 +788,27 @@ Only share an insight if it's genuinely illuminating — something that makes yo
 		},
 	}
 
+	report := agentutil.SchemaCallReport{Schema: "insight_synthesize", Agent: da.Name()}
+	start := time.Now()
 	resp, err := da.llmProvider.Complete(ctx, req)
+	report.Latency = time.Since(start)
+	report.MeanProb = resp.MeanProb
+	report.MinProb = resp.MinProb
+	defer func() { agentutil.PublishSchemaCall(ctx, da.bus, report, da.log) }()
 	if err != nil {
+		report.Outcome = events.SchemaCallError
 		return nil, fmt.Errorf("LLM insight generation failed: %w", err)
 	}
 
 	jsonStr := agentutil.ExtractJSON(resp.Content)
 	var result insightResponse
 	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		report.Outcome = events.SchemaCallParseFailed
 		return nil, fmt.Errorf("failed to parse insight response: %w", err)
 	}
 
 	if !result.HasInsight || result.Title == "" || result.Insight == "" {
+		report.Outcome = events.SchemaCallSoftRejected
 		da.log.Info("dreaming.synthesizeInsight LLM-gate reject",
 			"cluster_size", len(cluster),
 			"memory_ids", memoryIDs,
@@ -842,6 +851,7 @@ Only share an insight if it's genuinely illuminating — something that makes yo
 		UpdatedAt:       time.Now(),
 	}
 
+	report.Outcome = events.SchemaCallOK
 	return abstraction, nil
 }
 

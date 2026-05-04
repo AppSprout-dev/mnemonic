@@ -623,8 +623,8 @@ func TestNewChainRegistry(t *testing.T) {
 		Logger:                testLogger(),
 	})
 
-	if len(chains) != 13 {
-		t.Errorf("expected 13 chains, got %d", len(chains))
+	if len(chains) != 14 {
+		t.Errorf("expected 14 chains, got %d", len(chains))
 	}
 
 	// Verify chain IDs

@@ -179,6 +179,7 @@ type RetrievalAgent struct {
 	mu       sync.RWMutex
 	stats    *retrievalStats
 	activity *activityTracker // nil when bus is not available (e.g. CLI mode)
+	bus      events.Bus       // retained for telemetry emission; nil in CLI mode
 }
 
 // retrievalStats tracks retrieval performance metrics.
@@ -199,6 +200,7 @@ func NewRetrievalAgent(s store.Store, llmProv llm.Provider, cfg RetrievalConfig,
 		llm:    llmProv,
 		config: cfg,
 		log:    log,
+		bus:    bus,
 		stats: &retrievalStats{
 			TotalQueries: 0,
 		},
@@ -1107,25 +1109,49 @@ func (ra *RetrievalAgent) synthesizeNarrative(ctx context.Context, query string,
 			req.Tools = tools
 		}
 
+		report := agentutil.SchemaCallReport{Schema: "retrieval_synthesis", Agent: "retrieval"}
+		start := time.Now()
 		resp, err := ra.llm.Complete(ctx, req)
+		report.Latency = time.Since(start)
+		report.MeanProb = resp.MeanProb
+		report.MinProb = resp.MinProb
+		publish := func() { agentutil.PublishSchemaCall(ctx, ra.bus, report, ra.log) }
 		if err != nil {
 			// If tool-use fails (e.g. model doesn't support it), fall back to no-tools synthesis
 			if toolCallCount == 0 {
+				report.Outcome = events.SchemaCallError
+				publish()
 				ra.log.Warn("tool-use synthesis failed, falling back to plain synthesis", "error", err)
 				req.Tools = nil
+				fallback := agentutil.SchemaCallReport{Schema: "retrieval_synthesis", Agent: "retrieval"}
+				start2 := time.Now()
 				resp, err = ra.llm.Complete(ctx, req)
+				fallback.Latency = time.Since(start2)
+				fallback.MeanProb = resp.MeanProb
+				fallback.MinProb = resp.MinProb
 				if err != nil {
+					fallback.Outcome = events.SchemaCallError
+					agentutil.PublishSchemaCall(ctx, ra.bus, fallback, ra.log)
 					return "", fmt.Errorf("llm synthesis failed: %w", err)
 				}
+				fallback.Outcome = events.SchemaCallOK
+				agentutil.PublishSchemaCall(ctx, ra.bus, fallback, ra.log)
 				return strings.TrimSpace(resp.Content), nil
 			}
+			report.Outcome = events.SchemaCallError
+			publish()
 			return "", fmt.Errorf("llm synthesis failed during tool loop: %w", err)
 		}
 
 		// If the model returned text (no tool calls), we're done
 		if len(resp.ToolCalls) == 0 {
+			report.Outcome = events.SchemaCallOK
+			publish()
 			return strings.TrimSpace(resp.Content), nil
 		}
+		// tool calls present — count this iteration as ok and continue
+		report.Outcome = events.SchemaCallOK
+		publish()
 
 		// The model wants to use tools — append its message to the conversation
 		assistantMsg := llm.Message{

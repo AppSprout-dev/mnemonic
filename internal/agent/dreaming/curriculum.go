@@ -10,6 +10,7 @@ import (
 	"github.com/appsprout-dev/mnemonic/internal/agent/agentutil"
 	"github.com/appsprout-dev/mnemonic/internal/agent/encoding"
 	"github.com/appsprout-dev/mnemonic/internal/config"
+	"github.com/appsprout-dev/mnemonic/internal/events"
 	"github.com/appsprout-dev/mnemonic/internal/llm"
 	"github.com/appsprout-dev/mnemonic/internal/store"
 	"github.com/google/uuid"
@@ -124,26 +125,36 @@ func (da *DreamingAgent) correctEntry(ctx context.Context, entry store.Experienc
 		Temperature: 0.1,
 	}
 
+	report := agentutil.SchemaCallReport{Schema: "curriculum_correction", Agent: da.Name()}
+	start := time.Now()
 	resp, err := da.llmProvider.Complete(ctx, req)
+	report.Latency = time.Since(start)
+	report.MeanProb = resp.MeanProb
+	report.MinProb = resp.MinProb
+	defer func() { agentutil.PublishSchemaCall(ctx, da.bus, report, da.log) }()
 	if err != nil {
+		report.Outcome = events.SchemaCallError
 		return fmt.Errorf("teacher model completion failed: %w", err)
 	}
 
 	// Parse and validate the response
 	jsonStr := agentutil.ExtractJSON(resp.Content)
 	if jsonStr == "" {
+		report.Outcome = events.SchemaCallParseFailed
 		return fmt.Errorf("teacher model returned no valid JSON")
 	}
 
 	// Basic structure validation — must be valid JSON with required fields
 	var parsed map[string]any
 	if err := json.Unmarshal([]byte(jsonStr), &parsed); err != nil {
+		report.Outcome = events.SchemaCallParseFailed
 		return fmt.Errorf("teacher model response not valid JSON: %w", err)
 	}
 
 	// Check required fields exist
 	for _, field := range []string{"summary", "content", "concepts"} {
 		if _, ok := parsed[field]; !ok {
+			report.Outcome = events.SchemaCallSoftRejected
 			return fmt.Errorf("teacher model response missing required field: %s", field)
 		}
 	}
@@ -151,6 +162,7 @@ func (da *DreamingAgent) correctEntry(ctx context.Context, entry store.Experienc
 	// Compute EPR on the corrected output
 	epr := computeSimpleEPR(raw.Content, jsonStr)
 	if epr < 0.7 {
+		report.Outcome = events.SchemaCallSoftRejected
 		return fmt.Errorf("teacher model output EPR too low (%.2f), skipping", epr)
 	}
 
@@ -158,6 +170,7 @@ func (da *DreamingAgent) correctEntry(ctx context.Context, entry store.Experienc
 	if err := da.store.UpdateExperienceCorrectedOutput(ctx, entry.ID, jsonStr, epr, 0.0, "api"); err != nil {
 		return fmt.Errorf("storing corrected output: %w", err)
 	}
+	report.Outcome = events.SchemaCallOK
 
 	da.log.Info("curriculum correction stored",
 		"entry_id", entry.ID, "original_epr", entry.EncodingEPR, "corrected_epr", epr)

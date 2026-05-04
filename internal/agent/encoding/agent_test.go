@@ -941,16 +941,25 @@ func TestEncodeMemory(t *testing.T) {
 			t.Errorf("expected emotional_tone 'satisfying', got %q", writtenAttrs.EmotionalTone)
 		}
 
-		// Verify event was published
+		// Verify event was published — scan rather than assume index 0,
+		// since LLMSchemaCall telemetry events also appear on the bus.
 		if len(bus.published) == 0 {
 			t.Fatal("expected MemoryEncoded event to be published")
 		}
-		evt, ok := bus.published[0].(events.MemoryEncoded)
-		if !ok {
-			t.Fatalf("expected MemoryEncoded event, got %T", bus.published[0])
+		var encoded events.MemoryEncoded
+		var found bool
+		for _, evt := range bus.published {
+			if e, ok := evt.(events.MemoryEncoded); ok {
+				encoded = e
+				found = true
+				break
+			}
 		}
-		if evt.RawID != "raw-1" {
-			t.Errorf("expected event raw_id 'raw-1', got %q", evt.RawID)
+		if !found {
+			t.Fatalf("MemoryEncoded event not found among %d published events", len(bus.published))
+		}
+		if encoded.RawID != "raw-1" {
+			t.Errorf("expected event raw_id 'raw-1', got %q", encoded.RawID)
 		}
 	})
 

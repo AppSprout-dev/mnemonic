@@ -732,25 +732,32 @@ Respond with ONLY a JSON object:
 		},
 	}
 
+	report := agentutil.SchemaCallReport{Schema: "consolidation_gist", Agent: ca.Name()}
+	start := time.Now()
 	resp, err := ca.llmProvider.Complete(ctx, req)
+	report.Latency = time.Since(start)
+	report.MeanProb = resp.MeanProb
+	report.MinProb = resp.MinProb
+	defer func() { agentutil.PublishSchemaCall(ctx, ca.bus, report, ca.log) }()
 	if err != nil {
+		report.Outcome = events.SchemaCallError
 		ca.log.Warn("llm gist creation failed, skipping merge (will retry next cycle)", "error", err)
 		return store.Memory{}, fmt.Errorf("LLM unavailable for gist creation: %w", err)
-	} else {
-		// Try to parse JSON from response
-		jsonStr := agentutil.ExtractJSON(resp.Content)
-		var parsed struct {
-			Summary string `json:"summary"`
-			Content string `json:"content"`
-		}
-		if err := json.Unmarshal([]byte(jsonStr), &parsed); err != nil {
-			ca.log.Warn("failed to parse gist JSON, skipping merge", "error", err)
-			return store.Memory{}, fmt.Errorf("failed to parse gist response: %w", err)
-		} else {
-			gistSummary = parsed.Summary
-			gistContent = parsed.Content
-		}
 	}
+	// Try to parse JSON from response
+	jsonStr := agentutil.ExtractJSON(resp.Content)
+	var parsed struct {
+		Summary string `json:"summary"`
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal([]byte(jsonStr), &parsed); err != nil {
+		report.Outcome = events.SchemaCallParseFailed
+		ca.log.Warn("failed to parse gist JSON, skipping merge", "error", err)
+		return store.Memory{}, fmt.Errorf("failed to parse gist response: %w", err)
+	}
+	gistSummary = parsed.Summary
+	gistContent = parsed.Content
+	report.Outcome = events.SchemaCallOK
 
 	// Fallback: if LLM returned an empty summary, truncate content (matches encoding agent)
 	if gistSummary == "" {
@@ -1442,8 +1449,15 @@ If these memories are just coincidentally similar but don't reveal a real patter
 		},
 	}
 
+	report := agentutil.SchemaCallReport{Schema: "pattern_identify", Agent: ca.Name()}
+	start := time.Now()
 	resp, err := ca.llmProvider.Complete(ctx, req)
+	report.Latency = time.Since(start)
+	report.MeanProb = resp.MeanProb
+	report.MinProb = resp.MinProb
+	defer func() { agentutil.PublishSchemaCall(ctx, ca.bus, report, ca.log) }()
 	if err != nil {
+		report.Outcome = events.SchemaCallError
 		return nil, fmt.Errorf("LLM pattern identification failed: %w", err)
 	}
 
@@ -1451,12 +1465,15 @@ If these memories are just coincidentally similar but don't reveal a real patter
 	jsonStr := agentutil.ExtractJSON(resp.Content)
 	var result patternResponse
 	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		report.Outcome = events.SchemaCallParseFailed
 		return nil, fmt.Errorf("failed to parse pattern response: %w", err)
 	}
 
 	if !result.IsPattern || result.Title == "" {
+		report.Outcome = events.SchemaCallSoftRejected
 		return nil, nil
 	}
+	report.Outcome = events.SchemaCallOK
 
 	// Build evidence IDs
 	evidenceIDs := make([]string, len(cluster))

@@ -1214,13 +1214,21 @@ func (ea *EncodingAgent) compressAndExtractConcepts(ctx context.Context, raw sto
 		},
 	}
 
+	report := agentutil.SchemaCallReport{Schema: "encoding_compression", Agent: ea.Name()}
+	start := time.Now()
 	resp, err := ea.llmProvider.Complete(ctx, req)
+	report.Latency = time.Since(start)
+	report.MeanProb = resp.MeanProb
+	report.MinProb = resp.MinProb
+	defer func() { agentutil.PublishSchemaCall(ctx, ea.bus, report, ea.log) }()
 	if err != nil {
+		report.Outcome = events.SchemaCallError
 		return nil, fmt.Errorf("LLM completion failed: %w", err)
 	}
 
 	// Logit validation: reject low-confidence completions from embedded models
 	if resp.MeanProb > 0 && resp.MeanProb < 0.10 {
+		report.Outcome = events.SchemaCallLowConfidence
 		slog.Warn("LLM completion has very low confidence, falling back to heuristic",
 			"mean_prob", resp.MeanProb, "min_prob", resp.MinProb,
 			"tokens", resp.CompletionTokens)
@@ -1234,9 +1242,11 @@ func (ea *EncodingAgent) compressAndExtractConcepts(ctx context.Context, raw sto
 	jsonStr := agentutil.ExtractJSON(resp.Content)
 	var result compressionResponse
 	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		report.Outcome = events.SchemaCallParseFailed
 		slog.Debug("LLM response failed JSON parse", "raw_response", agentutil.Truncate(resp.Content, 500), "stop_reason", resp.StopReason, "tokens_used", resp.TokensUsed)
 		return nil, fmt.Errorf("failed to parse LLM compression response: %w", err)
 	}
+	report.Outcome = events.SchemaCallOK
 
 	// Validate and fix fields
 	if result.Summary == "" {
@@ -1726,8 +1736,15 @@ Respond with ONLY a JSON object — pick the relationship that best captures the
 		},
 	}
 
+	report := agentutil.SchemaCallReport{Schema: "association_classify", Agent: ea.Name()}
+	start := time.Now()
 	resp, err := ea.llmProvider.Complete(ctx, req)
+	report.Latency = time.Since(start)
+	report.MeanProb = resp.MeanProb
+	report.MinProb = resp.MinProb
+	defer func() { agentutil.PublishSchemaCall(ctx, ea.bus, report, ea.log) }()
 	if err != nil {
+		report.Outcome = events.SchemaCallError
 		ea.log.Debug("llm relationship classification failed", "error", err)
 		return ""
 	}
@@ -1735,14 +1752,17 @@ Respond with ONLY a JSON object — pick the relationship that best captures the
 	jsonStr := agentutil.ExtractJSON(resp.Content)
 	var result classificationResponse
 	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		report.Outcome = events.SchemaCallParseFailed
 		ea.log.Debug("failed to parse classification response", "response", resp.Content)
 		return ""
 	}
 
 	if validRelationTypes[result.RelationType] {
+		report.Outcome = events.SchemaCallOK
 		return result.RelationType
 	}
 
+	report.Outcome = events.SchemaCallSoftRejected
 	return ""
 }
 

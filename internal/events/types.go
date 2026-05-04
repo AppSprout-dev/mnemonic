@@ -244,6 +244,54 @@ type ForumPostCreated struct {
 func (e ForumPostCreated) EventType() string         { return TypeForumPostCreated }
 func (e ForumPostCreated) EventTimestamp() time.Time { return e.Ts }
 
+// LLMSchemaCall outcome values.
+const (
+	SchemaCallOK            = "ok"             // call succeeded and was used downstream
+	SchemaCallError         = "error"          // Complete() returned an error
+	SchemaCallParseFailed   = "parse_failed"   // JSON unmarshal failed
+	SchemaCallLowConfidence = "low_confidence" // mean_prob below the agent's threshold
+	SchemaCallSoftRejected  = "soft_rejected"  // parsed but agent declined (has_X: false, missing fields)
+)
+
+// LLMSchemaCall is emitted at every Complete() callsite in cognitive agents to
+// surface per-schema LLM health. Aggregated by the metacognition agent into
+// rolling-window stats. Schema strings are stable identifiers (see SchemaCall*
+// outcome constants for the outcome enum).
+const TypeLLMSchemaCall = "llm_schema_call"
+
+type LLMSchemaCall struct {
+	Schema    string    `json:"schema"`     // e.g. "encoding_compression", "principle_synthesize"
+	Agent     string    `json:"agent"`      // emitting agent's Name()
+	Outcome   string    `json:"outcome"`    // see SchemaCall* constants
+	MeanProb  float32   `json:"mean_prob"`  // 0 if provider doesn't surface logprobs
+	MinProb   float32   `json:"min_prob"`   // 0 if not surfaced
+	LatencyMs int64     `json:"latency_ms"` // wall-clock latency of the Complete() call
+	Ts        time.Time `json:"timestamp"`
+}
+
+func (e LLMSchemaCall) EventType() string         { return TypeLLMSchemaCall }
+func (e LLMSchemaCall) EventTimestamp() time.Time { return e.Ts }
+
+// SchemaHealthObserved is emitted by metacognition when its rolling-window
+// aggregator flags a schema as drifting. Drives forum posts and reactor chains.
+const TypeSchemaHealthObserved = "schema_health_observed"
+
+type SchemaHealthObserved struct {
+	Schema      string    `json:"schema"`
+	Severity    string    `json:"severity"` // "info", "warning", "critical"
+	OkRate      float64   `json:"ok_rate"`
+	ParseFailed float64   `json:"parse_failed_rate"`
+	LowConf     float64   `json:"low_confidence_rate"`
+	SoftReject  float64   `json:"soft_rejected_rate"`
+	ErrorRate   float64   `json:"error_rate"`
+	MeanProb    float64   `json:"mean_prob"`
+	SampleCount int       `json:"sample_count"`
+	Ts          time.Time `json:"timestamp"`
+}
+
+func (e SchemaHealthObserved) EventType() string         { return TypeSchemaHealthObserved }
+func (e SchemaHealthObserved) EventTimestamp() time.Time { return e.Ts }
+
 // ForumMentionDetected is emitted when an @mention is detected in a forum post.
 const TypeForumMentionDetected = "forum_mention_detected"
 

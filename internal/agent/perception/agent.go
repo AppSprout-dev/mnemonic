@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/appsprout-dev/mnemonic/internal/agent"
+	"github.com/appsprout-dev/mnemonic/internal/agent/agentutil"
 	"github.com/appsprout-dev/mnemonic/internal/events"
 	"github.com/appsprout-dev/mnemonic/internal/llm"
 	"github.com/appsprout-dev/mnemonic/internal/store"
@@ -522,14 +523,22 @@ Salience 0.0-1.0: Higher for errors, decisions, insights, creative work. Lower f
 	llmCtx, cancel := context.WithTimeout(ctx, gateTimeout)
 	defer cancel()
 
+	report := agentutil.SchemaCallReport{Schema: "perception_gate", Agent: pa.Name()}
+	start := time.Now()
 	resp, err := pa.llmProvider.Complete(llmCtx, req)
+	report.Latency = time.Since(start)
+	report.MeanProb = resp.MeanProb
+	report.MinProb = resp.MinProb
+	defer func() { agentutil.PublishSchemaCall(ctx, pa.bus, report, pa.log) }()
 	if err != nil {
+		report.Outcome = events.SchemaCallError
 		return nil, fmt.Errorf("LLM completion failed: %w", err)
 	}
 
 	// Parse the JSON response
 	var result llmGateResult
 	if err := json.Unmarshal([]byte(resp.Content), &result); err != nil {
+		report.Outcome = events.SchemaCallParseFailed
 		pa.log.Error(
 			"failed to parse LLM response",
 			"error", err,
@@ -537,6 +546,7 @@ Salience 0.0-1.0: Higher for errors, decisions, insights, creative work. Lower f
 		)
 		return nil, fmt.Errorf("failed to parse LLM response: %w", err)
 	}
+	report.Outcome = events.SchemaCallOK
 
 	// Clamp salience to [0.0, 1.0]
 	if result.Salience < 0.0 {
