@@ -668,6 +668,7 @@ Set has_principle to false if:
 
 	if !result.HasPrinciple || result.Title == "" || result.Principle == "" {
 		report.Outcome = events.SchemaCallSoftRejected
+		aa.captureRejectionSample(ctx, "principle_synthesize", patternIDs, patternTitles(patterns), resp.Content, principleRejectReason(result))
 		return nil, nil
 	}
 	report.Outcome = events.SchemaCallOK
@@ -789,6 +790,7 @@ Set has_axiom to false if:
 
 	if !result.HasAxiom || result.Title == "" || result.Axiom == "" {
 		report.Outcome = events.SchemaCallSoftRejected
+		aa.captureRejectionSample(ctx, "axiom_synthesize", sourceIDs, abstractionTitles(principles), resp.Content, axiomRejectReason(result))
 		return nil, nil
 	}
 	report.Outcome = events.SchemaCallOK
