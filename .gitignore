@@ -39,6 +39,7 @@ config.yaml
 .vscode/
 .claude/plans/
 .claude/projects/
+.claude/scheduled_tasks.lock
 sdk/agent/evolution/.decay_stamp
 
 # Training data (large downloads, not shipped)
