@@ -50,14 +50,33 @@ type ConsolidationConfig struct {
 	MergeSimilarityThreshold      float64 // cosine threshold for memory merge clustering (default 0.85)
 	PatternMatchThreshold         float64 // cosine threshold for cluster→pattern matching (default 0.70)
 	PatternMatchMinConceptOverlap int     // min shared concepts required for cluster→pattern match (default 2) — prevents super-attractor behavior
-	MaxClusterSampleForLLM        int     // max cluster memories shown to the LLM for identifyPattern (default 10) — prevents JSON truncation on huge clusters
-	PatternStrengthIncrement      float32 // strength gain per new evidence (default 0.03)
-	PatternIncrementCap           float32 // max single-cycle strength gain (default 0.15)
-	LargeClusterBonus             float32 // multiplier for clusters >= LargeClusterMinSize (default 1.3)
-	LargeClusterMinSize           int     // cluster size to trigger bonus (default 5)
-	PatternStrengthCeiling        float32 // max strength unless strong evidence (default 0.95)
-	StrongEvidenceCeiling         float32 // max strength with strong evidence (default 1.0)
-	StrongEvidenceMinCount        int     // evidence count to unlock strong ceiling (default 10)
+	// PatternEvidenceJaccardMin is the evidence-set Jaccard above which two
+	// existing patterns are treated as duplicates regardless of title or
+	// embedding wording. Catches "Repeated Session Handoffs" / "Consistent
+	// Session Handoff" type variants that share most of their evidence but
+	// fail the title/embedding gates. Default: 0.5.
+	PatternEvidenceJaccardMin float32
+	// PatternEvidenceJaccardMinCount is the minimum evidence count BOTH patterns
+	// must have for evidence-Jaccard to apply as a duplicate signal. Below this,
+	// two small-cluster patterns sharing the same N memories are likely
+	// legitimately distinct extractions (e.g. one cluster of 4 memories yielding
+	// both a "Session Handoff Workflow" pattern and a "Tokenizer boundary"
+	// pattern). Real recurring patterns easily exceed this floor. Default: 10.
+	PatternEvidenceJaccardMinCount int
+	// PatternMatchEvidenceCoverageMin is the directional ratio
+	// |cluster ∩ pattern.evidence| / |cluster| above which findMatchingPattern
+	// treats a cluster as a re-extraction of an existing pattern (skipping the
+	// LLM call). Prevents new duplicate patterns from being generated when the
+	// memories are mostly already evidence in some pattern X. Default: 0.7.
+	PatternMatchEvidenceCoverageMin float32
+	MaxClusterSampleForLLM          int     // max cluster memories shown to the LLM for identifyPattern (default 10) — prevents JSON truncation on huge clusters
+	PatternStrengthIncrement        float32 // strength gain per new evidence (default 0.03)
+	PatternIncrementCap             float32 // max single-cycle strength gain (default 0.15)
+	LargeClusterBonus               float32 // multiplier for clusters >= LargeClusterMinSize (default 1.3)
+	LargeClusterMinSize             int     // cluster size to trigger bonus (default 5)
+	PatternStrengthCeiling          float32 // max strength unless strong evidence (default 0.95)
+	StrongEvidenceCeiling           float32 // max strength with strong evidence (default 1.0)
+	StrongEvidenceMinCount          int     // evidence count to unlock strong ceiling (default 10)
 
 	// Pattern decay tunables
 	PatternBaselineDecay float32 // per-cycle baseline decay (default 0.995)
@@ -80,40 +99,43 @@ type ConsolidationConfig struct {
 // DefaultConfig returns sensible defaults for consolidation.
 func DefaultConfig() ConsolidationConfig {
 	return ConsolidationConfig{
-		Interval:                      6 * time.Hour,
-		DecayRate:                     0.95,
-		FadeThreshold:                 0.3,
-		ArchiveThreshold:              0.1,
-		RetentionWindow:               90 * 24 * time.Hour,
-		MaxMemoriesPerCycle:           100,
-		MaxMergesPerCycle:             5,
-		MinClusterSize:                3,
-		MinEvidenceSalience:           0.5,
-		AssocPruneThreshold:           0.05,
-		RecencyProtection24h:          0.8,
-		RecencyProtection168h:         0.9,
-		AccessResistanceCap:           0.3,
-		AccessResistanceScale:         0.02,
-		SalienceCeiling:               1.0,
-		MergeSimilarityThreshold:      0.85,
-		PatternMatchThreshold:         0.70,
-		PatternMatchMinConceptOverlap: 2,
-		MaxClusterSampleForLLM:        10,
-		PatternStrengthIncrement:      0.03,
-		PatternIncrementCap:           0.15,
-		LargeClusterBonus:             1.3,
-		LargeClusterMinSize:           5,
-		PatternStrengthCeiling:        0.95,
-		StrongEvidenceCeiling:         1.0,
-		StrongEvidenceMinCount:        10,
-		PatternBaselineDecay:          0.995,
-		StaleDecayHealthy:             0.97,
-		StaleDecayModerate:            0.93,
-		StaleDecayAggressive:          0.85,
-		SelfSustainingMinEvidence:     10,
-		SelfSustainingMinStrength:     0.9,
-		SelfSustainingDecay:           0.995,
-		NeverRecalledArchiveDays:      30,
+		Interval:                        6 * time.Hour,
+		DecayRate:                       0.95,
+		FadeThreshold:                   0.3,
+		ArchiveThreshold:                0.1,
+		RetentionWindow:                 90 * 24 * time.Hour,
+		MaxMemoriesPerCycle:             100,
+		MaxMergesPerCycle:               5,
+		MinClusterSize:                  3,
+		MinEvidenceSalience:             0.5,
+		AssocPruneThreshold:             0.05,
+		RecencyProtection24h:            0.8,
+		RecencyProtection168h:           0.9,
+		AccessResistanceCap:             0.3,
+		AccessResistanceScale:           0.02,
+		SalienceCeiling:                 1.0,
+		MergeSimilarityThreshold:        0.85,
+		PatternMatchThreshold:           0.70,
+		PatternMatchMinConceptOverlap:   2,
+		PatternEvidenceJaccardMin:       0.5,
+		PatternEvidenceJaccardMinCount:  10,
+		PatternMatchEvidenceCoverageMin: 0.7,
+		MaxClusterSampleForLLM:          10,
+		PatternStrengthIncrement:        0.03,
+		PatternIncrementCap:             0.15,
+		LargeClusterBonus:               1.3,
+		LargeClusterMinSize:             5,
+		PatternStrengthCeiling:          0.95,
+		StrongEvidenceCeiling:           1.0,
+		StrongEvidenceMinCount:          10,
+		PatternBaselineDecay:            0.995,
+		StaleDecayHealthy:               0.97,
+		StaleDecayModerate:              0.93,
+		StaleDecayAggressive:            0.85,
+		SelfSustainingMinEvidence:       10,
+		SelfSustainingMinStrength:       0.9,
+		SelfSustainingDecay:             0.995,
+		NeverRecalledArchiveDays:        30,
 	}
 }
 
@@ -1183,8 +1205,13 @@ func (ca *ConsolidationAgent) findMatchingPattern(ctx context.Context, cluster [
 
 	threshold := float32(agentutil.Float64Or(ca.config.PatternMatchThreshold, 0.70))
 	minConceptOverlap := agentutil.IntOr(ca.config.PatternMatchMinConceptOverlap, 2)
+	evidenceCoverageMin := agentutil.Float32Or(ca.config.PatternMatchEvidenceCoverageMin, 0.7)
 
 	clusterConcepts := collectClusterConcepts(cluster)
+	clusterIDs := make([]string, 0, len(cluster))
+	for _, m := range cluster {
+		clusterIDs = append(clusterIDs, m.ID)
+	}
 
 	for i := range patterns {
 		p := &patterns[i]
@@ -1196,12 +1223,26 @@ func (ca *ConsolidationAgent) findMatchingPattern(ctx context.Context, cluster [
 			continue
 		}
 		overlap := countConceptOverlap(clusterConcepts, p.Concepts)
-		if overlap < minConceptOverlap {
-			ca.log.Info("pattern extraction: rejected embedding match on concept gate",
+		coverage := evidenceCoverage(clusterIDs, p.EvidenceIDs)
+		// Evidence-coverage override: when most of the cluster is already
+		// evidence in this candidate pattern, the cluster IS this pattern —
+		// bypass the concept gate. Concept gate alone caused
+		// "Repeated Session Handoffs"-class duplicates because the LLM
+		// re-extracted slightly-different concepts each cycle.
+		if overlap < minConceptOverlap && coverage < evidenceCoverageMin {
+			ca.log.Info("pattern extraction: rejected embedding match on concept+evidence gate",
 				"pattern_id", p.ID, "title", p.Title,
 				"cosine_sim", sim, "concept_overlap", overlap,
-				"min_required", minConceptOverlap)
+				"min_concept_required", minConceptOverlap,
+				"evidence_coverage", coverage,
+				"min_coverage_required", evidenceCoverageMin)
 			continue
+		}
+		if overlap < minConceptOverlap {
+			ca.log.Info("pattern extraction: matched via evidence-coverage override",
+				"pattern_id", p.ID, "title", p.Title,
+				"cosine_sim", sim, "concept_overlap", overlap,
+				"evidence_coverage", coverage)
 		}
 		return p, sim, nil
 	}
@@ -1593,6 +1634,59 @@ func (ca *ConsolidationAgent) logReport(report *CycleReport) {
 	)
 }
 
+// evidenceJaccard returns |A ∩ B| / |A ∪ B| over evidence-ID slices. Returns 0
+// when either side is empty. Used as a primary duplicate signal for patterns:
+// two patterns sharing most of their evidence ARE duplicates regardless of how
+// the LLM happened to title them this run vs last run.
+func evidenceJaccard(a, b []string) float32 {
+	if len(a) == 0 || len(b) == 0 {
+		return 0
+	}
+	setA := make(map[string]struct{}, len(a))
+	for _, id := range a {
+		setA[id] = struct{}{}
+	}
+	intersection := 0
+	setB := make(map[string]struct{}, len(b))
+	for _, id := range b {
+		setB[id] = struct{}{}
+		if _, ok := setA[id]; ok {
+			intersection++
+		}
+	}
+	union := len(setA)
+	for id := range setB {
+		if _, ok := setA[id]; !ok {
+			union++
+		}
+	}
+	if union == 0 {
+		return 0
+	}
+	return float32(intersection) / float32(union)
+}
+
+// evidenceCoverage returns |cluster ∩ pattern.evidence| / |cluster| — the
+// directional ratio of cluster memories already represented in a pattern.
+// High coverage means the cluster is a re-extraction of an existing pattern,
+// not a new one. Returns 0 when cluster is empty.
+func evidenceCoverage(clusterIDs, patternEvidence []string) float32 {
+	if len(clusterIDs) == 0 {
+		return 0
+	}
+	patSet := make(map[string]struct{}, len(patternEvidence))
+	for _, id := range patternEvidence {
+		patSet[id] = struct{}{}
+	}
+	hit := 0
+	for _, id := range clusterIDs {
+		if _, ok := patSet[id]; ok {
+			hit++
+		}
+	}
+	return float32(hit) / float32(len(clusterIDs))
+}
+
 // isDuplicate returns true if two items are near-duplicates based on title Jaccard and embedding cosine.
 // For short titles (<=4 words in either), requires BOTH signals to exceed thresholds to avoid false positives.
 func isDuplicate(titleA, titleB string, embA, embB []float32, titleThresh, embThresh float32) bool {
@@ -1857,6 +1951,8 @@ func (ca *ConsolidationAgent) dedupPatterns(ctx context.Context) (int, error) {
 
 	archived := 0
 	archivedIDs := make(map[string]bool)
+	evidenceJaccardMin := agentutil.Float32Or(ca.config.PatternEvidenceJaccardMin, 0.5)
+	evidenceMinCount := agentutil.IntOr(ca.config.PatternEvidenceJaccardMinCount, 10)
 
 	for i := 0; i < len(active); i++ {
 		if archivedIDs[active[i].ID] {
@@ -1866,7 +1962,33 @@ func (ca *ConsolidationAgent) dedupPatterns(ctx context.Context) (int, error) {
 			if archivedIDs[active[j].ID] {
 				continue
 			}
-			if isDuplicate(active[i].Title, active[j].Title, active[i].Embedding, active[j].Embedding, 0.5, 0.75) {
+			// Two duplicate paths:
+			//   1. Title-or-embedding similarity (existing isDuplicate behavior).
+			//   2. Evidence-set Jaccard >= threshold — patterns sharing most
+			//      of their evidence ARE duplicates regardless of title/embedding
+			//      wording. Catches LLM-induced title variants like "Repeated
+			//      Session Handoffs" vs "Consistent Session Handoff" that share
+			//      the same underlying memories.
+			titleEmbDup := isDuplicate(active[i].Title, active[j].Title, active[i].Embedding, active[j].Embedding, 0.5, 0.75)
+			evJaccard := evidenceJaccard(active[i].EvidenceIDs, active[j].EvidenceIDs)
+			// Evidence-jaccard duplicates must clear a minimum-count floor on
+			// BOTH sides. Otherwise small clusters (e.g. 4 memories yielding
+			// "Session Handoff Workflow" + "Tokenizer boundary") get falsely
+			// merged because they trivially share 4/4 evidence — different
+			// patterns extracted from the same small substrate are usually
+			// legitimately distinct, not duplicates.
+			evidenceDup := evJaccard >= evidenceJaccardMin &&
+				len(active[i].EvidenceIDs) >= evidenceMinCount &&
+				len(active[j].EvidenceIDs) >= evidenceMinCount
+			if titleEmbDup || evidenceDup {
+				if evidenceDup && !titleEmbDup {
+					ca.log.Info("pattern dedup: matched via evidence-jaccard",
+						"keep_id", active[i].ID, "keep_title", active[i].Title,
+						"archive_id", active[j].ID, "archive_title", active[j].Title,
+						"evidence_jaccard", evJaccard,
+						"keep_evidence_n", len(active[i].EvidenceIDs),
+						"archive_evidence_n", len(active[j].EvidenceIDs))
+				}
 				// Keep older (i), archive newer (j)
 				canonical := &active[i]
 				dup := &active[j]

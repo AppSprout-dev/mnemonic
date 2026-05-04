@@ -35,6 +35,7 @@ type mockStore struct {
 	batchMergeMemoriesFn    func(ctx context.Context, sourceIDs []string, gist store.Memory) error
 	writeConsolidationFn    func(ctx context.Context, record store.ConsolidationRecord) error
 	getMemoryAttributesFn   func(ctx context.Context, memoryID string) (store.MemoryAttributes, error)
+	listPatternsFn          func(ctx context.Context, project string, limit int) ([]store.Pattern, error)
 	searchPatternsByEmbFn   func(ctx context.Context, emb []float32, limit int) ([]store.Pattern, error)
 	searchArchivedByEmbFn   func(ctx context.Context, emb []float32, limit int) ([]store.Pattern, error)
 	updatePatternFn         func(ctx context.Context, p store.Pattern) error
@@ -72,6 +73,12 @@ func (m *mockStore) UpdateState(ctx context.Context, id string, state string) er
 func (m *mockStore) ListMemories(ctx context.Context, state string, limit, offset int) ([]store.Memory, error) {
 	if m.listMemoriesFn != nil {
 		return m.listMemoriesFn(ctx, state, limit, offset)
+	}
+	return nil, nil
+}
+func (m *mockStore) ListPatterns(ctx context.Context, project string, limit int) ([]store.Pattern, error) {
+	if m.listPatternsFn != nil {
+		return m.listPatternsFn(ctx, project, limit)
 	}
 	return nil, nil
 }
